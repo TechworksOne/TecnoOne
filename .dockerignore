@@ -1,0 +1,22 @@
+# ── Node / npm ──────────────────────────────────────────────
+node_modules/
+
+# ── Build output ────────────────────────────────────────────
+dist/
+
+# ── Git ─────────────────────────────────────────────────────
+.git/
+.gitignore
+github/
+
+# ── Backend (no se necesita para construir el frontend) ─────
+Tecnocell_backend/
+
+# ── Archivos de entorno (los valores vienen por build-arg) ───
+.env
+.env.*
+
+# ── Archivos grandes que no son parte del build ─────────────
+tecnocell_web.sql
+*.log
+.DS_Store

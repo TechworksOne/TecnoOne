@@ -1,0 +1,102 @@
+# =============================================================
+#  docker-compose.yml  —  DESARROLLO (hot reload activo)
+# =============================================================
+#
+#  Levanta: MariaDB + Backend (nodemon) + Frontend (Vite HMR)
+#
+#  Uso:
+#    docker compose up --build
+#
+#  Accesos directos:
+#    Frontend → http://localhost:5173
+#    Backend  → http://localhost:3000
+#    MariaDB  → localhost:3306
+# =============================================================
+
+services:
+
+  # ─────────────────────────────────────────────────────────
+  # Base de datos — MariaDB 10.6 LTS
+  # (el dump SQL fue exportado desde MariaDB, usar MySQL 8 puede
+  #  fallar con las CHECK constraints json_valid() y procedimientos)
+  # ─────────────────────────────────────────────────────────
+  mysql:
+    image: mariadb:10.6
+    container_name: tecnocell_mysql
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE:      ${DB_NAME}
+      MARIADB_USER:          ${DB_USER}
+      MARIADB_PASSWORD:      ${DB_PASSWORD}
+    volumes:
+      # Datos persistentes
+      - mysql_data:/var/lib/mysql
+      # Script de inicialización (solo se ejecuta la primera vez)
+      - ./tecnocell_web.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+#     ports:
+#       - "3307:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────
+  # Backend Node.js / Express (nodemon — hot reload)
+  # ─────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./Tecnocell_backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: tecnocell_backend
+    restart: unless-stopped
+    env_file:
+      - ./Tecnocell_backend/.env.docker
+    environment:
+      # Polling para nodemon en Windows+Docker (NTFS inotify no funciona)
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=500
+    volumes:
+      # Código fuente montado para hot reload con nodemon
+      - ./Tecnocell_backend:/app
+      # El named volume preserva node_modules del contenedor
+      # (sin esto, el bind mount sobrescribiría node_modules con los del host)
+      - backend_node_modules:/app/node_modules
+      # Uploads reales del servidor (sobreescribe /app/uploads del bind mount anterior)
+      - /var/www/Tecnocell_storage/uploads:/app/uploads
+#     ports:
+#       - "3000:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────
+  # Frontend React + Vite dev server (HMR)
+  # El browser accede a http://localhost:3000/api directamente
+  # (el puerto 3000 del backend está expuesto al host)
+  # ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: tecnocell_frontend
+    restart: unless-stopped
+    environment:
+      # VITE_API_URL: el BROWSER accede al backend vía puerto expuesto del host
+      - VITE_API_URL=/api
+    volumes:
+      # Solo montar fuentes de código; node_modules queda del build
+      - ./src:/app/src
+      - ./index.html:/app/index.html
+#     ports:
+#       - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
+  backend_node_modules:

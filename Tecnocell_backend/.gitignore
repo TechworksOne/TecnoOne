@@ -1,0 +1,11 @@
+node_modules/
+
+# ─── Variables de entorno — NUNCA versionar archivos reales ───────────────────
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# ─── Misceláneos ─────────────────────────────────────────────────────────────
+.DS_Store
+*.log

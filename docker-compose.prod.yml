@@ -1,0 +1,90 @@
+# =============================================================
+#  docker-compose.prod.yml  —  PRODUCCIÓN
+# =============================================================
+#
+#  Levanta: MariaDB + Backend (node) + Frontend (Nginx build)
+#  Un solo puerto 80 expuesto; Nginx proxea /api/ al backend.
+#
+#  Uso:
+#    docker compose -f docker-compose.prod.yml up --build -d
+#
+#  Acceso:
+#    http://localhost  (o tu IP / dominio)
+# =============================================================
+
+services:
+
+  # ─────────────────────────────────────────────────────────
+  # Base de datos (no expone puerto al host en producción)
+  # ─────────────────────────────────────────────────────────
+  mysql:
+    image: mariadb:10.6
+    container_name: tecnocell_mysql
+    restart: always
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE:      ${DB_NAME}
+      MARIADB_USER:          ${DB_USER}
+      MARIADB_PASSWORD:      ${DB_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./tecnocell_web.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    expose:
+      - "3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────
+  # Backend (imagen mínima, sin devDependencies, usuario no-root)
+  # ─────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./Tecnocell_backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: tecnocell_backend
+    restart: always
+    env_file:
+      - ./Tecnocell_backend/.env.docker
+    volumes:
+      # Uploads persisten aunque se reconstruya el contenedor
+      - /var/www/Tecnocell_storage/uploads:/app/uploads
+    expose:
+      - "3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────
+  # Frontend — build optimizado servido por Nginx
+  # Nginx proxea /api/ → backend:3000  y  /uploads/ → backend:3000
+  # ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        # Con VITE_API_URL=/api, el browser llama a /api/...
+        # y Nginx (mismo servidor) lo proxea al backend internamente
+        VITE_API_URL: /api
+    container_name: tecnocell_frontend
+    restart: always
+    ports:
+      - "8092:80"
+    volumes:
+      # Mismo volumen de uploads que el backend, montado read-only.
+      # Nginx sirve las imágenes DIRECTO desde disco (sin pasar por Node.js).
+      - /var/www/Tecnocell_storage/uploads:/var/www/uploads:ro
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  mysql_data:
+  # uploads_data eliminado: se usa bind mount en el servicio backend
+  # /var/www/Tecnocell_storage/uploads:/app/uploads

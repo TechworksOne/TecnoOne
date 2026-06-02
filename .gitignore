@@ -1,0 +1,29 @@
+node_modules/
+
+# ─── Variables de entorno — NUNCA versionar archivos reales ───────────────────
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# ─── Directorio backend ───────────────────────────────────────────────────────
+Tecnocell_backend/.env
+Tecnocell_backend/.env.*
+!Tecnocell_backend/.env.example
+!Tecnocell_backend/.env.*.example
+
+# ─── Misceláneos ─────────────────────────────────────────────────────────────
+.DS_Store
+*.log
+dist/
+
+# ─── Backups y archivos temporales del servidor ─────────────────────────────
+*.bak
+*.bak_*
+*.corrupt_*
+*.sql
+backups_codigo/
+backups_pre_pull_*
+docker-compose.override.yml
+docker-compose.override.yml.bak_*
+docker-compose.yml.bak_*

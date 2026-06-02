@@ -1,0 +1,202 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══ Variables de tema — modo claro (por defecto) ═══════════════════════════ */
+:root {
+  --radius: 1rem;
+
+  --color-bg:             #F6FCFF;
+  --color-surface:        #FFFFFF;
+  --color-surface-soft:   #F8FDFF;
+  --color-sidebar:        #FFFFFF;
+  --color-text:           #14324A;
+  --color-text-sec:       #5E7184;
+  --color-text-muted:     #8AAABB;
+  --color-border:         #D6EEF8;
+  --color-primary:        #48B9E6;
+  --color-primary-dark:   #2EA7D8;
+  --color-input-bg:       #FFFFFF;
+  --color-row-hover:      #F6FCFF;
+  --color-active-bg:      rgba(72,185,230,0.22);
+  --color-active-border:  rgba(72,185,230,0.30);
+}
+
+/* ═══ Variables de tema — modo oscuro ════════════════════════════════════════ */
+.dark {
+  --color-bg:             #060B14;
+  --color-surface:        #0D1526;
+  --color-surface-soft:   #0A1220;
+  --color-sidebar:        #08111F;
+  --color-text:           #F8FAFC;
+  --color-text-sec:       #B8C2D1;
+  --color-text-muted:     #7F8A99;
+  --color-border:         rgba(72,185,230,0.16);
+  --color-primary:        #48B9E6;
+  --color-primary-dark:   #2EA7D8;
+  --color-input-bg:       #0A1220;
+  --color-row-hover:      rgba(72,185,230,0.05);
+  --color-active-bg:      rgba(72,185,230,0.18);
+  --color-active-border:  rgba(72,185,230,0.35);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: Inter, Montserrat, ui-sans-serif, system-ui;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 250ms ease, color 250ms ease;
+}
+
+.card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  padding: 1rem;
+  box-shadow: 0 1px 6px rgba(20,50,74,0.06);
+}
+
+/* ── Inputs globales ─────────────────────────────────────────────────────── */
+input, textarea, select {
+  background-color: var(--color-input-bg);
+  color: var(--color-text);
+  border-color: var(--color-border);
+  transition: background-color 250ms ease, border-color 250ms ease;
+}
+
+/* ── Tablas globales ─────────────────────────────────────────────────────── */
+table th,
+table td {
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+/* ─── Sidebar background gradient (light / dark) ───────────────────────── */
+.sidebar-bg {
+  background: linear-gradient(180deg, #EBF6FF 0%, #F8FDFF 100%);
+}
+.dark .sidebar-bg {
+  background: linear-gradient(180deg, #070E1A 0%, #050A13 100%);
+}
+
+/* ─── Sidebar nav — scrollbar discreto ─────────────────────────────────── */
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(72, 185, 230, 0.22) transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: rgba(72, 185, 230, 0.18);
+  border-radius: 999px;
+}
+
+.sidebar-nav:hover::-webkit-scrollbar-thumb {
+  background: rgba(72, 185, 230, 0.42);
+}
+
+/* En modo colapsado: ocultar scrollbar visualmente, mantener funcionalidad */
+.sidebar-nav-collapsed {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.sidebar-nav-collapsed::-webkit-scrollbar {
+  width: 0;
+  display: none;
+}
+
+/* ─── Category list scrollbar discreto ─────────────────────────────────── */
+.category-list-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(72, 185, 230, 0.22) transparent;
+}
+
+.category-list-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.category-list-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.category-list-scroll::-webkit-scrollbar-thumb {
+  background: rgba(72, 185, 230, 0.20);
+  border-radius: 999px;
+}
+
+.category-list-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(72, 185, 230, 0.45);
+}
+
+/* ─── Scrollbar global (webkit) ───────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.10);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.28);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.55);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ─── Clase reutilizable .custom-scrollbar ────────────────────────────── */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(56, 189, 248, 0.45) rgba(15, 23, 42, 0.35);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.35);
+  border-radius: 999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.60), rgba(14, 116, 144, 0.55));
+  border-radius: 999px;
+  border: 2px solid rgba(15, 23, 42, 0.55);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.85), rgba(14, 116, 144, 0.75));
+}
+
+.custom-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}

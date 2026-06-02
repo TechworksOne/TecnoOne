@@ -1,0 +1,837 @@
+import { useState, useEffect, useRef } from 'react';
+import {
+  User, Mail, Phone, MapPin, Shield, Clock, Calendar,
+  Edit2, Save, X, Camera, CheckCircle, Key, Tag,
+  Loader2, AlertTriangle, Pen,
+} from 'lucide-react';
+import { useAuth } from '../../store/useAuth';
+import { useToast } from '../../components/ui/Toast';
+import { canViewCosts, isAdmin } from '../../lib/permissions';
+import API_URL from '../../services/config';
+import { getImageUrl } from '../../utils/getImageUrl';
+import axios from 'axios';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface UserProfile {
+  id: number;
+  username: string;
+  email: string;
+  name: string;
+  role: string;
+  active: boolean;
+  ultimo_login: string | null;
+  created_at: string;
+  updated_at: string;
+  perfil: {
+    nombres: string | null;
+    apellidos: string | null;
+    telefono: string | null;
+    dpi: string | null;
+    direccion: string | null;
+    foto_perfil: string | null;
+    firma: string | null;
+  } | null;
+  roles: string[];
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatDate(dt: string | null): string {
+  if (!dt) return 'No registrado';
+  return new Date(dt).toLocaleString('es-GT', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function buildAvatarUrl(foto: string | null | undefined): string | null {
+  if (!foto) return null;
+  return getImageUrl(foto) || null;
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(' ');
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.substring(0, 2).toUpperCase() || 'TC';
+}
+
+// ─── Role badge config ────────────────────────────────────────────────────────
+
+const ROLE_COLORS: Record<string, string> = {
+  ADMINISTRADOR:
+    'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-700/40',
+  TECNICO:
+    'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-700/40',
+  VENTAS:
+    'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-700/40',
+};
+const rolColor = (r: string) =>
+  ROLE_COLORS[r] ??
+  'bg-slate-100 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/40';
+
+// ─── Design tokens ────────────────────────────────────────────────────────────
+
+const inputCls =
+  'w-full rounded-xl px-3 py-2.5 text-sm border outline-none focus:ring-2 focus:ring-[var(--color-primary)] transition-colors';
+const inputStyle = {
+  background: 'var(--color-input-bg)',
+  borderColor: 'var(--color-border)',
+  color: 'var(--color-text)',
+};
+const cardStyle = {
+  background: 'var(--color-surface)',
+  borderColor: 'var(--color-border)',
+};
+
+// ─── Signature Pad ────────────────────────────────────────────────────────────
+
+function SignaturePad({
+  initialValue,
+  onChange,
+}: {
+  initialValue: string | null;
+  onChange: (dataUrl: string | null) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!initialValue || !canvasRef.current) return;
+    const img = new Image();
+    img.onload = () => {
+      const ctx = canvasRef.current?.getContext('2d');
+      if (ctx) ctx.drawImage(img, 0, 0);
+    };
+    img.src = initialValue;
+  }, []);
+
+  const getXY = (
+    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+  ) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    if ('touches' in e) {
+      return {
+        x: (e.touches[0].clientX - rect.left) * scaleX,
+        y: (e.touches[0].clientY - rect.top) * scaleY,
+      };
+    }
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  };
+
+  const onStart = (
+    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+  ) => {
+    e.preventDefault();
+    drawing.current = true;
+    lastPos.current = getXY(e);
+  };
+
+  const onMove = (
+    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+  ) => {
+    e.preventDefault();
+    if (!drawing.current || !canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d')!;
+    const pos = getXY(e);
+    ctx.beginPath();
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (lastPos.current) {
+      ctx.moveTo(lastPos.current.x, lastPos.current.y);
+      ctx.lineTo(pos.x, pos.y);
+    }
+    ctx.stroke();
+    lastPos.current = pos;
+    onChange(canvasRef.current.toDataURL('image/png'));
+  };
+
+  const onEnd = () => {
+    drawing.current = false;
+    lastPos.current = null;
+  };
+
+  const clear = () => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d')!;
+    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    onChange(null);
+  };
+
+  return (
+    <div className="space-y-2">
+      <canvas
+        ref={canvasRef}
+        width={580}
+        height={130}
+        className="w-full rounded-xl border cursor-crosshair touch-none block"
+        style={{ background: '#ffffff', borderColor: 'var(--color-border)' }}
+        onMouseDown={onStart}
+        onMouseMove={onMove}
+        onMouseUp={onEnd}
+        onMouseLeave={onEnd}
+        onTouchStart={onStart}
+        onTouchMove={onMove}
+        onTouchEnd={onEnd}
+      />
+      <button
+        type="button"
+        onClick={clear}
+        className="text-xs font-semibold text-red-500 hover:underline cursor-pointer"
+      >
+        Limpiar firma
+      </button>
+    </div>
+  );
+}
+
+// ─── Avatar component ─────────────────────────────────────────────────────────
+
+function AvatarImage({
+  src, name, className,
+}: {
+  src: string | null;
+  name: string;
+  className?: string;
+}) {
+  const [err, setErr] = useState(false);
+  if (src && !err) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        className={className}
+        onError={() => setErr(true)}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${className} bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-white font-bold`}
+    >
+      {getInitials(name)}
+    </div>
+  );
+}
+
+// ─── Edit modal ───────────────────────────────────────────────────────────────
+
+interface EditForm {
+  nombres: string;
+  apellidos: string;
+  telefono: string;
+  direccion: string;
+  foto: File | null;
+  fotoPreview: string | null;
+  firma: string | null;
+}
+
+function ModalEditar({
+  profile,
+  token,
+  onClose,
+  onSaved,
+}: {
+  profile: UserProfile;
+  token: string;
+  onClose: () => void;
+  onSaved: (updatedPerfil: UserProfile['perfil']) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [form, setForm] = useState<EditForm>({
+    nombres: profile.perfil?.nombres ?? '',
+    apellidos: profile.perfil?.apellidos ?? '',
+    telefono: profile.perfil?.telefono ?? '',
+    direccion: profile.perfil?.direccion ?? '',
+    foto: null,
+    fotoPreview: buildAvatarUrl(profile.perfil?.foto_perfil),
+    firma: profile.perfil?.firma ?? null,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const displayName =
+    form.nombres.trim() || profile.name || profile.username;
+
+  const set = (k: keyof EditForm, v: unknown) =>
+    setForm(f => ({ ...f, [k]: v }));
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    set('foto', file);
+    set('fotoPreview', URL.createObjectURL(file));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const fd = new FormData();
+      fd.append('nombres', form.nombres);
+      fd.append('apellidos', form.apellidos);
+      fd.append('telefono', form.telefono);
+      fd.append('direccion', form.direccion);
+      if (form.foto) fd.append('foto_perfil', form.foto);
+      // Always send firma so it is not overwritten with NULL
+      fd.append('firma', form.firma ?? '');
+
+      const res = await axios.put(`${API_URL}/auth/me/perfil`, fd, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      onSaved(res.data?.data?.perfil ?? null);
+    } catch {
+      setError('Error al actualizar el perfil. Intenta nuevamente.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const labelCls = 'block text-xs font-semibold text-[var(--color-text-sec)] mb-1.5';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center"
+      style={{ background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(10px)', padding: '16px' }}
+    >
+      <div
+        className="flex flex-col rounded-3xl border shadow-2xl overflow-hidden"
+        style={{
+          ...cardStyle,
+          width: 'calc(100vw - 32px)',
+          maxWidth: 760,
+          maxHeight: 'calc(100vh - 32px)',
+        }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-6 py-4 shrink-0 border-b"
+          style={{ background: 'var(--color-surface-soft)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl" style={{ background: 'rgba(72,185,230,0.14)' }}>
+              <Edit2 size={16} className="text-[var(--color-primary)]" />
+            </div>
+            <h2 className="text-base font-bold text-[var(--color-text)]">Editar perfil</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-row-hover)] transition-colors cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <form
+          id="edit-profile-form"
+          onSubmit={handleSubmit}
+          className="flex-1 overflow-y-auto p-6 space-y-5"
+        >
+          {/* Photo */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)] mb-3 flex items-center gap-2">
+              <span className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
+              Foto de perfil
+              <span className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
+            </p>
+            <div className="flex items-center gap-5">
+              <div className="relative group shrink-0">
+                <AvatarImage
+                  src={form.fotoPreview}
+                  name={displayName}
+                  className="w-20 h-20 rounded-2xl object-cover ring-2 ring-[var(--color-border)] text-2xl"
+                />
+                <label
+                  className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                >
+                  <Camera size={20} className="text-white" />
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFile}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[var(--color-text)]">Foto de perfil</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">JPG, PNG. Max 5MB</p>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="mt-2 text-xs font-semibold text-[var(--color-primary)] hover:underline cursor-pointer"
+                >
+                  Cambiar foto
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Personal data */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)] mb-3 flex items-center gap-2">
+              <span className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
+              Datos personales
+              <span className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls}>Nombres</label>
+                <input
+                  value={form.nombres}
+                  onChange={e => set('nombres', e.target.value)}
+                  placeholder="Ej: Juan Carlos"
+                  className={inputCls}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Apellidos</label>
+                <input
+                  value={form.apellidos}
+                  onChange={e => set('apellidos', e.target.value)}
+                  placeholder="Ej: Perez Lopez"
+                  className={inputCls}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Telefono</label>
+                <input
+                  value={form.telefono}
+                  onChange={e => set('telefono', e.target.value)}
+                  placeholder="Ej: 5555-1234"
+                  className={inputCls}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Email</label>
+                <input
+                  value={profile.email}
+                  disabled
+                  className={inputCls + ' opacity-50 cursor-not-allowed'}
+                  style={inputStyle}
+                  title="El email se gestiona desde Administracion de Usuarios"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className={labelCls}>Direccion</label>
+                <input
+                  value={form.direccion}
+                  onChange={e => set('direccion', e.target.value)}
+                  placeholder="Ej: Zona 10, Ciudad de Guatemala"
+                  className={inputCls}
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Firma */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)] mb-3 flex items-center gap-2">
+              <span className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
+              Firma digital
+              <span className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
+            </p>
+            <p className="text-xs text-[var(--color-text-muted)] mb-2">
+              Dibuja tu firma en el area de abajo
+            </p>
+            <SignaturePad
+              initialValue={form.firma}
+              onChange={v => set('firma', v)}
+            />
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-red-500 bg-red-500/10 border border-red-500/20 px-4 py-2.5 rounded-xl">
+              <AlertTriangle size={15} className="shrink-0" /> {error}
+            </div>
+          )}
+        </form>
+
+        {/* Footer */}
+        <div
+          className="flex gap-3 justify-end px-6 py-4 border-t shrink-0"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface-soft)' }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold border text-[var(--color-text-sec)] hover:bg-[var(--color-row-hover)] transition-colors cursor-pointer"
+            style={{ borderColor: 'var(--color-border)' }}
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            form="edit-profile-form"
+            disabled={saving}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] text-white transition-colors disabled:opacity-60 shadow-sm cursor-pointer"
+          >
+            {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+            Guardar cambios
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function SectionTitle({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="flex items-center gap-2 mb-4">
+      <span className="text-[var(--color-primary)]">{icon}</span>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function InfoRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 text-[var(--color-text-muted)] shrink-0">{icon}</div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
+          {label}
+        </p>
+        <div className="text-sm font-medium text-[var(--color-text)] mt-0.5 break-words">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function PermissionRow({ label, granted }: { label: string; granted: boolean }) {
+  return (
+    <div
+      className="flex items-center justify-between rounded-xl px-3 py-2.5"
+      style={{ background: 'var(--color-surface-soft)', border: '1px solid var(--color-border)' }}
+    >
+      <span className="text-xs text-[var(--color-text-sec)]">{label}</span>
+      <span
+        className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+          granted
+            ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+            : 'bg-slate-100 dark:bg-slate-800/50 text-[var(--color-text-muted)]'
+        }`}
+      >
+        {granted ? 'Si' : 'No'}
+      </span>
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function ProfilePage() {
+  const { user, token } = useAuth();
+  const toast = useToast();
+
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const showCost   = canViewCosts(user?.roles);
+  const userIsAdmin = isAdmin(user?.roles);
+
+  async function loadProfile() {
+    try {
+      setLoading(true);
+      const res = await axios.get(`${API_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.data.success) setProfile(res.data.data);
+    } catch {
+      toast.add('Error al cargar perfil', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadProfile(); }, []);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div
+          className="h-52 rounded-3xl animate-pulse"
+          style={{ background: 'var(--color-surface)' }}
+        />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map(i => (
+            <div
+              key={i}
+              className="h-40 rounded-2xl animate-pulse"
+              style={{ background: 'var(--color-surface)' }}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!profile) return null;
+
+  const displayName =
+    profile.perfil?.nombres
+      ? `${profile.perfil.nombres} ${profile.perfil.apellidos ?? ''}`.trim()
+      : profile.name || profile.username;
+
+  const avatarSrc = buildAvatarUrl(profile.perfil?.foto_perfil);
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── Profile hero ──────────────────────────────────────────────────── */}
+      <div
+        className="rounded-3xl border overflow-hidden"
+        style={cardStyle}
+      >
+        {/* Gradient banner */}
+        <div className="h-32 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 relative">
+          <div
+            className="absolute inset-0 opacity-30"
+            style={{
+              backgroundImage:
+                'radial-gradient(ellipse at 30% 50%, rgba(255,255,255,0.15) 0%, transparent 60%)',
+            }}
+          />
+        </div>
+
+        {/* Avatar + info + edit button */}
+        <div className="px-6 pb-6 -mt-14 flex flex-col sm:flex-row items-start sm:items-end gap-4">
+          <div className="relative shrink-0">
+            <AvatarImage
+              src={avatarSrc}
+              name={displayName}
+              className="w-28 h-28 rounded-2xl object-cover ring-4 text-3xl shadow-xl"
+              style={{ ringColor: 'var(--color-surface)' } as React.CSSProperties}
+            />
+          </div>
+
+          <div className="flex-1 min-w-0 sm:pb-1">
+            <h1 className="text-xl font-extrabold text-[var(--color-text)] truncate leading-tight">
+              {displayName}
+            </h1>
+            <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
+              @{profile.username}
+            </p>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {profile.roles.length > 0 ? (
+                profile.roles.map(r => (
+                  <span key={r} className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${rolColor(r)}`}>
+                    {r}
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-[var(--color-text-muted)]">Sin roles asignados</span>
+              )}
+            </div>
+          </div>
+
+          <div className="shrink-0 self-end sm:self-auto">
+            <button
+              onClick={() => setEditOpen(true)}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] text-white transition-colors shadow-sm cursor-pointer"
+            >
+              <Edit2 size={15} /> Editar perfil
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 2-column grid ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Left column */}
+        <div className="space-y-6 lg:col-span-1">
+
+          {/* Informacion personal */}
+          <div className="rounded-2xl border p-5" style={cardStyle}>
+            <SectionTitle icon={<User size={14} />} label="Informacion personal" />
+            <div className="space-y-4">
+              <InfoRow
+                icon={<Mail size={14} />}
+                label="Correo electronico"
+                value={profile.email || 'No registrado'}
+              />
+              <InfoRow
+                icon={<Phone size={14} />}
+                label="Telefono"
+                value={profile.perfil?.telefono || 'No registrado'}
+              />
+              <InfoRow
+                icon={<MapPin size={14} />}
+                label="Direccion"
+                value={profile.perfil?.direccion || 'No registrado'}
+              />
+              {profile.perfil?.dpi && (
+                <InfoRow icon={<Shield size={14} />} label="DPI" value={profile.perfil.dpi} />
+              )}
+            </div>
+          </div>
+
+          {/* Roles */}
+          <div className="rounded-2xl border p-5" style={cardStyle}>
+            <SectionTitle icon={<Tag size={14} />} label="Roles asignados" />
+            <div className="flex flex-wrap gap-2">
+              {profile.roles.length > 0 ? (
+                profile.roles.map(r => (
+                  <span key={r} className={`text-xs font-semibold px-3 py-1.5 rounded-full ${rolColor(r)}`}>
+                    {r}
+                  </span>
+                ))
+              ) : (
+                <span className="text-sm text-[var(--color-text-muted)]">Sin roles asignados</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right column */}
+        <div className="space-y-6 lg:col-span-2">
+
+          {/* Acceso al sistema */}
+          <div className="rounded-2xl border p-5" style={cardStyle}>
+            <SectionTitle icon={<Key size={14} />} label="Acceso al sistema" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <InfoRow icon={<User size={14} />} label="Nombre de usuario" value={profile.username} />
+              <InfoRow
+                icon={<CheckCircle size={14} />}
+                label="Estado de cuenta"
+                value={
+                  <span
+                    className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+                      profile.active
+                        ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                        : 'bg-slate-100 dark:bg-slate-800/50 text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${profile.active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                    {profile.active ? 'Activo' : 'Inactivo'}
+                  </span>
+                }
+              />
+              <InfoRow
+                icon={<Clock size={14} />}
+                label="Ultimo acceso"
+                value={formatDate(profile.ultimo_login)}
+              />
+              <InfoRow
+                icon={<Calendar size={14} />}
+                label="Cuenta creada"
+                value={formatDate(profile.created_at)}
+              />
+            </div>
+          </div>
+
+          {/* Permisos */}
+          <div className="rounded-2xl border p-5" style={cardStyle}>
+            <SectionTitle icon={<Shield size={14} />} label="Permisos del sistema" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <PermissionRow label="Acceso de administrador"  granted={userIsAdmin} />
+              <PermissionRow label="Ver datos de costos"      granted={showCost} />
+              <PermissionRow label="Gestion de compras"       granted={userIsAdmin} />
+              <PermissionRow label="Gestion de proveedores"   granted={userIsAdmin} />
+              <PermissionRow label="Stickers de garantia"     granted={userIsAdmin} />
+              <PermissionRow label="Admin de usuarios"        granted={userIsAdmin} />
+            </div>
+          </div>
+
+          {/* Account summary */}
+          <div className="rounded-2xl border p-5" style={cardStyle}>
+            <SectionTitle icon={<Calendar size={14} />} label="Resumen de cuenta" />
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {[
+                { label: 'Roles activos', value: String(profile.roles.length), color: 'text-blue-500 dark:text-blue-400' },
+                { label: 'Estado', value: profile.active ? 'Activo' : 'Inactivo', color: profile.active ? 'text-emerald-500 dark:text-emerald-400' : 'text-[var(--color-text-muted)]' },
+                { label: 'Ultimo login', value: profile.ultimo_login ? new Date(profile.ultimo_login).toLocaleDateString('es-GT') : 'Nunca', color: 'text-[var(--color-text-sec)]' },
+              ].map(item => (
+                <div
+                  key={item.label}
+                  className="rounded-xl p-3 text-center border"
+                  style={{ background: 'var(--color-surface-soft)', borderColor: 'var(--color-border)' }}
+                >
+                  <p className={`text-lg font-extrabold ${item.color}`}>{item.value}</p>
+                  <p className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wide mt-0.5">
+                    {item.label}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Firma */}
+          <div className="rounded-2xl border p-5" style={cardStyle}>
+            <SectionTitle icon={<Pen size={14} />} label="Firma digital" />
+            {profile.perfil?.firma ? (
+              <div
+                className="rounded-xl overflow-hidden border"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <img
+                  src={profile.perfil.firma}
+                  alt="Firma"
+                  className="w-full block"
+                  style={{ background: '#ffffff', maxHeight: 120, objectFit: 'contain' }}
+                />
+              </div>
+            ) : (
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Sin firma registrada. Haz clic en &quot;Editar perfil&quot; para agregar una.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Edit modal */}
+      {editOpen && (
+        <ModalEditar
+          profile={profile}
+          token={token ?? ''}
+          onClose={() => setEditOpen(false)}
+          onSaved={async (updatedPerfil) => {
+            setEditOpen(false);
+            // Update profile state immediately with the PUT response
+            // (avoids a second GET that could return stale or missing firma)
+            if (updatedPerfil) {
+              setProfile(prev => prev ? { ...prev, perfil: updatedPerfil } : prev);
+            }
+            toast.add('Perfil actualizado exitosamente', 'success');
+            // Full re-fetch to keep everything in sync
+            await loadProfile();
+          }}
+        />
+      )}
+    </div>
+  );
+}

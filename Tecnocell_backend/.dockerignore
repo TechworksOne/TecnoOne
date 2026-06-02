@@ -1,0 +1,17 @@
+# ── Node / npm ──────────────────────────────────────────────
+node_modules/
+
+# ── Uploads de usuarios (se montan como volumen) ────────────
+uploads/
+
+# ── Archivos de entorno (se inyectan por docker-compose) ────
+.env
+.env.*
+
+# ── Docker ──────────────────────────────────────────────────
+Dockerfile
+
+# ── Misc ────────────────────────────────────────────────────
+*.log
+.DS_Store
+README.md
