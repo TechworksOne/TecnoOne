@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
-import tecnocellLogo from "../../assets/tecnocell-logo.png";
+import BrandMark from "./BrandMark";
 import { useSidebar } from "../../store/useSidebar";
 import { useAuth } from "../../store/useAuth";
 
@@ -117,14 +117,10 @@ export default function Sidebar() {
       >
         {isOpen ? (
           <div className="flex items-center gap-3 overflow-hidden w-full">
-            <img
-              src={tecnocellLogo}
-              alt="TECNOCELL"
-              style={{ height: 36, width: "auto", objectFit: "contain", flexShrink: 0 }}
-            />
+            <BrandMark size="sm" />
             <div className="leading-tight overflow-hidden">
               <p style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.06em", color: "var(--color-text)", whiteSpace: "nowrap" }}>
-                TECNOCELL
+                TecnoOne
               </p>
               <p style={{ fontSize: 9, fontWeight: 500, letterSpacing: "0.12em", color: "var(--color-text-muted)", textTransform: "uppercase" }}>
                 Sistema comercial
@@ -132,11 +128,7 @@ export default function Sidebar() {
             </div>
           </div>
         ) : (
-          <img
-            src={tecnocellLogo}
-            alt="TC"
-            style={{ height: 32, width: 32, objectFit: "contain" }}
-          />
+          <BrandMark size="sm" />
         )}
       </div>
 
@@ -262,7 +254,7 @@ export default function Sidebar() {
       >
         {isOpen && (
           <p style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: "0.05em", color: "var(--color-text-muted)" }}>
-            v2.0 · TECNOCELL
+            v2.0 · TecnoOne
           </p>
         )}
         <button

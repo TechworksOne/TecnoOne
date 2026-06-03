@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
-import logoUrl from '../assets/tecnocell-logo.png';
+
+const BRAND_RGB = { r: 72, g: 185, b: 230 } as const;
 
 interface RecepcionEquipoData {
   cliente: {
@@ -117,22 +118,35 @@ export const generarPDFRecepcion = (data: RecepcionEquipoData, preview: boolean 
   const hdrBoxY = margin - 5;
   const hdrBoxW = 45;
   const hdrBoxH = 25;
-  const logoWidth  = 30;
-  const logoHeight = 15;
-  const logoX = hdrBoxX + (hdrBoxW - logoWidth)  / 2;
-  const logoY = hdrBoxY + (hdrBoxH - logoHeight) / 2;
 
   function renderHeader() {
-    doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(0.5);
+    doc.setDrawColor(BRAND_RGB.r, BRAND_RGB.g, BRAND_RGB.b);
+    doc.setLineWidth(0.4);
     doc.rect(hdrBoxX, hdrBoxY, hdrBoxW, hdrBoxH);
-    doc.addImage(logoUrl, 'PNG', logoX, logoY, logoWidth, logoHeight);
+
+    const markSize = 14;
+    const markX = hdrBoxX + 3;
+    const markY = hdrBoxY + (hdrBoxH - markSize) / 2;
+
+    doc.setFillColor(BRAND_RGB.r, BRAND_RGB.g, BRAND_RGB.b);
+    doc.rect(markX, markY, markSize, markSize, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text('TO', markX + markSize / 2, markY + markSize / 2 + 1.5, { align: 'center' });
+
+    doc.setFontSize(11);
+    doc.setTextColor(BRAND_RGB.r, BRAND_RGB.g, BRAND_RGB.b);
+    doc.text('TecnoOne', markX + markSize + 4, hdrBoxY + hdrBoxH / 2 + 1.5);
+
+    doc.setTextColor(0, 0, 0);
   }
 
   function renderFooter() {
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
-    doc.text('TECNOCELL - Soluciones Tecnológicas Profesionales',
+    doc.text('TecnoOne - Soluciones Tecnológicas Profesionales',
       pageWidth / 2, pageHeight - 10, { align: 'center' });
     doc.text(`No. Reparación: ${data.numeroReparacion}`,
       pageWidth / 2, pageHeight - 6,  { align: 'center' });
@@ -189,7 +203,7 @@ export const generarPDFRecepcion = (data: RecepcionEquipoData, preview: boolean 
   // Heading
   doc.setFont('times', 'bold');
   doc.setFontSize(16);
-  doc.text('TECNOCELL', pageWidth / 2, yPos, { align: 'center' });
+  doc.text('TecnoOne', pageWidth / 2, yPos, { align: 'center' });
   yPos += 6;
   doc.setFont('times', 'italic');
   doc.setFontSize(10);
@@ -283,13 +297,13 @@ export const generarPDFRecepcion = (data: RecepcionEquipoData, preview: boolean 
 
   doc.setFont('times', 'bold');
   doc.setFontSize(12);
-  doc.text('POLÍTICA DE GARANTÍA – TECNOCELL', margin, yPos);
+  doc.text('POLÍTICA DE GARANTÍA – TECNOONE', margin, yPos);
   yPos += 8;
 
   doc.setFont('times', 'normal');
   doc.setFontSize(10);
   doc.text(
-    'TECNOCELL ofrece una garantía de 5 meses para los siguientes servicios de reparación:',
+    'TecnoOne ofrece una garantía de 5 meses para los siguientes servicios de reparación:',
     margin, yPos, { maxWidth: contentWidth - 50, align: 'justify' }
   );
   yPos += 8;
@@ -361,7 +375,7 @@ export const generarPDFRecepcion = (data: RecepcionEquipoData, preview: boolean 
   doc.setFont('times', 'normal');
   doc.setFontSize(10);
   const hallazgosLines = doc.splitTextToSize(
-    'Durante la revisión o reparación, TECNOCELL puede descubrir daños adicionales que no podían detectarse al momento de recibir el equipo. Estos problemas no están cubiertos por la garantía inicial y podrían requerir reparaciones extra.',
+    'Durante la revisión o reparación, TecnoOne puede descubrir daños adicionales que no podían detectarse al momento de recibir el equipo. Estos problemas no están cubiertos por la garantía inicial y podrían requerir reparaciones extra.',
     contentWidth
   );
   doc.text(hallazgosLines, margin, yPos, { maxWidth: contentWidth, align: 'justify' });
@@ -398,7 +412,7 @@ export const generarPDFRecepcion = (data: RecepcionEquipoData, preview: boolean 
 
   yPos += 8;
   const notifLines = doc.splitTextToSize(
-    'En todos los casos, TECNOCELL notificará al cliente antes de continuar, explicando el nuevo problema y el costo adicional necesario para completar la reparación.',
+    'En todos los casos, TecnoOne notificará al cliente antes de continuar, explicando el nuevo problema y el costo adicional necesario para completar la reparación.',
     contentWidth
   );
   doc.text(notifLines, margin, yPos, { maxWidth: contentWidth, align: 'justify' });
@@ -429,7 +443,7 @@ export const generarPDFRecepcion = (data: RecepcionEquipoData, preview: boolean 
   [
     'El equipo tiene 30 días calendario para ser retirado después de haber sido informado que está listo.',
     'Pasados los 30 días, el equipo pasará a bodega y se cobrará Q10.00 adicionales por resguardo.',
-    'Si el equipo no es retirado en un período de 3 meses después de ingresar a bodega, se considerará abandonado y pasará a propiedad de TECNOCELL para cubrir los gastos de diagnóstico, reparación y almacenamiento.',
+    'Si el equipo no es retirado en un período de 3 meses después de ingresar a bodega, se considerará abandonado y pasará a propiedad de TecnoOne para cubrir los gastos de diagnóstico, reparación y almacenamiento.',
   ].forEach(cond => {
     doc.text('•', margin + 5, yPos);
     const ls = doc.splitTextToSize(cond, contentWidth - 15);
@@ -456,7 +470,7 @@ export const generarPDFRecepcion = (data: RecepcionEquipoData, preview: boolean 
   doc.setFont('times', 'normal');
   doc.setFontSize(10);
   const declLines = doc.splitTextToSize(
-    'Al firmar este documento, el cliente acepta haber leído, comprendido y estar de acuerdo con todos los términos y condiciones de garantía, costos y devolución establecidos por TECNOCELL.',
+    'Al firmar este documento, el cliente acepta haber leído, comprendido y estar de acuerdo con todos los términos y condiciones de garantía, costos y devolución establecidos por TecnoOne.',
     contentWidth - 6
   );
   doc.text(declLines, margin + 3, yPos, { maxWidth: contentWidth - 6, align: 'justify' });
@@ -480,7 +494,7 @@ export const generarPDFRecepcion = (data: RecepcionEquipoData, preview: boolean 
   doc.line(firma2X, firmaY, firma2X + firmaWidth, firmaY);
   doc.setFont('times', 'bold');
   doc.setFontSize(9);
-  doc.text('Recibido por TECNOCELL', firma2X + firmaWidth / 2, firmaY + 5, { align: 'center' });
+  doc.text('Recibido por TecnoOne', firma2X + firmaWidth / 2, firmaY + 5, { align: 'center' });
   doc.setFont('times', 'normal');
   doc.text(`Fecha: ${formatFechaPDF(data.fecha)}`, firma2X + firmaWidth / 2, firmaY + 10, { align: 'center' });
 

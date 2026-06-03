@@ -2,36 +2,27 @@ import {
   Eye,
   EyeOff,
   Lock,
-  Package,
   ShoppingCart,
-  TrendingUp,
+  User,
   Users,
   Wrench,
   Zap,
 } from "lucide-react";
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import tecnocellLogo from "../../assets/tecnocell-logo.png";
 import { SESSION_EXPIRED_KEY } from "../../hooks/useIdleLogout";
+import BrandMark from "../../components/common/BrandMark";
 import { useAuth } from "../../store/useAuth";
 import { useBusiness } from "../../store/useBusiness";
 
-// Color de acento principal del logo TECNOCELL
+// Color de acento principal del logo TecnoOne
 const BRAND = "#48B9E6";
 
-// ─── Módulos principales de la tienda ────────────────────────────────────────
-const FEATURES = [
-  { icon: ShoppingCart, label: "Ventas",       sub: "Facturación y control de caja"      },
-  { icon: Wrench,       label: "Reparaciones", sub: "Seguimiento de equipos técnicos"    },
-  { icon: Users,        label: "Clientes",     sub: "Historial de compras y servicios"   },
-  { icon: Package,      label: "Inventario",   sub: "Stock de repuestos y accesorios"    },
-];
-
-// ─── Métricas del resumen diario ─────────────────────────────────────────────
-const MOCK_STATS = [
-  { label: "Ventas hoy",   value: "Q 4,320", delta: "+12%", up: true  },
-  { label: "Reparaciones", value: "18",       delta: "+3",   up: true  },
-  { label: "Stock bajo",   value: "5",        delta: "-2",   up: false },
+// ─── Beneficios principales ─────────────────────────────────────────────────
+const BENEFITS = [
+  { icon: Wrench,       text: "Órdenes de reparación con seguimiento por estado" },
+  { icon: ShoppingCart, text: "Ventas, stock y movimientos al día" },
+  { icon: Users,        text: "Clientes, caja diaria y reportes operativos" },
 ];
 
 export default function LoginPage() {
@@ -95,113 +86,61 @@ export default function LoginPage() {
         {/* ── Logo + nombre ──────────────────────────────── */}
         <div className="relative z-10">
           <div className="flex items-center gap-3">
-            {/* Logo TECNOCELL */}
-            <div className="w-24 h-24 rounded-2xl overflow-hidden flex items-center justify-center bg-white p-1"
-              style={{ boxShadow: "0 6px 28px rgba(72,185,230,0.32)" }}>
-              <img
-                src={tecnocellLogo}
-                alt="TECNOCELL"
-                className="w-full h-full object-contain"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                  (e.currentTarget.nextElementSibling as HTMLElement)?.classList.remove("hidden");
-                }}
-              />
-              <span className="hidden font-black text-lg tracking-tight" style={{ color: "#48B9E6" }}>TC</span>
-            </div>
-            <span className="font-bold text-sm tracking-widest uppercase" style={{ color: "#A8B3C7" }}>
-              TECNOCELL
+            <BrandMark size="sm" />
+            <span className="font-bold text-sm tracking-widest uppercase" style={{ color: "#C4CDD9" }}>
+              TecnoOne
             </span>
           </div>
         </div>
 
         {/* ── Copia principal ───────────────────────────── */}
-        <div className="relative z-10 space-y-8">
+        <div className="relative z-10 space-y-9">
           <div className="space-y-4">
             {/* Badge */}
             <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5"
               style={{ background: "rgba(72,185,230,0.08)", border: "1px solid rgba(72,185,230,0.22)" }}>
               <Zap size={12} style={{ color: BRAND }} />
-              <span className="text-xs font-semibold tracking-widest uppercase" style={{ color: BRAND }}>
-                Sistema comercial y técnico
+              <span className="text-xs font-semibold tracking-wide uppercase" style={{ color: BRAND }}>
+                Para talleres y tiendas de reparación
               </span>
             </div>
 
-            <h1 className="text-4xl xl:text-5xl font-bold text-white leading-tight">
-              Control inteligente<br />
+            <h1 className="text-4xl xl:text-[2.65rem] font-bold text-white leading-[1.15] tracking-tight">
+              Tu operación diaria,<br />
               <span style={{
                 background: "linear-gradient(90deg, #48B9E6 0%, #2EA7D8 60%, #48B9E6 100%)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
                 backgroundClip: "text",
               }}>
-                para TECNOCELL
+                en un solo panel
               </span>
             </h1>
 
-            <p className="text-lg leading-relaxed max-w-sm" style={{ color: "#A8B3C7" }}>
-              Administra ventas, reparaciones, clientes, inventario y caja desde un solo sistema.
+            <p className="text-[0.9375rem] leading-relaxed max-w-[19rem]" style={{ color: "#8B96A8" }}>
+              Reparaciones, ventas, inventario y clientes sin saltar entre hojas de cálculo ni sistemas sueltos.
             </p>
           </div>
 
-          {/* Tarjetas de módulos con glassmorphism */}
-          <div className="grid grid-cols-2 gap-3">
-            {FEATURES.map(({ icon: Icon, label, sub }) => (
-              <div
-                key={label}
-                className="group rounded-2xl p-4 transition-all duration-300 cursor-default"
-                style={{
-                  background: "rgba(13,21,38,0.70)",
-                  border: "1px solid rgba(72,185,230,0.10)",
-                  backdropFilter: "blur(8px)",
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(72,185,230,0.06)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(72,185,230,0.22)"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(13,21,38,0.70)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(72,185,230,0.10)"; }}
-              >
-                <Icon size={20} className="mb-2.5 transition-transform duration-300 group-hover:scale-110" style={{ color: BRAND }} />
-                <p className="text-white font-semibold text-sm">{label}</p>
-                <p className="text-xs mt-0.5" style={{ color: "#7F8A99" }}>{sub}</p>
+          {/* Beneficios — lista limpia */}
+          <div className="space-y-3">
+            {BENEFITS.map(({ icon: Icon, text }) => (
+              <div key={text} className="flex items-center gap-3.5">
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ background: "rgba(72,185,230,0.10)", border: "1px solid rgba(72,185,230,0.18)" }}>
+                  <Icon size={15} style={{ color: BRAND }} />
+                </div>
+                <span className="text-sm font-medium leading-snug" style={{ color: "#C4CDD9" }}>{text}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* ── Tarjeta resumen del día ────────────────────── */}
+        {/* ── Pie de panel ──────────────────────────────── */}
         <div className="relative z-10">
-          <div className="rounded-2xl p-5" style={{ background: "rgba(13,21,38,0.75)", border: "1px solid rgba(72,185,230,0.10)", backdropFilter: "blur(8px)" }}>
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.50)" }}>
-                Resumen del día
-              </span>
-              <div className="flex gap-1">
-                <div className="w-2 h-2 rounded-full bg-red-400/70" />
-                <div className="w-2 h-2 rounded-full bg-yellow-400/70" />
-                <div className="w-2 h-2 rounded-full bg-emerald-400/70" />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              {MOCK_STATS.map(({ label, value, delta, up }) => (
-                <div key={label} className="rounded-xl p-3" style={{ background: "rgba(6,11,20,0.60)" }}>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: "#7F8A99" }}>{label}</p>
-                  <p className="text-white font-bold text-base mt-1">{value}</p>
-                  <p className={`text-[11px] font-medium mt-0.5 flex items-center gap-0.5 ${up ? "text-emerald-400" : "text-rose-400"}`}>
-                    <TrendingUp size={10} className={up ? "" : "rotate-180"} />
-                    {delta}
-                  </p>
-                </div>
-              ))}
-            </div>
-            {/* Sparkline en azul/cyan */}
-            <div className="mt-4 flex items-end gap-1 h-10">
-              {[30, 55, 40, 70, 50, 80, 65, 90, 75, 95, 80, 100].map((h, i) => (
-                <div
-                  key={i}
-                  className="flex-1 rounded-sm"
-                  style={{ height: `${h}%`, background: "linear-gradient(to top, rgba(46,167,216,0.40), rgba(72,185,230,0.50))" }}
-                />
-              ))}
-            </div>
-          </div>
+          <p className="text-xs tracking-wide" style={{ color: "#3D4D5C" }}>
+            TecnoOne · Operación unificada · v2.0
+          </p>
         </div>
       </div>
 
@@ -209,42 +148,30 @@ export default function LoginPage() {
           RIGHT — formulario de inicio de sesión
       ═══════════════════════════════════════════════ */}
       <div className="flex-1 flex items-center justify-center p-6 sm:p-10 overflow-y-auto" style={{ backgroundColor: "#060B14" }}>
-        <div className="w-full max-w-[420px] space-y-8">
+        <div className="w-full max-w-[420px] space-y-7 sm:space-y-8">
 
           {/* Cabecera de marca — solo en móvil */}
           <div className="lg:hidden text-center space-y-3">
-            <div className="w-28 h-28 mx-auto rounded-2xl overflow-hidden flex items-center justify-center bg-white p-1"
-              style={{ boxShadow: "0 6px 28px rgba(72,185,230,0.32)" }}>
-              <img
-                src={tecnocellLogo}
-                alt="TECNOCELL"
-                className="w-full h-full object-contain"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                  (e.currentTarget.nextElementSibling as HTMLElement)?.classList.remove("hidden");
-                }}
-              />
-              <span className="hidden text-white font-black text-base tracking-tight">TC</span>
-            </div>
-            <p className="text-xs font-bold tracking-widest uppercase" style={{ color: "#A8B3C7" }}>TECNOCELL</p>
+            <BrandMark size="lg" />
+            <p className="text-xs font-bold tracking-widest uppercase" style={{ color: "#A8B3C7" }}>TecnoOne</p>
           </div>
 
           {/* Tarjeta del formulario */}
           <div
-            className="rounded-3xl shadow-2xl p-8 space-y-7"
+            className="rounded-3xl shadow-2xl p-7 sm:p-9 space-y-6 sm:space-y-7"
             style={{
               background: "#0D1526",
-              border: "1px solid rgba(72,185,230,0.10)",
-              boxShadow: "0 25px 60px rgba(0,0,0,0.60), 0 0 0 1px rgba(72,185,230,0.06)",
+              border: "1px solid rgba(72,185,230,0.13)",
+              boxShadow: "0 32px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(72,185,230,0.06)",
             }}
           >
             {/* Encabezado del formulario */}
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <h2 className="text-2xl font-bold text-white tracking-tight">Iniciar sesión</h2>
-              <p className="text-sm" style={{ color: "#A8B3C7" }}>
+              <p className="text-sm leading-relaxed" style={{ color: "#8B96A8" }}>
                 {businessInfo
-                  ? `Accede al panel administrativo de ${businessInfo.businessName}`
-                  : "Accede al panel administrativo de TECNOCELL"}
+                  ? `Ingresa con tu usuario asignado en ${businessInfo.businessName}`
+                  : "Ingresa con el usuario que te asignó tu administrador"}
               </p>
             </div>
 
@@ -255,8 +182,8 @@ export default function LoginPage() {
                 <div className="rounded-xl px-4 py-3 flex items-start gap-2.5"
                   style={{ background: "rgba(72,185,230,0.08)", border: "1px solid rgba(72,185,230,0.30)" }}>
                   <span className="text-lg leading-none mt-0.5" style={{ color: "#48B9E6" }}>⏱</span>
-                  <p className="text-sm font-medium" style={{ color: "#48B9E6" }}>
-                    Tu sesión expiró por inactividad. Inicia sesión nuevamente.
+                  <p className="text-sm font-medium leading-snug" style={{ color: "#48B9E6" }}>
+                    Sesión cerrada por inactividad. Vuelve a ingresar para continuar.
                   </p>
                 </div>
               )}
@@ -272,11 +199,11 @@ export default function LoginPage() {
 
               {/* Campo: Usuario */}
               <div className="space-y-2">
-                <label htmlFor="username" className="block text-xs font-semibold uppercase tracking-widest" style={{ color: "#A8B3C7" }}>
+                <label htmlFor="username" className="block text-xs font-semibold uppercase tracking-wide" style={{ color: "#A8B3C7" }}>
                   Usuario
                 </label>
                 <div className="relative group">
-                  <Wrench
+                  <User
                     size={16}
                     className="absolute left-4 top-1/2 -translate-y-1/2 transition-colors pointer-events-none"
                     style={{ color: "#64748B" }}
@@ -286,7 +213,7 @@ export default function LoginPage() {
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Ingresa tu usuario"
+                    placeholder="Usuario de acceso"
                     required
                     disabled={isLoading}
                     autoComplete="username"
@@ -304,7 +231,7 @@ export default function LoginPage() {
 
               {/* Campo: Contraseña */}
               <div className="space-y-2">
-                <label htmlFor="password" className="block text-xs font-semibold uppercase tracking-widest" style={{ color: "#A8B3C7" }}>
+                <label htmlFor="password" className="block text-xs font-semibold uppercase tracking-wide" style={{ color: "#A8B3C7" }}>
                   Contraseña
                 </label>
                 <div className="relative group">
@@ -318,7 +245,7 @@ export default function LoginPage() {
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Ingresa tu contraseña"
+                    placeholder="Tu contraseña"
                     required
                     disabled={isLoading}
                     autoComplete="current-password"
@@ -371,15 +298,15 @@ export default function LoginPage() {
                       Ingresando...
                     </>
                   ) : (
-                    "Ingresar al sistema"
+                    "Entrar"
                   )}
                 </span>
               </button>
             </form>
 
             {/* Texto de ayuda */}
-            <p className="text-center text-xs" style={{ color: "#7F8A99" }}>
-              ¿Problemas para ingresar?{" "}
+            <p className="text-center text-xs leading-relaxed" style={{ color: "#7F8A99" }}>
+              ¿No puedes acceder?{" "}
               <a
                 href="#"
                 className="transition-colors font-medium"
@@ -387,17 +314,17 @@ export default function LoginPage() {
                 onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = BRAND; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#B8C2D1"; }}
               >
-                Contacta al administrador
+                Habla con el administrador de tu negocio
               </a>
             </p>
           </div>
 
           {/* Footer */}
-          <div className="text-center space-y-1">
+          <div className="text-center space-y-0.5">
             <p className="text-xs" style={{ color: "#7F8A99" }}>
-              Sistema de gestión comercial · TECNOCELL
+              Gestión para talleres y tiendas · TecnoOne
             </p>
-            <p className="text-xs" style={{ color: "#4B5563" }}>
+            <p className="text-[0.6875rem]" style={{ color: "#4B5563" }}>
               Desarrollado por{" "}
               <span className="font-medium" style={{ color: "#6B7A8D" }}>TechWorksOne</span>
             </p>

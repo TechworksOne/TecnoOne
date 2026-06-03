@@ -23,7 +23,6 @@ import { getTecnicos, asignarTecnico } from '../../services/otService';
 import type { Tecnico } from '../../types/ot';
 import { isAdmin } from '../../lib/permissions';
 import { useAuth } from '../../store/useAuth';
-import logoUrl from '../../assets/tecnocell-logo.png';
 
 // ── Style maps ────────────────────────────────────────────────────────────
 const STATUS_PILL: Record<string, string> = {
@@ -935,7 +934,7 @@ export default function RepairsPage() {
     }
     .ticket { width: 100%; }
     .header { text-align: center; border-bottom: 1px solid #000; padding-bottom: 0.5mm; margin-bottom: 0.5mm; display: flex; align-items: center; gap: 1mm; }
-    .header img { height: 7mm; width: auto; flex-shrink: 0; }
+    .brand-mark { height: 7mm; width: 7mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 5px; font-weight: bold; color: #fff; background: #48B9E6; border-radius: 1mm; }
     .header-text { font-size: 8px; font-weight: bold; line-height: 1.2; }
     .header-text span { font-size: 6px; font-weight: normal; display: block; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1mm; }
@@ -950,7 +949,7 @@ export default function RepairsPage() {
 </head>
 <body>
 <div class="ticket">
-  <div class="header"><img src="${logoUrl}" alt="Logo" /><div class="header-text">TECNO CELL<span>Ticket de reparaci\u00f3n</span></div></div>
+  <div class="header"><div class="brand-mark">TO</div><div class="header-text">TecnoOne<span>Ticket de reparaci\u00f3n</span></div></div>
   <div class="grid">
     <div class="row full"><span class="b"># </span>${esc(r.id)}</div>
     <div class="row"><span class="b">Cliente: </span>${esc(r.clienteNombre || 'N/A')}</div>

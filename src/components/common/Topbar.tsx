@@ -1,5 +1,5 @@
 import { LogOut, Menu, Moon, Sun, User } from "lucide-react";
-import tecnocellLogo from "../../assets/tecnocell-logo.png";
+import BrandMark from "./BrandMark";
 import { getImageUrl } from "../../utils/getImageUrl";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -28,7 +28,7 @@ export default function Topbar() {
         minHeight:    52,
       }}
     >
-      {/* Izquierda: botón hamburguesa (mobile) + branding TECNOCELL */}
+      {/* Izquierda: botón hamburguesa (mobile) + branding TecnoOne */}
       <div className="flex items-center gap-3">
         {/* Hamburguesa — solo visible en mobile */}
         <button
@@ -45,19 +45,14 @@ export default function Topbar() {
         >
           <Menu size={18} />
         </button>
-        <img
-          src={tecnocellLogo}
-          alt="Tecnocell"
-          className="shrink-0 rounded-lg object-contain"
-          style={{ width: 34, height: 34 }}
-        />
+        <BrandMark size="sm" />
 
         <div className="flex flex-col leading-tight">
           <span
             className="text-sm font-extrabold tracking-widest"
             style={{ color: "var(--color-text)", letterSpacing: "0.1em" }}
           >
-            TECNOCELL
+            TecnoOne
           </span>
           <span
             className="text-[9px] font-medium uppercase tracking-widest hidden sm:block"
