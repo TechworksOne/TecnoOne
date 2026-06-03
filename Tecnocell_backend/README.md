@@ -1,6 +1,6 @@
-# Tecnocell Backend API
+# TecnoOne Backend API
 
-Backend para el sistema de gestión Tecnocell desarrollado con Node.js, Express y MySQL.
+Backend para el sistema de gestión TecnoOne desarrollado con Node.js, Express y MySQL.
 
 ## 📋 Requisitos Previos
 
@@ -85,7 +85,7 @@ Authorization: Bearer TU_TOKEN_AQUI
 
 ## 👤 Usuario por Defecto
 
-- **Email:** admin@tecnocell.com
+- **Email:** admin@tecnoone.com
 - **Contraseña:** admin123
 - **Rol:** admin
 

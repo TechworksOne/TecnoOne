@@ -1,7 +1,7 @@
 {
-  "name": "tecnocell-backend",
+  "name": "tecnoone-backend",
   "version": "1.0.0",
-  "description": "Backend para sistema Tecnocell",
+  "description": "Backend para sistema TecnoOne",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -14,7 +14,7 @@
   "keywords": [
     "api",
     "backend",
-    "tecnocell"
+    "tecnoone"
   ],
   "author": "",
   "license": "ISC",

@@ -1,6 +1,6 @@
-# Ferretería Frontend Demo
+# TecnoOne Frontend
 
-Sistema de inventario de ferretería con roles Admin y Empleado. Frontend-only con datos mock y navegación completa.
+Sistema de gestión comercial para TecnoOne con roles Admin, Empleado y Técnico.
 
 ## Stack Tecnológico
 
@@ -41,7 +41,7 @@ Sistema de inventario de ferretería con roles Admin y Empleado. Frontend-only c
 
 ### Datos Mock
 
-- 25 productos de ferretería con SKU, códigos de barras, stock, precios
+- 25 productos con SKU, códigos de barras, stock, precios
 - Categorías: Herramienta, Eléctrico, Plomería, Pintura, Construcción, etc.
 - Ventas, cotizaciones, facturas FEL y movimientos de kardex simulados
 - Usuarios con diferentes roles
