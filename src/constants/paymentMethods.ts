@@ -1,5 +1,5 @@
 // ================================================================
-// Métodos de pago centralizados para TECNOCELL
+// Métodos de pago centralizados para TecnoOne
 // Usar estos valores en todo el sistema (frontend + backend)
 // ================================================================
 

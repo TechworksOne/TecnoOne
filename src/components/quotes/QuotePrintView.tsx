@@ -286,10 +286,10 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
         <div className="print-header">
           <div>
             <div className="print-logo">EMPRENDE360</div>
-            <div className="text-sm text-gray-600 mt-1">Tecnocell - Soluciones Tecnológicas</div>
+            <div className="text-sm text-gray-600 mt-1">TecnoOne - Soluciones Tecnológicas</div>
           </div>
           <div className="print-company-info">
-            <div className="font-semibold">TECNOCELL by EMPRENDE360</div>
+            <div className="font-semibold">TecnoOne</div>
             <div>Ciudad de Guatemala</div>
             <div>Tel: (502) 2222-3333</div>
             <div>info@emprende360.com</div>
@@ -433,7 +433,7 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
           <div className="print-header">
             <div>
               <div className="print-logo">EMPRENDE360</div>
-              <div className="text-sm text-gray-600 mt-1">Tecnocell - Soluciones Tecnológicas</div>
+              <div className="text-sm text-gray-600 mt-1">TecnoOne - Soluciones Tecnológicas</div>
             </div>
             <div className="print-company-info">
               <div className="font-semibold">Cotización: {quote.numero}</div>
@@ -448,7 +448,7 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
           <div className="contract-section">
             <div className="contract-section-title">1. Objeto del Contrato</div>
             <div className="contract-text">
-              Por medio del presente documento, el TALLER (TECNOCELL by EMPRENDE360) se compromete a realizar 
+              Por medio del presente documento, el TALLER (TecnoOne) se compromete a realizar 
               los servicios de reparación detallados en la cotización {quote.numero} al equipo propiedad del 
               CLIENTE ({quote.cliente.name}), bajo los términos y condiciones establecidos a continuación.
             </div>
@@ -530,7 +530,7 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
               <div className="signature-line">
                 Firma del Taller
               </div>
-              <div className="signature-label">TECNOCELL by EMPRENDE360</div>
+              <div className="signature-label">TecnoOne</div>
               <div className="signature-label text-xs mt-2">Nombre y Sello</div>
             </div>
             <div className="signature-box">

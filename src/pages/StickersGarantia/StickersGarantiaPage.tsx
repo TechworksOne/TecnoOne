@@ -53,7 +53,7 @@ function imprimirStickers(stickers: StickerGarantia[]) {
   const fecha = new Date().toLocaleDateString('es-GT');
   const rows = stickers.map((s) => `
     <div class="stk">
-      <div class="stk-header">TecnoCell</div>
+      <div class="stk-header">TecnoOne</div>
       <div class="stk-code">${s.numero_sticker}</div>
       ${s.dias_garantia ? `<div class="stk-meta">Garantía: ${s.dias_garantia} días</div>` : ''}
       ${s.tipo_garantia ? `<div class="stk-meta">${s.tipo_garantia}</div>` : ''}
@@ -76,7 +76,7 @@ function imprimirStickers(stickers: StickerGarantia[]) {
       .stk-date{font-size:7px;color:#aaa}
       @media print{.title{display:none}@page{margin:8mm}.stk{break-inside:avoid}}
     </style></head><body>
-    <div class="title">TecnoCell — ${stickers.length} sticker${stickers.length!==1?'s':''} — ${fecha}</div>
+    <div class="title">TecnoOne — ${stickers.length} sticker${stickers.length!==1?'s':''} — ${fecha}</div>
     <div class="grid">${rows}</div>
     <script>window.onload=function(){window.print()}<\/script>
   </body></html>`);

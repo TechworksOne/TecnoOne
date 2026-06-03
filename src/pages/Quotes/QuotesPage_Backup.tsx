@@ -162,7 +162,7 @@ export default function QuotesPage() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cotización ${quote.id} - TECNOCELL by EMPRENDE360</title>
+    <title>Cotización ${quote.id} - TecnoOne</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f8fafc; color: #1e293b; }
         .container { max-width: 800px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
@@ -191,8 +191,8 @@ export default function QuotesPage() {
 <body>
     <div class="container">
         <div class="header">
-            <div class="logo">TECNOCELL by EMPRENDE360</div>
-            <div class="subtitle">Gestión Comercial Integral • Ferretería</div>
+            <div class="logo">TecnoOne</div>
+            <div class="subtitle">Gestión Comercial Integral • TecnoOne</div>
             <h2 class="quote-title">COTIZACIÓN ${quote.id}</h2>
         </div>
         
@@ -250,8 +250,8 @@ export default function QuotesPage() {
         </div>
 
         <div class="footer">
-            <h4>TECNOCELL by EMPRENDE360</h4>
-            <p>Gestión Comercial Integral • Ferretería</p>
+            <h4>TecnoOne</h4>
+            <p>Gestión Comercial Integral • TecnoOne</p>
             <p>Esta cotización es válida por ${quote.validDays} días desde la fecha de emisión.</p>
             <p style="font-weight: 600; margin-top: 20px;">Generado el ${currentDate}</p>
         </div>

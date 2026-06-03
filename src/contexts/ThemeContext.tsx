@@ -10,7 +10,7 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-const LS_KEY = "tecnocell_theme";
+const LS_KEY = "tecnoone_theme";
 
 function getInitialTheme(): Theme {
   const saved = localStorage.getItem(LS_KEY) as Theme | null;

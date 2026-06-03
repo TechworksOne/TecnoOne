@@ -12,6 +12,6 @@ export const useSidebar = create<SidebarState>()(
       isOpen: true,
       toggle: () => set({ isOpen: !get().isOpen }),
     }),
-    { name: "tecnocell-sidebar" }
+    { name: "tecnoone-sidebar" }
   )
 );

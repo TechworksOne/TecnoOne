@@ -251,7 +251,7 @@ export default function SaleDetailPage() {
         <div className="max-w-4xl mx-auto p-8">
           {/* Header empresa */}
           <div className="text-center mb-8 border-b-2 border-gray-300 pb-6">
-            <h1 className="text-3xl font-bold mb-2">TECNOCELL</h1>
+            <h1 className="text-3xl font-bold mb-2">TecnoOne</h1>
             <p className="text-gray-600 dark:text-slate-400">by EMPRENDE360</p>
             <p className="text-sm text-gray-600 mt-2">
               Gestión Comercial | Tel: +502 1234-5678

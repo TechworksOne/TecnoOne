@@ -6,7 +6,7 @@ import { useAuth } from "../store/useAuth";
 const IDLE_TIMEOUT = 15 * 60 * 1000;
 
 /** Clave usada para pasar el mensaje de expiración al login */
-export const SESSION_EXPIRED_KEY = "tecnocell_session_expired";
+export const SESSION_EXPIRED_KEY = "tecnoone_session_expired";
 
 /** Eventos que se consideran actividad del usuario */
 const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [

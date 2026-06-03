@@ -329,7 +329,7 @@ export default function UsersPage() {
                   type="email"
                   value={userForm.email}
                   onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                  placeholder="juan@ferreteria.com"
+                  placeholder="usuario@tecnoone.com"
                   className="border-2 border-indigo-200 focus:border-indigo-500 rounded-xl shadow-sm"
                 />
               </div>

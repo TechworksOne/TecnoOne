@@ -202,7 +202,7 @@ function StatCard({ label, value, sub, icon, iconBg, footer, onClick }: StatCard
   );
 }
 
-/** Tarjeta KPI para técnico — estilo TECNOCELL */
+/** Tarjeta KPI para técnico — estilo TecnoOne */
 interface TecKpiCardProps {
   label:    string;
   value:    number;
