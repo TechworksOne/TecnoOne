@@ -74,7 +74,7 @@ app.use('/api', marcaLineaRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {
-  res.json({ message: 'API Tecnocell funcionando correctamente' });
+  res.json({ message: 'API TecnoOne funcionando correctamente' });
 });
 
 // Manejo de errores
