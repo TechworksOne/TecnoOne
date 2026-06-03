@@ -382,18 +382,17 @@ exports.getTecnicos = async (req, res) => {
          u.name,
          u.email,
          CONCAT(COALESCE(p.nombres,''), ' ', COALESCE(p.apellidos,'')) AS nombre_completo,
-         GROUP_CONCAT(r.nombre ORDER BY r.nombre SEPARATOR ',') AS roles
+         GROUP_CONCAT(DISTINCT r.nombre ORDER BY r.nombre SEPARATOR ',') AS roles
        FROM users u
        LEFT JOIN user_profiles p ON p.user_id = u.id
-       LEFT JOIN user_roles ur ON ur.user_id = u.id
-       LEFT JOIN roles r ON r.id = ur.role_id
+       INNER JOIN user_roles ur ON ur.user_id = u.id
+       INNER JOIN roles r ON r.id = ur.role_id
        WHERE u.active = 1
-         AND (u.role IN ('admin','tecnico') OR ur.user_id IS NOT NULL)
-       GROUP BY u.id
-       HAVING u.role IN ('admin','tecnico')
-           OR roles LIKE '%ADMINISTRADOR%'
-           OR roles LIKE '%TECNICO%'
-       ORDER BY nombre_completo`,
+       GROUP BY u.id, u.username, u.name, u.email, p.nombres, p.apellidos
+       HAVING SUM(
+           CASE WHEN LOWER(r.nombre) IN ('admin','administrador','tecnico','técnico') THEN 1 ELSE 0 END
+         ) > 0
+       ORDER BY nombre_completo, u.username`,
       []
     );
 
