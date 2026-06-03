@@ -27,3 +27,7 @@ backups_pre_pull_*
 docker-compose.override.yml
 docker-compose.override.yml.bak_*
 docker-compose.yml.bak_*
+
+# Backups locales de base de datos
+backup_*.sql
+logs-*.txt
