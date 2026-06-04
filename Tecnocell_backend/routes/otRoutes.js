@@ -3,9 +3,11 @@ const express = require('express');
 const router = express.Router();
 const otController = require('../controllers/otController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
+router.use(tenantScope);
 
 // GET /api/ot/resumen  — KPI cards del dashboard (activas, por estado, carga técnico)
 router.get('/resumen',   otController.getResumenOT);

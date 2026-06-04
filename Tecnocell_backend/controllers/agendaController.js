@@ -3,6 +3,20 @@
 
 const db = require('../config/database');
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
+function repairTenantClause(req, alias = 'r') {
+  return isSuperadminTenant(req)
+    ? { sql: '', params: [] }
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
 // ─── GET /api/agenda/entregas ─────────────────────────────────────────────
 // Retorna reparaciones que tienen fecha_entrega_programada asignada.
 // Filtros opcionales: fecha_inicio, fecha_fin, estado (query params)
@@ -31,6 +45,9 @@ exports.getEntregas = async (req, res) => {
     `;
 
     const params = [];
+    const tenant = repairTenantClause(req, 'r');
+    query += tenant.sql;
+    params.push(...tenant.params);
 
     if (fecha_inicio) {
       query += ' AND r.fecha_entrega_programada >= ?';
@@ -76,7 +93,8 @@ exports.patchFechaEntrega = async (req, res) => {
     }
 
     // Verificar que la reparación exista
-    const [rows] = await db.query('SELECT id FROM reparaciones WHERE id = ?', [id]);
+    const tenant = repairTenantClause(req);
+    const [rows] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`, [id, ...tenant.params]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
     }
@@ -86,15 +104,15 @@ exports.patchFechaEntrega = async (req, res) => {
          SET fecha_entrega_programada = ?,
              nota_entrega_programada  = ?,
              updated_at               = NOW()
-       WHERE id = ?`,
-      [fecha_entrega_programada, nota_entrega_programada ?? null, id]
+       WHERE id = ?${tenant.sql.replace('r.', '')}`,
+      [fecha_entrega_programada, nota_entrega_programada ?? null, id, ...tenant.params]
     );
 
     // Devolver la reparación actualizada (campos de entrega)
     const [[updated]] = await db.query(
       `SELECT id, fecha_entrega_programada, nota_entrega_programada, estado
-         FROM reparaciones WHERE id = ?`,
-      [id]
+         FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`,
+      [id, ...tenant.params]
     );
 
     res.json({ success: true, data: updated });
@@ -110,7 +128,8 @@ exports.deleteFechaEntrega = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [rows] = await db.query('SELECT id FROM reparaciones WHERE id = ?', [id]);
+    const tenant = repairTenantClause(req);
+    const [rows] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`, [id, ...tenant.params]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
     }
@@ -120,8 +139,8 @@ exports.deleteFechaEntrega = async (req, res) => {
          SET fecha_entrega_programada = NULL,
              nota_entrega_programada  = NULL,
              updated_at               = NOW()
-       WHERE id = ?`,
-      [id]
+       WHERE id = ?${tenant.sql.replace('r.', '')}`,
+      [id, ...tenant.params]
     );
 
     res.json({ success: true, message: 'Fecha de entrega eliminada' });

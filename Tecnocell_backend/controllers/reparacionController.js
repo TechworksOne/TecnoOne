@@ -16,6 +16,27 @@ function esMetodoTarjeta(m) {
   return ['TARJETA_BAC', 'TARJETA_NEONET', 'TARJETA_OTRA'].includes(String(m || '').toUpperCase());
 }
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
+function addRepairTenantCondition(req, conditions, params, alias = 'r') {
+  if (!isSuperadminTenant(req)) {
+    conditions.push(`${alias}.empresa_id = ?`);
+    params.push(getTenantEmpresaId(req));
+  }
+}
+
+function repairTenantClause(req, alias = 'r') {
+  return isSuperadminTenant(req)
+    ? { sql: '', params: [] }
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
 // Ruta base de uploads — siempre absoluta para ser compatible con Docker bind mount
 // Dentro del contenedor es /app/uploads (mapeado a /var/www/Tecnocell_storage/uploads en el host)
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
@@ -153,6 +174,18 @@ exports.createReparacion = async (req, res) => {
     
     // Generar ID único
     const repairId = `REP${Date.now()}`;
+    const empresaId = getTenantEmpresaId(req);
+
+    if (clienteId && !isSuperadminTenant(req)) {
+      const [[cliente]] = await connection.query(
+        'SELECT id FROM clientes WHERE id = ? AND empresa_id = ? AND activo = true',
+        [clienteId, empresaId]
+      );
+      if (!cliente) {
+        await connection.rollback();
+        return res.status(404).json({ success: false, message: 'Cliente no encontrado' });
+      }
+    }
     
     // Calcular totales (convertir a centavos)
     const subtotalCentavos = items.reduce((sum, item) => sum + (item.subtotal || 0), 0);
@@ -165,7 +198,7 @@ exports.createReparacion = async (req, res) => {
     // 1. Insertar reparación
     await connection.query(
       `INSERT INTO reparaciones (
-        id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
+        id, empresa_id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
         tipo_equipo, marca, modelo, color, imei_serie, patron_contrasena,
         acceso_tipo, acceso_valor,
         estado_fisico, diagnostico_inicial,
@@ -173,9 +206,9 @@ exports.createReparacion = async (req, res) => {
         mano_obra, subtotal, impuestos, total,
         monto_anticipo, saldo_anticipo, metodo_anticipo,
         fecha_ingreso, observaciones, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        repairId, clienteId || null, clienteNombre, clienteTelefono, clienteEmail,
+        repairId, empresaId, clienteId || null, clienteNombre, clienteTelefono, clienteEmail,
         tipoEquipo, marca, modelo, color, imeiSerie, patronContrasena,
         acceso_tipo, acceso_valor,
         estadoFisico, diagnosticoInicial,
@@ -287,8 +320,8 @@ exports.createReparacion = async (req, res) => {
                     firma_estado           = 'FIRMADO',
                     firmado_at             = NOW(),
                     firmado_por_usuario_id = ?
-              WHERE id = ?`,
-            [firmaClienteUrl, tecnicoId, repairId]
+              WHERE id = ? AND empresa_id = ?`,
+            [firmaClienteUrl, tecnicoId, repairId, empresaId]
           );
           console.log(`✅ Firma guardada para reparación ${repairId} → ${firmaClienteUrl}`);
         }
@@ -367,6 +400,9 @@ exports.getAllReparaciones = async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
+    const tenant = repairTenantClause(req, 'r');
+    query += tenant.sql;
+    params.push(...tenant.params);
     
     if (estado) {
       query += ' AND r.estado = ?';
@@ -432,9 +468,10 @@ exports.getReparacionById = async (req, res) => {
     const { id } = req.params;
     
     // Obtener reparación principal
+    const tenant = repairTenantClause(req);
     const [reparaciones] = await db.query(
-      'SELECT * FROM reparaciones WHERE id = ?',
-      [id]
+      `SELECT * FROM reparaciones WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
     
     if (reparaciones.length === 0) {
@@ -545,11 +582,12 @@ exports.changeRepairState = async (req, res) => {
     } = req.body;
     
     const uploadedFiles = req.files || [];
+    const tenant = repairTenantClause(req);
     
     // Obtener reparación actual
     const [reparaciones] = await connection.query(
-      'SELECT * FROM reparaciones WHERE id = ?',
-      [id]
+      `SELECT * FROM reparaciones WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
     
     if (reparaciones.length === 0) {
@@ -651,8 +689,8 @@ exports.changeRepairState = async (req, res) => {
     const updateValues = Object.values(updates);
     
     await connection.query(
-      `UPDATE reparaciones SET ${updateFields} WHERE id = ?`,
-      [...updateValues, id]
+      `UPDATE reparaciones SET ${updateFields} WHERE id = ?${tenant.sql}`,
+      [...updateValues, id, ...tenant.params]
     );
     
     await connection.commit();
@@ -693,15 +731,19 @@ exports.updateEstadoReparacion = async (req, res) => {
     }
 
     // Obtener estado anterior antes de actualizar
+    const tenant = repairTenantClause(req);
     const [[repActual]] = await db.query(
-      'SELECT estado FROM reparaciones WHERE id = ?', [id]
+      `SELECT estado FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
     );
+    if (!repActual) {
+      return res.status(404).json({ success: false, message: 'ReparaciÃ³n no encontrada' });
+    }
     const estadoAnteriorSimple = repActual ? repActual.estado : null;
 
     // Actualizar estado en la reparación
     await db.query(
-      `UPDATE reparaciones SET estado = ? WHERE id = ?`,
-      [estado, id]
+      `UPDATE reparaciones SET estado = ? WHERE id = ?${tenant.sql}`,
+      [estado, id, ...tenant.params]
     );
 
     // Crear entrada en historial
@@ -741,9 +783,10 @@ exports.getHistorialCompleto = async (req, res) => {
     const { id } = req.params;
 
     // Verificar que la reparación exista
+    const tenant = repairTenantClause(req);
     const [[reparacion]] = await db.query(
-      `SELECT * FROM reparaciones WHERE id = ?`,
-      [id]
+      `SELECT * FROM reparaciones WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
 
     if (!reparacion) {
@@ -943,8 +986,9 @@ exports.updatePrioridad = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Prioridad inválida. Debe ser BAJA, MEDIA o ALTA' });
     }
 
+    const tenant = repairTenantClause(req);
     const [[rep]] = await connection.query(
-      'SELECT id, estado, prioridad FROM reparaciones WHERE id = ?', [id]
+      `SELECT id, estado, prioridad FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
     );
     if (!rep) {
       await connection.rollback();
@@ -957,8 +1001,8 @@ exports.updatePrioridad = async (req, res) => {
 
     const prioridadAnterior = rep.prioridad;
     await connection.query(
-      'UPDATE reparaciones SET prioridad = ?, updated_by = ? WHERE id = ?',
-      [prioridad, usuario, id]
+      `UPDATE reparaciones SET prioridad = ?, updated_by = ? WHERE id = ?${tenant.sql}`,
+      [prioridad, usuario, id, ...tenant.params]
     );
 
     await connection.query(
@@ -1005,8 +1049,9 @@ exports.registrarPagoSaldo = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Método de pago inválido. Use efectivo o tarjeta' });
     }
 
+    const tenant = repairTenantClause(req);
     const [[rep]] = await connection.query(
-      'SELECT id, estado, total, monto_anticipo, monto_pagado_adicional FROM reparaciones WHERE id = ?', [id]
+      `SELECT id, estado, total, monto_anticipo, monto_pagado_adicional FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
     );
     if (!rep) {
       await connection.rollback();
@@ -1037,8 +1082,8 @@ exports.registrarPagoSaldo = async (req, res) => {
 
     const nuevoMontoPagadoAdicional = (rep.monto_pagado_adicional || 0) + montoCentavos;
     await connection.query(
-      'UPDATE reparaciones SET monto_pagado_adicional = ?, metodo_pago_adicional = ?, updated_by = ? WHERE id = ?',
-      [nuevoMontoPagadoAdicional, metodoPago, usuario, id]
+      `UPDATE reparaciones SET monto_pagado_adicional = ?, metodo_pago_adicional = ?, updated_by = ? WHERE id = ?${tenant.sql}`,
+      [nuevoMontoPagadoAdicional, metodoPago, usuario, id, ...tenant.params]
     );
 
     await connection.query(
@@ -1113,11 +1158,12 @@ exports.cancelarReparacion = async (req, res) => {
     const motivoRetLimpio = motivoRetencion;
 
     // ── Cargar reparación ────────────────────────────────────────────────
+    const tenant = repairTenantClause(req);
     const [[rep]] = await connection.query(
       `SELECT id, estado, cliente_nombre, monto_anticipo, metodo_anticipo,
               cuenta_bancaria_anticipo_id
-         FROM reparaciones WHERE id = ?`,
-      [id]
+         FROM reparaciones WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
     if (!rep) {
       await connection.rollback();
@@ -1251,7 +1297,7 @@ exports.cancelarReparacion = async (req, res) => {
              anticipo_movimiento_id  = ?,
              devolucion_movimiento_id = ?,
              updated_by              = ?
-       WHERE id = ?`,
+       WHERE id = ?${tenant.sql}`,
       [
         fechaHoy,
         motivoLimpio,
@@ -1262,6 +1308,7 @@ exports.cancelarReparacion = async (req, res) => {
         devolucionMovId,
         usuario,
         id,
+        ...tenant.params,
       ]
     );
 
@@ -1333,8 +1380,9 @@ exports.completarReparacion = async (req, res) => {
     const uploadedFiles    = req.files || [];
 
     // ── 1. Obtener reparación ─────────────────────────────────────────────
+    const tenant = repairTenantClause(req);
     const [[reparacion]] = await connection.query(
-      'SELECT * FROM reparaciones WHERE id = ?', [id]
+      `SELECT * FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
     );
     if (!reparacion) {
       await connection.rollback();
@@ -1511,7 +1559,7 @@ exports.completarReparacion = async (req, res) => {
          porcentaje_interes     = ?,
          interes_monto          = ?,
          referencia_pago        = COALESCE(?, referencia_pago)
-       WHERE id = ?`,
+       WHERE id = ?${tenant.sql}`,
       [
         stickerNumero || null, stickerUbicacion || null,
         montoPagoFinalCentavos, metodoPagoFinal, fechaPagoFinal, observacionPagoFinal,
@@ -1520,7 +1568,8 @@ exports.completarReparacion = async (req, res) => {
         cuentaBancariaId || null,
         porcentajeInteres, interesMontoCentavos,
         referenciaPago || null,
-        id
+        id,
+        ...tenant.params
       ]
     );
 
@@ -1608,8 +1657,9 @@ exports.descargarContrato = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const tenant = repairTenantClause(req);
     const [[rep]] = await db.query(
-      'SELECT id, firma_estado FROM reparaciones WHERE id = ?', [id]
+      `SELECT id, firma_estado FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
     );
     if (!rep) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
