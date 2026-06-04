@@ -2,16 +2,20 @@ const express = require('express');
 const router = express.Router();
 const customerController = require('../controllers/customerController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
-// Rutas públicas (sin autenticación) - solo lectura
+router.use(verifyToken);
+router.use(tenantScope);
+
+// Rutas de lectura
 router.get('/', customerController.getAllCustomers);
 router.get('/search', customerController.searchCustomers);
 router.get('/:id', customerController.getCustomerById);
 router.get('/:id/purchases', customerController.getCustomerPurchases);
 
-// Rutas protegidas (requieren autenticación) - escritura
-router.post('/', verifyToken, customerController.createCustomer);
-router.put('/:id', verifyToken, customerController.updateCustomer);
-router.delete('/:id', verifyToken, customerController.deleteCustomer);
+// Rutas de escritura
+router.post('/', customerController.createCustomer);
+router.put('/:id', customerController.updateCustomer);
+router.delete('/:id', customerController.deleteCustomer);
 
 module.exports = router;
