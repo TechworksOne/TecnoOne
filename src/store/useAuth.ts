@@ -12,8 +12,9 @@ interface User {
   username: string;
   name: string;
   email: string;
-  role: "admin" | "employee" | "tecnico";
+  role: string;
   roles: string[];
+  empresa_id: number | null;
   perfil: UserPerfil | null;
 }
 
