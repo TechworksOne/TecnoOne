@@ -10,6 +10,7 @@ const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    decoded.empresa_id = decoded.empresa_id ?? null;
     req.user = decoded; // Agregar datos del usuario al request
     next();
   } catch (error) {

@@ -14,6 +14,7 @@ export interface LoginResponse {
     email: string;
     role: string;
     roles: string[];
+    empresa_id: number | null;
     perfil: {
       nombres?: string;
       apellidos?: string;

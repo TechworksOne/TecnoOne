@@ -49,6 +49,7 @@ const login = async (req, res) => {
       [user.id]
     );
     const rolesArray = rolesRows.map(r => r.nombre);
+    const empresaId = user.empresa_id ?? null;
 
     // Generar token JWT (incluye roles para middleware)
     const token = jwt.sign(
@@ -58,7 +59,8 @@ const login = async (req, res) => {
         username: user.username,
         name: user.name,
         role: user.role,
-        roles: rolesArray
+        roles: rolesArray,
+        empresa_id: empresaId
       },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
@@ -78,6 +80,7 @@ const login = async (req, res) => {
         name: user.name,
         role: user.role,
         roles: rolesArray,
+        empresa_id: empresaId,
         perfil: perfil || null,
       }
     });
@@ -115,7 +118,7 @@ const getMe = async (req, res) => {
     const userId = req.user.id;
 
     const [[user]] = await db.query(
-      'SELECT id, username, email, name, role, active, ultimo_login, created_at, updated_at FROM users WHERE id = ?',
+      'SELECT id, username, email, name, role, empresa_id, active, ultimo_login, created_at, updated_at FROM users WHERE id = ?',
       [userId]
     );
     if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
@@ -137,6 +140,7 @@ const getMe = async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
+        empresa_id: user.empresa_id ?? null,
         active: Boolean(user.active),
         ultimo_login: user.ultimo_login,
         created_at: user.created_at,
