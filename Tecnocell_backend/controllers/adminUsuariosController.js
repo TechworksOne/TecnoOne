@@ -6,6 +6,25 @@ const fs = require('fs');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 
+function addTenantCondition(req, conditions, params, alias = 'u') {
+  if (!req.tenant?.isSuperadmin) {
+    conditions.push(`${alias}.empresa_id = ?`);
+    params.push(req.tenant.empresa_id);
+  }
+}
+
+function scopedUserExistsQuery(req, id, select = 'id') {
+  const params = [id];
+  let query = `SELECT ${select} FROM users WHERE id = ?`;
+
+  if (!req.tenant?.isSuperadmin) {
+    query += ' AND empresa_id = ?';
+    params.push(req.tenant.empresa_id);
+  }
+
+  return { query, params };
+}
+
 // ── Multer: temp storage para fotos de perfil ──────────────────────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -63,11 +82,12 @@ exports.getUsuarios = async (req, res) => {
       conditions.push(`u.active = ?`);
       params.push(estado === '1' || estado === 'true' ? 1 : 0);
     }
+    addTenantCondition(req, conditions, params);
     if (conditions.length) where = 'WHERE ' + conditions.join(' AND ');
 
     const [rows] = await db.query(
       `SELECT
-         u.id, u.username, u.email, u.active, u.ultimo_login, u.created_at,
+         u.id, u.username, u.email, u.empresa_id, u.active, u.ultimo_login, u.created_at,
          p.nombres, p.apellidos, p.telefono, p.dpi, p.direccion, p.foto_perfil,
          GROUP_CONCAT(r.nombre ORDER BY r.nombre SEPARATOR ',') AS roles
        FROM users u
@@ -102,18 +122,22 @@ exports.getUsuarios = async (req, res) => {
 exports.getUsuarioById = async (req, res) => {
   try {
     const { id } = req.params;
+    const conditions = ['u.id = ?'];
+    const params = [id];
+    addTenantCondition(req, conditions, params);
+
     const [[user]] = await db.query(
       `SELECT
-         u.id, u.username, u.email, u.active, u.ultimo_login, u.created_at,
+         u.id, u.username, u.email, u.empresa_id, u.active, u.ultimo_login, u.created_at,
          p.nombres, p.apellidos, p.telefono, p.dpi, p.direccion, p.foto_perfil,
          GROUP_CONCAT(r.nombre ORDER BY r.nombre SEPARATOR ',') AS roles
        FROM users u
        LEFT JOIN user_profiles p ON p.user_id = u.id
        LEFT JOIN user_roles ur ON ur.user_id = u.id
        LEFT JOIN roles r ON r.id = ur.role_id
-       WHERE u.id = ?
+       WHERE ${conditions.join(' AND ')}
        GROUP BY u.id`,
-      [id]
+      params
     );
     if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
 
@@ -131,7 +155,7 @@ exports.getUsuarioById = async (req, res) => {
 exports.createUsuario = async (req, res) => {
   let tempFilePath = null;
   try {
-    const { username, email, password, nombres, apellidos, telefono, dpi, direccion, roles } = req.body;
+    const { username, email, password, nombres, apellidos, telefono, dpi, direccion, roles, empresa_id } = req.body;
 
     if (!password) return res.status(400).json({ success: false, message: 'La contraseña es requerida' });
     if (!nombres) return res.status(400).json({ success: false, message: 'El nombre es requerido' });
@@ -159,11 +183,14 @@ exports.createUsuario = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const legacyRole = rolesArray.includes('ADMINISTRADOR') ? 'admin' : 'employee';
+    const empresaId = req.tenant?.isSuperadmin
+      ? (empresa_id !== undefined && empresa_id !== '' ? empresa_id : null)
+      : req.tenant.empresa_id;
 
     const [result] = await db.query(
-      `INSERT INTO users (username, email, password, name, telefono, role, active)
-       VALUES (?, ?, ?, ?, ?, ?, 1)`,
-      [username || null, email || null, hashedPassword, nombres + (apellidos ? ' ' + apellidos : ''), telefono || null, legacyRole]
+      `INSERT INTO users (username, email, password, name, telefono, role, empresa_id, active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+      [username || null, email || null, hashedPassword, nombres + (apellidos ? ' ' + apellidos : ''), telefono || null, legacyRole, empresaId]
     );
     const userId = result.insertId;
 
@@ -204,7 +231,8 @@ exports.updateUsuario = async (req, res) => {
     const { id } = req.params;
     const { username, email, nombres, apellidos, telefono, dpi, direccion, roles, active } = req.body;
 
-    const [[existing]] = await db.query('SELECT id FROM users WHERE id = ?', [id]);
+    const existingScope = scopedUserExistsQuery(req, id);
+    const [[existing]] = await db.query(existingScope.query, existingScope.params);
     if (!existing) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
 
     if (req.file) tempFilePath = req.file.path;
@@ -292,15 +320,19 @@ exports.updateUsuario = async (req, res) => {
 exports.toggleEstado = async (req, res) => {
   try {
     const { id } = req.params;
-    const [[user]] = await db.query('SELECT id, active, role FROM users WHERE id = ?', [id]);
+    const userScope = scopedUserExistsQuery(req, id, 'id, active, role, empresa_id');
+    const [[user]] = await db.query(userScope.query, userScope.params);
     if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
 
     // Verificar: no desactivar al único admin activo
     if (user.active && user.role === 'admin') {
-      const [[adminCount]] = await db.query(
-        'SELECT COUNT(*) as cnt FROM users WHERE role = ? AND active = 1 AND id != ?',
-        ['admin', id]
-      );
+      const adminCountParams = ['admin', id];
+      let adminCountQuery = 'SELECT COUNT(*) as cnt FROM users WHERE role = ? AND active = 1 AND id != ?';
+      if (!req.tenant?.isSuperadmin) {
+        adminCountQuery += ' AND empresa_id = ?';
+        adminCountParams.push(req.tenant.empresa_id);
+      }
+      const [[adminCount]] = await db.query(adminCountQuery, adminCountParams);
       if (adminCount.cnt === 0) {
         return res.status(400).json({ success: false, message: 'No se puede desactivar al único administrador activo' });
       }
@@ -308,10 +340,13 @@ exports.toggleEstado = async (req, res) => {
 
     // No permitir que el usuario se desactive a sí mismo si es el único admin
     if (req.user && req.user.id === Number(id) && user.role === 'admin') {
-      const [[adminCount]] = await db.query(
-        'SELECT COUNT(*) as cnt FROM users WHERE role = ? AND active = 1 AND id != ?',
-        ['admin', id]
-      );
+      const adminCountParams = ['admin', id];
+      let adminCountQuery = 'SELECT COUNT(*) as cnt FROM users WHERE role = ? AND active = 1 AND id != ?';
+      if (!req.tenant?.isSuperadmin) {
+        adminCountQuery += ' AND empresa_id = ?';
+        adminCountParams.push(req.tenant.empresa_id);
+      }
+      const [[adminCount]] = await db.query(adminCountQuery, adminCountParams);
       if (adminCount.cnt === 0) {
         return res.status(400).json({ success: false, message: 'No puedes desactivarte a ti mismo si eres el único administrador' });
       }
@@ -334,6 +369,10 @@ exports.changePassword = async (req, res) => {
     if (!password || password.length < 6) {
       return res.status(400).json({ success: false, message: 'La contraseña debe tener al menos 6 caracteres' });
     }
+    const userScope = scopedUserExistsQuery(req, id);
+    const [[user]] = await db.query(userScope.query, userScope.params);
+    if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+
     const hashed = await bcrypt.hash(password, 10);
     await db.query('UPDATE users SET password = ? WHERE id = ?', [hashed, id]);
     res.json({ success: true, message: 'Contraseña actualizada' });
