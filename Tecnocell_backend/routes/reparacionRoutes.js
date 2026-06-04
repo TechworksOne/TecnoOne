@@ -3,53 +3,55 @@ const express = require('express');
 const router = express.Router();
 const reparacionController = require('../controllers/reparacionController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
+
+router.use(verifyToken);
+router.use(tenantScope);
 
 // Rutas CRUD
 router.get('/', reparacionController.getAllReparaciones);
-router.get('/:id/historial-completo', verifyToken, reparacionController.getHistorialCompleto);
+router.get('/:id/historial-completo', reparacionController.getHistorialCompleto);
 router.get('/:id', reparacionController.getReparacionById);
-router.post('/', verifyToken, reparacionController.createReparacion);
+router.post('/', reparacionController.createReparacion);
 
 // Actualizar solo el estado (simple) — PUT usa JSON plano desde el Kanban
-router.put('/:id/estado', verifyToken, reparacionController.updateEstadoReparacion);
+router.put('/:id/estado', reparacionController.updateEstadoReparacion);
 
 // Actualizar prioridad
-router.patch('/:id/prioridad', verifyToken, reparacionController.updatePrioridad);
+router.patch('/:id/prioridad', reparacionController.updatePrioridad);
 
 // Registrar pago de saldo pendiente
-router.post('/:id/pago', verifyToken, reparacionController.registrarPagoSaldo);
+router.post('/:id/pago', reparacionController.registrarPagoSaldo);
 
 // Cancelar reparación
-router.patch('/:id/cancelar', verifyToken, reparacionController.cancelarReparacion);
+router.patch('/:id/cancelar', reparacionController.cancelarReparacion);
 
 // Completar reparación (repuestos + regalías + pago final, con imágenes opcionales)
 router.post(
   '/:id/completar',
-  verifyToken,
   reparacionController.uploadMiddleware,
   reparacionController.completarReparacion
 );
 
 // Asignación técnica (OT)
 const otController = require('../controllers/otController');
-router.patch('/:id/asignar-tecnico', verifyToken, otController.asignarTecnico);
-router.delete('/:id/asignar-tecnico', verifyToken, otController.quitarAsignacion);
+router.patch('/:id/asignar-tecnico', otController.asignarTecnico);
+router.delete('/:id/asignar-tecnico', otController.quitarAsignacion);
 
 // Fecha de entrega programada (Agenda)
 const agendaController = require('../controllers/agendaController');
-router.patch('/:id/fecha-entrega', verifyToken, agendaController.patchFechaEntrega);
-router.delete('/:id/fecha-entrega', verifyToken, agendaController.deleteFechaEntrega);
+router.patch('/:id/fecha-entrega', agendaController.patchFechaEntrega);
+router.delete('/:id/fecha-entrega', agendaController.deleteFechaEntrega);
 
 // Cambiar estado con imágenes — POST usa FormData desde ModalActualizarEstado
 router.post(
   '/:id/estado',
-  verifyToken,
   reparacionController.uploadMiddleware,
   reparacionController.changeRepairState
 );
 
 // Descargar contrato PDF generado al crear la reparación
-router.get('/:id/contrato', verifyToken, reparacionController.descargarContrato);
+router.get('/:id/contrato', reparacionController.descargarContrato);
 
 // Subir imagen individual (opcional)
 router.post(

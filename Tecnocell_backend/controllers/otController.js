@@ -11,6 +11,26 @@ function isAdmin(user) {
   return roles.includes('ADMINISTRADOR') || user.role === 'admin';
 }
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
+function addRepairTenantFilter(req, where, params, alias = 'r') {
+  if (isSuperadminTenant(req)) return where;
+  params.push(getTenantEmpresaId(req));
+  return `${where} AND ${alias}.empresa_id = ?`;
+}
+
+function repairTenantClause(req, alias = 'r') {
+  return isSuperadminTenant(req)
+    ? { sql: '', params: [] }
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
 // ── Columnas SELECT reutilizables ──────────────────────────────────────────
 const OT_SELECT = `
   r.id,
@@ -44,6 +64,7 @@ exports.getOrdenesTrabajo = async (req, res) => {
 
     // Base: solo estados activos
     let where = `WHERE r.estado NOT IN ('CANCELADA','ENTREGADA')`;
+    where = addRepairTenantFilter(req, where, params);
 
     // Restricción de rol: técnico solo ve sus propias reparaciones asignadas
     if (!userIsAdmin) {
@@ -110,6 +131,7 @@ exports.getHistorialOT = async (req, res) => {
     const params = [];
 
     let where = `WHERE r.estado IN ('CANCELADA','ENTREGADA')`;
+    where = addRepairTenantFilter(req, where, params);
 
     // Técnico solo ve su propio historial
     if (!userIsAdmin) {
@@ -164,14 +186,16 @@ exports.getHistorialOT = async (req, res) => {
 exports.getResumenOT = async (req, res) => {
   try {
     const userIsAdmin = isAdmin(req.user);
+    const tenant = repairTenantClause(req);
 
     if (userIsAdmin) {
       // Conteos por estado (solo activos)
       const [stateCounts] = await db.query(
         `SELECT estado, COUNT(*) AS total
          FROM reparaciones
-         WHERE estado NOT IN ('CANCELADA','ENTREGADA')
-         GROUP BY estado`
+         WHERE estado NOT IN ('CANCELADA','ENTREGADA')${tenant.sql.replace('r.', '')}
+         GROUP BY estado`,
+        tenant.params
       );
 
       // Conteo sin asignar
@@ -179,7 +203,8 @@ exports.getResumenOT = async (req, res) => {
         `SELECT COUNT(*) AS total
          FROM reparaciones
          WHERE tecnico_asignado_id IS NULL
-           AND estado NOT IN ('CANCELADA','ENTREGADA')`
+           AND estado NOT IN ('CANCELADA','ENTREGADA')${tenant.sql.replace('r.', '')}`,
+        tenant.params
       );
 
       // Carga por técnico
@@ -199,8 +224,10 @@ exports.getResumenOT = async (req, res) => {
          LEFT JOIN user_profiles pt ON pt.user_id = r.tecnico_asignado_id
          WHERE r.tecnico_asignado_id IS NOT NULL
            AND r.estado NOT IN ('CANCELADA','ENTREGADA')
+           ${tenant.sql}
          GROUP BY r.tecnico_asignado_id, pt.nombres, pt.apellidos, pt.foto_perfil, ut.username
-         ORDER BY total_activas DESC`
+         ORDER BY total_activas DESC`,
+        tenant.params
       );
 
       const porEstado = {};
@@ -235,8 +262,9 @@ exports.getResumenOT = async (req, res) => {
          FROM reparaciones
          WHERE tecnico_asignado_id = ?
            AND estado NOT IN ('CANCELADA','ENTREGADA')
+           ${tenant.sql.replace('r.', '')}
          GROUP BY estado`,
-        [userId]
+        [userId, ...tenant.params]
       );
 
       const [[vencidasRow]] = await db.query(
@@ -245,8 +273,9 @@ exports.getResumenOT = async (req, res) => {
          WHERE tecnico_asignado_id = ?
            AND estado NOT IN ('CANCELADA','ENTREGADA')
            AND fecha_entrega_programada IS NOT NULL
-           AND fecha_entrega_programada < NOW()`,
-        [userId]
+           AND fecha_entrega_programada < NOW()
+           ${tenant.sql.replace('r.', '')}`,
+        [userId, ...tenant.params]
       );
 
       const porEstado = {};
@@ -281,7 +310,8 @@ exports.asignarTecnico = async (req, res) => {
     }
 
     // Verificar que la reparación existe
-    const [[rep]] = await db.query('SELECT id FROM reparaciones WHERE id = ?', [id]);
+    const tenant = repairTenantClause(req);
+    const [[rep]] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`, [id, ...tenant.params]);
     if (!rep) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
     }
@@ -292,8 +322,8 @@ exports.asignarTecnico = async (req, res) => {
               CONCAT(COALESCE(p.nombres,''), ' ', COALESCE(p.apellidos,'')) AS nombre_completo
        FROM users u
        LEFT JOIN user_profiles p ON p.user_id = u.id
-       WHERE u.id = ? AND u.active = 1`,
-      [parseInt(tecnico_id, 10)]
+       WHERE u.id = ? AND u.active = 1${isSuperadminTenant(req) ? '' : ' AND u.empresa_id = ?'}`,
+      isSuperadminTenant(req) ? [parseInt(tecnico_id, 10)] : [parseInt(tecnico_id, 10), getTenantEmpresaId(req)]
     );
     if (!tecnico) {
       return res.status(404).json({ success: false, message: 'Técnico no encontrado o inactivo' });
@@ -306,8 +336,8 @@ exports.asignarTecnico = async (req, res) => {
              tecnico_asignado_id = ?,
              asignado_por = ?,
              asignado_en = NOW()
-       WHERE id = ?`,
-      [tecnico.name, parseInt(tecnico_id, 10), req.user.id, id]
+       WHERE id = ?${tenant.sql.replace('r.', '')}`,
+      [tecnico.name, parseInt(tecnico_id, 10), req.user.id, id, ...tenant.params]
     );
 
     // Devolver datos actualizados
@@ -324,8 +354,8 @@ exports.asignarTecnico = async (req, res) => {
        LEFT JOIN user_profiles pt ON pt.user_id = r.tecnico_asignado_id
        LEFT JOIN users ua ON ua.id = r.asignado_por
        LEFT JOIN user_profiles pa ON pa.user_id = r.asignado_por
-       WHERE r.id = ?`,
-      [id]
+       WHERE r.id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
 
     res.json({
@@ -349,7 +379,8 @@ exports.quitarAsignacion = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Solo administradores pueden quitar asignaciones' });
     }
 
-    const [[rep]] = await db.query('SELECT id FROM reparaciones WHERE id = ?', [id]);
+    const tenant = repairTenantClause(req);
+    const [[rep]] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`, [id, ...tenant.params]);
     if (!rep) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
     }
@@ -360,8 +391,8 @@ exports.quitarAsignacion = async (req, res) => {
              tecnico_asignado_id = NULL,
              asignado_por = NULL,
              asignado_en = NULL
-       WHERE id = ?`,
-      [id]
+       WHERE id = ?${tenant.sql.replace('r.', '')}`,
+      [id, ...tenant.params]
     );
 
     res.json({ success: true, message: 'Asignación eliminada correctamente' });
@@ -387,13 +418,13 @@ exports.getTecnicos = async (req, res) => {
        LEFT JOIN user_profiles p ON p.user_id = u.id
        INNER JOIN user_roles ur ON ur.user_id = u.id
        INNER JOIN roles r ON r.id = ur.role_id
-       WHERE u.active = 1
+        WHERE u.active = 1${isSuperadminTenant(req) ? '' : ' AND u.empresa_id = ?'}
        GROUP BY u.id, u.username, u.name, u.email, p.nombres, p.apellidos
        HAVING SUM(
            CASE WHEN LOWER(r.nombre) IN ('admin','administrador','tecnico','técnico') THEN 1 ELSE 0 END
          ) > 0
        ORDER BY nombre_completo, u.username`,
-      []
+      isSuperadminTenant(req) ? [] : [getTenantEmpresaId(req)]
     );
 
     const result = rows.map(u => ({
