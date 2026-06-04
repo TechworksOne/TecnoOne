@@ -1,8 +1,23 @@
 const db = require('../config/database');
 
+function addTenantCondition(req, conditions, params, alias = 'c') {
+  if (!req.tenant?.isSuperadmin) {
+    conditions.push(`${alias}.empresa_id = ?`);
+    params.push(req.tenant.empresa_id);
+  }
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? 1;
+}
+
 // Obtener todos los clientes
 const getAllCustomers = async (req, res) => {
   try {
+    const conditions = ['c.activo = true'];
+    const params = [];
+    addTenantCondition(req, conditions, params);
+
     const [customers] = await db.query(
       `SELECT 
         c.*,
@@ -34,8 +49,9 @@ const getAllCustomers = async (req, res) => {
          FROM cotizaciones
          GROUP BY cliente_id
        ) cot ON cot.cliente_id = c.id
-       WHERE c.activo = true
-       ORDER BY c.created_at DESC`
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY c.created_at DESC`,
+      params
     );
     res.json({
       success: true,
@@ -62,15 +78,22 @@ const searchCustomers = async (req, res) => {
       });
     }
 
+    const conditions = [
+      'c.activo = true',
+      '(c.nombre LIKE ? OR c.apellido LIKE ? OR c.email LIKE ? OR c.telefono LIKE ? OR c.nit LIKE ?)'
+    ];
+    const like = `%${query}%`;
+    const params = [like, like, like, like, like];
+    addTenantCondition(req, conditions, params);
+
     const [customers] = await db.query(
-      `SELECT *,
-        TRIM(CONCAT_WS(' ', NULLIF(TRIM(nombre), ''), NULLIF(TRIM(apellido), ''))) AS nombre_completo,
-        TRIM(CONCAT_WS(' ', NULLIF(TRIM(nombre), ''), NULLIF(TRIM(apellido), ''))) AS name
-       FROM clientes 
-       WHERE activo = true 
-       AND (nombre LIKE ? OR apellido LIKE ? OR email LIKE ? OR telefono LIKE ? OR nit LIKE ?)
-       ORDER BY nombre ASC`,
-      [`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`]
+      `SELECT c.*,
+        TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS nombre_completo,
+        TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS name
+       FROM clientes c
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY c.nombre ASC`,
+      params
     );
 
     res.json({
@@ -90,12 +113,16 @@ const searchCustomers = async (req, res) => {
 const getCustomerById = async (req, res) => {
   try {
     const { id } = req.params;
+    const conditions = ['c.id = ?', 'c.activo = true'];
+    const params = [id];
+    addTenantCondition(req, conditions, params);
+
     const [customers] = await db.query(
-      `SELECT *,
-        TRIM(CONCAT_WS(' ', NULLIF(TRIM(nombre), ''), NULLIF(TRIM(apellido), ''))) AS nombre_completo,
-        TRIM(CONCAT_WS(' ', NULLIF(TRIM(nombre), ''), NULLIF(TRIM(apellido), ''))) AS name
-       FROM clientes WHERE id = ? AND activo = true`,
-      [id]
+      `SELECT c.*,
+        TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS nombre_completo,
+        TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS name
+       FROM clientes c WHERE ${conditions.join(' AND ')}`,
+      params
     );
 
     if (customers.length === 0) {
@@ -122,7 +149,7 @@ const getCustomerById = async (req, res) => {
 const createCustomer = async (req, res) => {
   try {
     console.log('📥 Datos recibidos en backend:', req.body);
-    const { nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas } = req.body;
+    const { nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas, empresa_id } = req.body;
 
     console.log('📋 nombre extraído:', nombre, 'tipo:', typeof nombre);
 
@@ -135,11 +162,16 @@ const createCustomer = async (req, res) => {
       });
     }
 
+    const empresaId = req.tenant?.isSuperadmin
+      ? (empresa_id !== undefined && empresa_id !== '' ? empresa_id : getTenantEmpresaId(req))
+      : getTenantEmpresaId(req);
+
     // Insertar cliente
     const [result] = await db.query(
-      `INSERT INTO clientes (nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO clientes (empresa_id, nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        empresaId,
         nombre, 
         apellido || null, 
         telefono || null, 
@@ -177,7 +209,10 @@ const updateCustomer = async (req, res) => {
     const { nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas } = req.body;
 
     // Verificar que el cliente existe
-    const [customers] = await db.query('SELECT id FROM clientes WHERE id = ? AND activo = true', [id]);
+    const conditions = ['c.id = ?', 'c.activo = true'];
+    const params = [id];
+    addTenantCondition(req, conditions, params);
+    const [customers] = await db.query(`SELECT c.id FROM clientes c WHERE ${conditions.join(' AND ')}`, params);
     if (customers.length === 0) {
       return res.status(404).json({ 
         success: false,
@@ -186,11 +221,8 @@ const updateCustomer = async (req, res) => {
     }
 
     // Actualizar cliente
-    await db.query(
-      `UPDATE clientes 
-       SET nombre = ?, apellido = ?, telefono = ?, nit = ?, email = ?, direccion = ?, metodo_pago_preferido = ?, notas = ?
-       WHERE id = ?`,
-      [
+    const updateConditions = ['id = ?'];
+    const updateParams = [
         nombre, 
         apellido || null, 
         telefono || null, 
@@ -200,7 +232,17 @@ const updateCustomer = async (req, res) => {
         metodo_pago_preferido || 'efectivo',
         notas || null,
         id
-      ]
+      ];
+    if (!req.tenant?.isSuperadmin) {
+      updateConditions.push('empresa_id = ?');
+      updateParams.push(req.tenant.empresa_id);
+    }
+
+    await db.query(
+      `UPDATE clientes 
+       SET nombre = ?, apellido = ?, telefono = ?, nit = ?, email = ?, direccion = ?, metodo_pago_preferido = ?, notas = ?
+       WHERE ${updateConditions.join(' AND ')}`,
+      updateParams
     );
 
     res.json({ 
@@ -220,8 +262,14 @@ const updateCustomer = async (req, res) => {
 const deleteCustomer = async (req, res) => {
   try {
     const { id } = req.params;
+    const conditions = ['id = ?'];
+    const params = [id];
+    if (!req.tenant?.isSuperadmin) {
+      conditions.push('empresa_id = ?');
+      params.push(req.tenant.empresa_id);
+    }
 
-    const [result] = await db.query('UPDATE clientes SET activo = false WHERE id = ?', [id]);
+    const [result] = await db.query(`UPDATE clientes SET activo = false WHERE ${conditions.join(' AND ')}`, params);
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ 
@@ -247,6 +295,17 @@ const deleteCustomer = async (req, res) => {
 const getCustomerPurchases = async (req, res) => {
   try {
     const { id } = req.params;
+    const conditions = ['c.id = ?', 'c.activo = true'];
+    const params = [id];
+    addTenantCondition(req, conditions, params);
+
+    const [customers] = await db.query(`SELECT c.id FROM clientes c WHERE ${conditions.join(' AND ')}`, params);
+    if (customers.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cliente no encontrado'
+      });
+    }
     
     const [purchases] = await db.query(
       `SELECT 
