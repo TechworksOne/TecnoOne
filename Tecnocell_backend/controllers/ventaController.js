@@ -1,6 +1,20 @@
 const db = require('../config/database');
 const cajaController = require('./cajaController');
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
+function ventaTenantClause(req, alias = 'v') {
+  return isSuperadminTenant(req)
+    ? { sql: '', params: [] }
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
 // Valores permitidos para metodo_pago (deben coincidir con el ENUM de la DB)
 const VALID_METODOS_PAGO = [
   'EFECTIVO', 'TRANSFERENCIA',
@@ -42,6 +56,7 @@ exports.createVenta = async (req, res) => {
       metodo_pago, pagos, monto_pagado, observaciones, notas_internas,
       created_by, interes_tarjeta
     } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     // Validaciones básicas
     if (!cliente_id || !cliente_nombre) {
@@ -58,6 +73,17 @@ exports.createVenta = async (req, res) => {
 
     if (!metodo_pago) {
       return res.status(400).json({ error: 'El método de pago es requerido' });
+    }
+
+    if (cliente_id && !isSuperadminTenant(req)) {
+      const [clientes] = await db.query(
+        'SELECT id FROM clientes WHERE id = ? AND empresa_id = ? AND activo = true',
+        [cliente_id, empresaId]
+      );
+
+      if (clientes.length === 0) {
+        return res.status(404).json({ error: 'Cliente no encontrado' });
+      }
     }
 
     // Normalizar y validar metodo_pago
@@ -85,15 +111,16 @@ exports.createVenta = async (req, res) => {
 
     const query = `
       INSERT INTO ventas (
-        cliente_id, cliente_nombre, cliente_telefono, cliente_email,
+        empresa_id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
         cliente_nit, cliente_direccion, cotizacion_id, numero_cotizacion,
         tipo_venta, items, subtotal, impuestos, descuento, interes_tarjeta, total,
         metodo_pago, pagos, monto_pagado, observaciones, notas_internas,
         created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await db.query(query, [
+      empresaId,
       cliente_id, cliente_nombre, cliente_telefono || null, cliente_email || null,
       cliente_nit || null, cliente_direccion || null, cotizacion_id || null, numero_cotizacion || null,
       tipo_venta || 'PRODUCTOS', itemsJSON, subtotal || 0, impuestos || 0, descuento || 0, 
@@ -103,10 +130,10 @@ exports.createVenta = async (req, res) => {
     ]);
 
     // Descontar stock del inventario
-    await descontarStock(items);
+    await descontarStock(items, empresaId);
 
     // Obtener la venta recién creada
-    const [newVenta] = await db.query('SELECT * FROM ventas WHERE id = ?', [result.insertId]);
+    const [newVenta] = await db.query('SELECT * FROM ventas WHERE id = ? AND empresa_id = ?', [result.insertId, empresaId]);
     const venta = parseVentaJSON(newVenta[0]);
 
     // Registrar movimiento en caja chica o bancos
@@ -123,7 +150,8 @@ exports.createVenta = async (req, res) => {
               null, // connection
               pago.pos_seleccionado || null,
               pago.banco_id || null,
-              pago.referencia || null
+              pago.referencia || null,
+              empresaId
             );
           }
         } else {
@@ -132,7 +160,12 @@ exports.createVenta = async (req, res) => {
             result.insertId,
             metodo_pago,
             total,
-            created_by || 'Sistema'
+            created_by || 'Sistema',
+            null,
+            null,
+            null,
+            null,
+            empresaId
           );
         }
       } catch (error) {
@@ -167,6 +200,7 @@ exports.createVentaFromQuote = async (req, res) => {
   try {
     const { cotizacionId } = req.params;
     const { pagos, metodo_pago, observaciones, created_by } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     // Normalizar y validar metodo_pago
     const metodoPagoNorm = normalizeMetodoPago(metodo_pago);
@@ -198,6 +232,17 @@ exports.createVentaFromQuote = async (req, res) => {
     }
 
     const cotizacion = cotizaciones[0];
+
+    if (cotizacion.cliente_id && !isSuperadminTenant(req)) {
+      const [clientes] = await db.query(
+        'SELECT id FROM clientes WHERE id = ? AND empresa_id = ? AND activo = true',
+        [cotizacion.cliente_id, empresaId]
+      );
+
+      if (clientes.length === 0) {
+        return res.status(404).json({ error: 'Cliente no encontrado' });
+      }
+    }
 
     // Verificar que no esté ya convertida usando la columna convertida
     if (cotizacion.convertida === 1) {
@@ -235,14 +280,15 @@ exports.createVentaFromQuote = async (req, res) => {
 
     const query = `
       INSERT INTO ventas (
-        cliente_id, cliente_nombre, cliente_telefono, cliente_email,
+        empresa_id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
         cliente_nit, cliente_direccion, cotizacion_id, numero_cotizacion,
         tipo_venta, items, subtotal, impuestos, descuento, total,
         metodo_pago, pagos, monto_pagado, observaciones, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await db.query(query, [
+      empresaId,
       cotizacion.cliente_id,
       cotizacion.cliente_nombre,
       cotizacion.cliente_telefono,
@@ -265,10 +311,10 @@ exports.createVentaFromQuote = async (req, res) => {
     ]);
 
     // Descontar stock del inventario
-    await descontarStock(items);
+    await descontarStock(items, empresaId);
 
     // Obtener la venta recién creada
-    const [newVenta] = await db.query('SELECT * FROM ventas WHERE id = ?', [result.insertId]);
+    const [newVenta] = await db.query('SELECT * FROM ventas WHERE id = ? AND empresa_id = ?', [result.insertId, empresaId]);
     const venta = parseVentaJSON(newVenta[0]);
 
     // Registrar movimiento en caja chica o bancos
@@ -285,7 +331,8 @@ exports.createVentaFromQuote = async (req, res) => {
               null,
               pago.pos_seleccionado || null,
               pago.banco_id || null,
-              pago.referencia || null
+              pago.referencia || null,
+              empresaId
             );
           }
         } else {
@@ -294,7 +341,12 @@ exports.createVentaFromQuote = async (req, res) => {
             result.insertId,
             metodo_pago,
             totalCentavos,
-            created_by || 'Sistema'
+            created_by || 'Sistema',
+            null,
+            null,
+            null,
+            null,
+            empresaId
           );
         }
       } catch (error) {
@@ -335,7 +387,9 @@ exports.getAllVentas = async (req, res) => {
       FROM ventas v
       LEFT JOIN users u ON v.created_by = u.id
       WHERE 1=1`;
-    const params = [];
+    const tenant = ventaTenantClause(req, 'v');
+    const params = [...tenant.params];
+    query += tenant.sql;
 
     // Filtros
     if (estado) {
@@ -402,8 +456,12 @@ exports.getAllVentas = async (req, res) => {
 exports.getVentaById = async (req, res) => {
   try {
     const { id } = req.params;
+    const tenant = ventaTenantClause(req);
 
-    const [ventas] = await db.query('SELECT * FROM ventas WHERE id = ?', [id]);
+    const [ventas] = await db.query(
+      `SELECT * FROM ventas v WHERE v.id = ?${tenant.sql}`,
+      [id, ...tenant.params]
+    );
 
     if (ventas.length === 0) {
       return res.status(404).json({ error: 'Venta no encontrada' });
@@ -428,6 +486,8 @@ exports.registrarPago = async (req, res) => {
   try {
     const { id } = req.params;
     const { monto, metodo, referencia, comprobanteUrl, usuario_id } = req.body;
+    const tenant = ventaTenantClause(req);
+    const empresaId = getTenantEmpresaId(req);
 
     if (!monto || monto <= 0) {
       return res.status(400).json({ error: 'El monto debe ser mayor a 0' });
@@ -438,7 +498,10 @@ exports.registrarPago = async (req, res) => {
     }
 
     // Obtener venta actual
-    const [ventasRows] = await db.query('SELECT * FROM ventas WHERE id = ? AND estado != "ANULADA"', [id]);
+    const [ventasRows] = await db.query(
+      `SELECT * FROM ventas v WHERE v.id = ? AND v.estado != "ANULADA"${tenant.sql}`,
+      [id, ...tenant.params]
+    );
     if (ventasRows.length === 0) {
       return res.status(404).json({ error: 'Venta no encontrada o ya está anulada' });
     }
@@ -473,8 +536,8 @@ exports.registrarPago = async (req, res) => {
     const metodoFinal = pagosActuales.length > 1 ? 'MIXTO' : metodo;
 
     await db.query(
-      'UPDATE ventas SET pagos = ?, monto_pagado = ?, metodo_pago = ?, updated_by = ? WHERE id = ?',
-      [JSON.stringify(pagosActuales), nuevoMontoPagado, metodoFinal, usuario_id || null, id]
+      `UPDATE ventas SET pagos = ?, monto_pagado = ?, metodo_pago = ?, updated_by = ? WHERE id = ?${ventaTenantClause(req, 'ventas').sql}`,
+      [JSON.stringify(pagosActuales), nuevoMontoPagado, metodoFinal, usuario_id || null, id, ...ventaTenantClause(req, 'ventas').params]
     );
 
     // Registrar en caja/bancos
@@ -487,14 +550,18 @@ exports.registrarPago = async (req, res) => {
         null,
         null,
         null,
-        referencia || null
+        referencia || null,
+        empresaId
       );
     } catch (cajaErr) {
       console.error('Error al registrar en caja (no crítico):', cajaErr);
     }
 
     // Obtener venta actualizada
-    const [ventasUpdated] = await db.query('SELECT * FROM ventas WHERE id = ?', [id]);
+    const [ventasUpdated] = await db.query(
+      `SELECT * FROM ventas v WHERE v.id = ?${tenant.sql}`,
+      [id, ...tenant.params]
+    );
     const venta = parseVentaJSON(ventasUpdated[0]);
 
     res.json(venta);
@@ -517,6 +584,8 @@ exports.anularVenta = async (req, res) => {
   try {
     const { id } = req.params;
     const { motivo, usuario_id } = req.body;
+    const tenant = ventaTenantClause(req);
+    const empresaId = getTenantEmpresaId(req);
 
     if (!motivo) {
       return res.status(400).json({
@@ -529,8 +598,8 @@ exports.anularVenta = async (req, res) => {
 
     // Verificar que la venta existe y no está ya anulada
     const [ventasRows] = await connection.query(
-      'SELECT * FROM ventas WHERE id = ? LIMIT 1',
-      [id]
+      `SELECT * FROM ventas v WHERE v.id = ?${tenant.sql} LIMIT 1`,
+      [id, ...tenant.params]
     );
 
     if (ventasRows.length === 0) {
@@ -564,8 +633,8 @@ exports.anularVenta = async (req, res) => {
        SET estado = 'ANULADA',
            notas_internas = ?,
            updated_by = ?
-       WHERE id = ?`,
-      [nuevasNotas, usuario_id || null, id]
+       WHERE id = ?${ventaTenantClause(req, 'ventas').sql}`,
+      [nuevasNotas, usuario_id || null, id, ...ventaTenantClause(req, 'ventas').params]
     );
 
     // Revertir cotización si existía
@@ -600,13 +669,14 @@ exports.anularVenta = async (req, res) => {
     await cajaController.registrarReversaMovimientoVenta(
       ventaActual,
       usuarioNombre,
-      connection
+      connection,
+      empresaId
     );
 
     // Obtener venta actualizada
     const [ventasUpdated] = await connection.query(
-      'SELECT * FROM ventas WHERE id = ? LIMIT 1',
-      [id]
+      `SELECT * FROM ventas v WHERE v.id = ?${tenant.sql} LIMIT 1`,
+      [id, ...tenant.params]
     );
 
     await connection.commit();
@@ -641,7 +711,24 @@ exports.anularVenta = async (req, res) => {
  */
 exports.getEstadisticas = async (req, res) => {
   try {
-    const [stats] = await db.query('SELECT * FROM v_estadisticas_ventas');
+    const tenant = ventaTenantClause(req, 'v');
+    const [stats] = await db.query(
+      `SELECT
+        COUNT(*) as total_ventas,
+        SUM(CASE WHEN v.estado = 'PAGADA' THEN 1 ELSE 0 END) as ventas_pagadas,
+        SUM(CASE WHEN v.estado = 'PENDIENTE' THEN 1 ELSE 0 END) as ventas_pendientes,
+        SUM(CASE WHEN v.estado = 'PARCIAL' THEN 1 ELSE 0 END) as ventas_parciales,
+        SUM(CASE WHEN v.estado = 'ANULADA' THEN 1 ELSE 0 END) as ventas_anuladas,
+        COALESCE(SUM(CASE WHEN v.estado != 'ANULADA' THEN v.total ELSE 0 END), 0) as total_ingresos,
+        COALESCE(AVG(CASE WHEN v.estado != 'ANULADA' THEN v.total END), 0) as promedio_venta,
+        SUM(CASE WHEN DATE(v.fecha_venta) = CURDATE() THEN 1 ELSE 0 END) as ventas_hoy,
+        COALESCE(SUM(CASE WHEN DATE(v.fecha_venta) = CURDATE() AND v.estado != 'ANULADA' THEN v.total ELSE 0 END), 0) as ingresos_hoy,
+        SUM(CASE WHEN MONTH(v.fecha_venta) = MONTH(CURDATE()) AND YEAR(v.fecha_venta) = YEAR(CURDATE()) THEN 1 ELSE 0 END) as ventas_mes_actual,
+        COALESCE(SUM(CASE WHEN MONTH(v.fecha_venta) = MONTH(CURDATE()) AND YEAR(v.fecha_venta) = YEAR(CURDATE()) AND v.estado != 'ANULADA' THEN v.total ELSE 0 END), 0) as ingresos_mes_actual
+       FROM ventas v
+       WHERE 1=1${tenant.sql}`,
+      tenant.params
+    );
     res.json(stats[0] || {});
   } catch (error) {
     console.error('Error al obtener estadísticas:', error);
@@ -655,23 +742,59 @@ exports.getEstadisticas = async (req, res) => {
 /**
  * Helper: Descontar stock del inventario
  */
-async function descontarStock(items) {
+async function descontarStock(items, empresaId) {
   try {
     for (const item of items) {
-      if (item.source === 'PRODUCTO') {
+      const itemId = item.refId || item.ref_id || item.id;
+
+      if (!itemId) {
+        continue;
+      }
+
+      const source = String(item.source || item.tipo || '').toUpperCase();
+
+      if (source === 'PRODUCTO' || source === 'PRODUCTOS') {
         // Descontar de productos
-        await db.query(
-          'UPDATE productos SET stock = stock - ? WHERE id = ?',
-          [item.cantidad, item.refId || item.ref_id]
+        const [productos] = await db.query(
+          'SELECT id, stock FROM productos WHERE id = ? AND empresa_id = ?',
+          [itemId, empresaId]
         );
-        console.log(`Stock descontado: Producto ${item.refId}, cantidad: ${item.cantidad}`);
-      } else if (item.source === 'REPUESTO') {
+
+        if (productos.length === 0) {
+          throw new Error(`Producto ${itemId} no encontrado para esta empresa`);
+        }
+
+        const [result] = await db.query(
+          'UPDATE productos SET stock = stock - ? WHERE id = ? AND empresa_id = ?',
+          [item.cantidad, itemId, empresaId]
+        );
+
+        if (result.affectedRows === 0) {
+          throw new Error(`Producto ${itemId} no encontrado para esta empresa`);
+        }
+
+        console.log(`Stock descontado: Producto ${itemId}, cantidad: ${item.cantidad}`);
+      } else if (source === 'REPUESTO' || source === 'REPUESTOS') {
         // Descontar de repuestos
-        await db.query(
-          'UPDATE repuestos SET stock_actual = stock_actual - ? WHERE id = ?',
-          [item.cantidad, item.refId || item.ref_id]
+        const [repuestos] = await db.query(
+          'SELECT id, stock FROM repuestos WHERE id = ? AND empresa_id = ?',
+          [itemId, empresaId]
         );
-        console.log(`Stock descontado: Repuesto ${item.refId}, cantidad: ${item.cantidad}`);
+
+        if (repuestos.length === 0) {
+          throw new Error(`Repuesto ${itemId} no encontrado para esta empresa`);
+        }
+
+        const [result] = await db.query(
+          'UPDATE repuestos SET stock = stock - ? WHERE id = ? AND empresa_id = ?',
+          [item.cantidad, itemId, empresaId]
+        );
+
+        if (result.affectedRows === 0) {
+          throw new Error(`Repuesto ${itemId} no encontrado para esta empresa`);
+        }
+
+        console.log(`Stock descontado: Repuesto ${itemId}, cantidad: ${item.cantidad}`);
       }
     }
   } catch (error) {
