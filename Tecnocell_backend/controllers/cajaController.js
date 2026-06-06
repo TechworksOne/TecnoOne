@@ -1,20 +1,53 @@
 const db = require('../config/database');
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
+function financialTenantClause(req, alias = null) {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+  const prefix = alias ? `${alias}.` : '';
+  return { sql: ` AND ${prefix}empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
+function resolveFinancialEmpresaId(options = {}) {
+  const { req, empresaId, fallbackEmpresaId = 1 } = options;
+
+  if (empresaId !== undefined && empresaId !== null && empresaId !== '') {
+    return empresaId;
+  }
+
+  if (req) {
+    return getTenantEmpresaId(req);
+  }
+
+  // Temporal hasta Sprint 1.7.2: ventas todavia no tiene empresa_id.
+  return fallbackEmpresaId;
+}
+
 // ========== CAJA CHICA ==========
 
 // Obtener saldo actual de caja chica
 exports.getSaldoCajaChica = async (req, res) => {
   try {
+    const tenant = financialTenantClause(req);
     const [ingresos] = await db.query(
-      "SELECT COALESCE(SUM(monto), 0) as total FROM caja_chica WHERE tipo_movimiento = 'INGRESO' AND estado = 'CONFIRMADO'"
+      `SELECT COALESCE(SUM(monto), 0) as total FROM caja_chica WHERE tipo_movimiento = 'INGRESO' AND estado = 'CONFIRMADO'${tenant.sql}`,
+      tenant.params
     );
     const [egresos] = await db.query(
-      "SELECT COALESCE(SUM(monto), 0) as total FROM caja_chica WHERE tipo_movimiento = 'EGRESO' AND estado = 'CONFIRMADO'"
+      `SELECT COALESCE(SUM(monto), 0) as total FROM caja_chica WHERE tipo_movimiento = 'EGRESO' AND estado = 'CONFIRMADO'${tenant.sql}`,
+      tenant.params
     );
     
     // Obtener pendientes
     const [pendientes] = await db.query(
-      "SELECT COALESCE(SUM(monto), 0) as total FROM caja_chica WHERE estado = 'PENDIENTE'"
+      `SELECT COALESCE(SUM(monto), 0) as total FROM caja_chica WHERE estado = 'PENDIENTE'${tenant.sql}`,
+      tenant.params
     );
     
     const saldo = ingresos[0].total - egresos[0].total;
@@ -38,13 +71,15 @@ exports.getSaldoCajaChica = async (req, res) => {
 exports.getMovimientosCajaChica = async (req, res) => {
   try {
     const { fecha_inicio, fecha_fin, tipo, estado } = req.query;
+    const tenant = financialTenantClause(req, 'cc');
     
     let query = `
       SELECT cc.*, u.name AS confirmado_por_nombre
       FROM caja_chica cc
       LEFT JOIN users u ON u.id = cc.confirmado_por
       WHERE 1=1`;
-    const params = [];
+    const params = [...tenant.params];
+    query += tenant.sql;
     
     if (fecha_inicio) {
       query += ' AND cc.fecha_movimiento >= ?';
@@ -78,11 +113,12 @@ exports.getMovimientosCajaChica = async (req, res) => {
 exports.registrarMovimientoCajaChica = async (req, res) => {
   try {
     const { tipo_movimiento, monto, concepto, categoria, observaciones, realizado_por } = req.body;
+    const empresaId = getTenantEmpresaId(req);
     
     const [result] = await db.query(
-      `INSERT INTO caja_chica (tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, ?, ?, ?, 'CONFIRMADO', ?, ?)`,
-      [tipo_movimiento, monto, concepto, categoria || 'Otro', realizado_por, observaciones]
+      `INSERT INTO caja_chica (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+       VALUES (?, ?, ?, ?, ?, 'CONFIRMADO', ?, ?)`,
+      [empresaId, tipo_movimiento, monto, concepto, categoria || 'Otro', realizado_por, observaciones]
     );
     
     res.status(201).json({
@@ -101,8 +137,10 @@ exports.registrarMovimientoCajaChica = async (req, res) => {
 // Obtener todas las cuentas bancarias
 exports.getCuentasBancarias = async (req, res) => {
   try {
+    const tenant = financialTenantClause(req);
     const [cuentas] = await db.query(
-      'SELECT * FROM cuentas_bancarias WHERE activa = TRUE ORDER BY nombre'
+      `SELECT * FROM cuentas_bancarias WHERE activa = TRUE${tenant.sql} ORDER BY nombre`,
+      tenant.params
     );
     const isAdmin = req.user?.role === 'admin' || (Array.isArray(req.user?.roles) && req.user.roles.includes('ADMINISTRADOR'));
     const data = isAdmin
@@ -119,26 +157,34 @@ exports.getCuentasBancarias = async (req, res) => {
 exports.getSaldoCuentaBancaria = async (req, res) => {
   try {
     const { id } = req.params;
+    const cuentaTenant = financialTenantClause(req);
     
-    const [cuenta] = await db.query('SELECT * FROM cuentas_bancarias WHERE id = ?', [id]);
+    const [cuenta] = await db.query(
+      `SELECT * FROM cuentas_bancarias WHERE id = ?${cuentaTenant.sql}`,
+      [id, ...cuentaTenant.params]
+    );
     
     if (cuenta.length === 0) {
       return res.status(404).json({ success: false, message: 'Cuenta no encontrada' });
     }
     
+    const movTenant = financialTenantClause(req);
     const [ingresos] = await db.query(
-      "SELECT COALESCE(SUM(monto), 0) as total FROM movimientos_bancarios WHERE cuenta_id = ? AND tipo_movimiento = 'INGRESO' AND estado = 'CONFIRMADO'",
-      [id]
+      `SELECT COALESCE(SUM(monto), 0) as total FROM movimientos_bancarios WHERE cuenta_id = ? AND tipo_movimiento = 'INGRESO' AND estado = 'CONFIRMADO'${movTenant.sql}`,
+      [id, ...movTenant.params]
     );
     const [egresos] = await db.query(
-      "SELECT COALESCE(SUM(monto), 0) as total FROM movimientos_bancarios WHERE cuenta_id = ? AND tipo_movimiento = 'EGRESO' AND estado = 'CONFIRMADO'",
-      [id]
+      `SELECT COALESCE(SUM(monto), 0) as total FROM movimientos_bancarios WHERE cuenta_id = ? AND tipo_movimiento = 'EGRESO' AND estado = 'CONFIRMADO'${movTenant.sql}`,
+      [id, ...movTenant.params]
     );
     
     const saldo = ingresos[0].total - egresos[0].total;
     
     // Actualizar saldo en la tabla
-    await db.query('UPDATE cuentas_bancarias SET saldo_actual = ? WHERE id = ?', [saldo, id]);
+    await db.query(
+      `UPDATE cuentas_bancarias SET saldo_actual = ? WHERE id = ?${cuentaTenant.sql}`,
+      [saldo, id, ...cuentaTenant.params]
+    );
     
     res.json({
       success: true,
@@ -159,7 +205,18 @@ exports.getSaldoCuentaBancaria = async (req, res) => {
 exports.getMovimientosPorCuenta = async (req, res) => {
   try {
     const { id } = req.params;
+    const tenant = financialTenantClause(req, 'mb');
+    const cuentaTenant = financialTenantClause(req);
     console.log('[HistorialCuenta] cuenta_id:', id);
+
+    const [cuentas] = await db.query(
+      `SELECT id FROM cuentas_bancarias WHERE id = ?${cuentaTenant.sql}`,
+      [id, ...cuentaTenant.params]
+    );
+
+    if (cuentas.length === 0) {
+      return res.status(404).json({ success: false, message: 'Cuenta no encontrada' });
+    }
 
     const [rows] = await db.query(
       `SELECT
@@ -181,10 +238,10 @@ exports.getMovimientosPorCuenta = async (req, res) => {
          mb.referencia_id,
          mb.fecha_movimiento
        FROM movimientos_bancarios mb
-       LEFT JOIN cuentas_bancarias cb ON cb.id = mb.cuenta_id
-       WHERE mb.cuenta_id = ?
+       LEFT JOIN cuentas_bancarias cb ON cb.id = mb.cuenta_id AND cb.empresa_id = mb.empresa_id
+       WHERE mb.cuenta_id = ?${tenant.sql}
        ORDER BY mb.fecha_movimiento DESC, mb.id DESC`,
-      [id]
+      [id, ...tenant.params]
     );
 
     console.log('[HistorialCuenta] movimientos encontrados:', rows.length);
@@ -199,17 +256,29 @@ exports.getMovimientosPorCuenta = async (req, res) => {
 exports.getMovimientosBancarios = async (req, res) => {
   try {
     const { cuenta_id, fecha_inicio, fecha_fin, tipo } = req.query;
+    const tenant = financialTenantClause(req, 'mb');
+    const cuentaTenant = financialTenantClause(req);
     
     let query = `
       SELECT mb.*, cb.nombre AS cuenta_nombre, u.name AS confirmado_por_nombre
       FROM movimientos_bancarios mb
-      JOIN cuentas_bancarias cb ON mb.cuenta_id = cb.id
+      JOIN cuentas_bancarias cb ON mb.cuenta_id = cb.id AND cb.empresa_id = mb.empresa_id
       LEFT JOIN users u ON u.id = mb.confirmado_por
       WHERE 1=1
     `;
-    const params = [];
+    const params = [...tenant.params];
+    query += tenant.sql;
     
     if (cuenta_id) {
+      const [cuentas] = await db.query(
+        `SELECT id FROM cuentas_bancarias WHERE id = ?${cuentaTenant.sql}`,
+        [cuenta_id, ...cuentaTenant.params]
+      );
+
+      if (cuentas.length === 0) {
+        return res.status(404).json({ success: false, message: 'Cuenta no encontrada' });
+      }
+
       query += ' AND mb.cuenta_id = ?';
       params.push(cuenta_id);
     }
@@ -250,19 +319,29 @@ exports.registrarMovimientoBancario = async (req, res) => {
       observaciones,
       realizado_por
     } = req.body;
+    const empresaId = getTenantEmpresaId(req);
+
+    const [cuentas] = await db.query(
+      'SELECT id FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+      [cuenta_id, empresaId]
+    );
+
+    if (cuentas.length === 0) {
+      return res.status(404).json({ success: false, message: 'Cuenta bancaria no encontrada o inactiva' });
+    }
     
     const [result] = await db.query(
       `INSERT INTO movimientos_bancarios 
-       (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, numero_referencia, realizado_por, observaciones)
-       VALUES (?, ?, ?, ?, ?, 'CONFIRMADO', ?, ?, ?)`,
-      [cuenta_id, tipo_movimiento, monto, concepto, categoria || 'Otro', numero_referencia, realizado_por, observaciones]
+       (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, numero_referencia, realizado_por, observaciones)
+       VALUES (?, ?, ?, ?, ?, ?, 'CONFIRMADO', ?, ?, ?)`,
+      [empresaId, cuenta_id, tipo_movimiento, monto, concepto, categoria || 'Otro', numero_referencia, realizado_por, observaciones]
     );
     
     // Actualizar saldo de la cuenta (movimientos manuales se confirman automáticamente)
     const operacion = tipo_movimiento === 'INGRESO' ? '+' : '-';
     await db.query(
-      `UPDATE cuentas_bancarias SET saldo_actual = saldo_actual ${operacion} ? WHERE id = ?`,
-      [monto, cuenta_id]
+      `UPDATE cuentas_bancarias SET saldo_actual = saldo_actual ${operacion} ? WHERE id = ? AND empresa_id = ?`,
+      [monto, cuenta_id, empresaId]
     );
     
     res.status(201).json({
@@ -282,8 +361,12 @@ exports.registrarMovimientoBancario = async (req, res) => {
 exports.confirmarMovimientoCajaChica = async (req, res) => {
   try {
     const { id } = req.params;
+    const tenant = financialTenantClause(req);
 
-    const [[mov]] = await db.query('SELECT * FROM caja_chica WHERE id = ?', [id]);
+    const [[mov]] = await db.query(
+      `SELECT * FROM caja_chica WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
+    );
     if (!mov) {
       return res.status(404).json({ success: false, message: 'Movimiento no encontrado' });
     }
@@ -318,10 +401,11 @@ exports.confirmarMovimientoCajaChica = async (req, res) => {
     }
 
     await db.query(
-      "UPDATE caja_chica SET estado = 'CONFIRMADO', confirmado_en = NOW(), confirmado_por = ? WHERE id = ?",
+      `UPDATE caja_chica SET estado = 'CONFIRMADO', confirmado_en = NOW(), confirmado_por = ? WHERE id = ?${tenant.sql}`,
       [
         req.user?.id ?? req.user?.userId ?? req.user?.usuario_id ?? null,
-        id
+        id,
+        ...tenant.params
       ]
     );
     res.json({ success: true, message: 'Movimiento confirmado exitosamente' });
@@ -335,11 +419,12 @@ exports.confirmarMovimientoCajaChica = async (req, res) => {
 exports.confirmarMovimientoBancario = async (req, res) => {
   try {
     const { id } = req.params;
+    const tenant = financialTenantClause(req);
     
     // Obtener detalles del movimiento
     const [movimiento] = await db.query(
-      'SELECT * FROM movimientos_bancarios WHERE id = ?',
-      [id]
+      `SELECT * FROM movimientos_bancarios WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
     
     if (movimiento.length === 0) {
@@ -379,18 +464,19 @@ exports.confirmarMovimientoBancario = async (req, res) => {
 
     // Actualizar estado a CONFIRMADO con trazabilidad
     await db.query(
-      "UPDATE movimientos_bancarios SET estado = 'CONFIRMADO', confirmado_en = NOW(), confirmado_por = ? WHERE id = ?",
+      `UPDATE movimientos_bancarios SET estado = 'CONFIRMADO', confirmado_en = NOW(), confirmado_por = ? WHERE id = ?${tenant.sql}`,
       [
         req.user?.id ?? req.user?.userId ?? req.user?.usuario_id ?? null,
-        id
+        id,
+        ...tenant.params
       ]
     );
     
     // Actualizar saldo de la cuenta bancaria
     const operacion = mov.tipo_movimiento === 'INGRESO' ? '+' : '-';
     await db.query(
-      `UPDATE cuentas_bancarias SET saldo_actual = saldo_actual ${operacion} ? WHERE id = ?`,
-      [mov.monto, mov.cuenta_id]
+      `UPDATE cuentas_bancarias SET saldo_actual = saldo_actual ${operacion} ? WHERE id = ?${tenant.sql}`,
+      [mov.monto, mov.cuenta_id, ...tenant.params]
     );
     
     res.json({ 
@@ -413,11 +499,13 @@ exports.registrarMovimientoVenta = async (
   connection = null,
   posSeleccionado = null,
   bancoId = null,
-  referencia = null
+  referencia = null,
+  empresaId = null
 ) => {
   const dbConn = connection || db;
 
   try {
+    const empresaIdFinanciera = resolveFinancialEmpresaId({ empresaId });
     const metodo = String(metodoPago || '').toUpperCase();
     const montoQuetzales = Number(monto || 0) / 100;
 
@@ -461,7 +549,8 @@ exports.registrarMovimientoVenta = async (
 
     const buscarPrimeraCuentaActiva = async () => {
       const [cuentas] = await dbConn.query(
-        'SELECT id, nombre FROM cuentas_bancarias WHERE activa = TRUE ORDER BY id LIMIT 1'
+        'SELECT id, nombre FROM cuentas_bancarias WHERE empresa_id = ? AND activa = TRUE ORDER BY id LIMIT 1',
+        [empresaIdFinanciera]
       );
 
       return cuentas.length > 0 ? cuentas[0] : null;
@@ -491,10 +580,11 @@ exports.registrarMovimientoVenta = async (
           `SELECT id, nombre 
            FROM cuentas_bancarias 
            WHERE (${condiciones}) 
+           AND empresa_id = ?
            AND activa = TRUE 
            ORDER BY id 
            LIMIT 1`,
-          params
+          [...params, empresaIdFinanciera]
         );
 
         return cuentas.length > 0 ? cuentas[0] : null;
@@ -515,10 +605,11 @@ exports.registrarMovimientoVenta = async (
             `SELECT id, nombre 
              FROM cuentas_bancarias 
              WHERE (${condiciones}) 
+             AND empresa_id = ?
              AND activa = TRUE 
              ORDER BY id 
              LIMIT 1`,
-            patrones
+            [...patrones, empresaIdFinanciera]
           );
 
           return cuentas.length > 0 ? cuentas[0] : null;
@@ -536,8 +627,8 @@ exports.registrarMovimientoVenta = async (
       // Anti-duplicado: verificar si ya existe un movimiento activo para esta venta/cuenta/categoría
       if (ventaIdNumerico !== null) {
         const [dup] = await dbConn.query(
-          `SELECT id FROM movimientos_bancarios WHERE venta_id = ? AND cuenta_id = ? AND tipo_movimiento = 'INGRESO' AND categoria = ? AND estado IN ('PENDIENTE', 'CONFIRMADO') LIMIT 1`,
-          [ventaIdNumerico, cuenta.id, categoria]
+          `SELECT id FROM movimientos_bancarios WHERE empresa_id = ? AND venta_id = ? AND cuenta_id = ? AND tipo_movimiento = 'INGRESO' AND categoria = ? AND estado IN ('PENDIENTE', 'CONFIRMADO') LIMIT 1`,
+          [empresaIdFinanciera, ventaIdNumerico, cuenta.id, categoria]
         );
         if (dup.length > 0) {
           console.warn(`⚠️ Movimiento duplicado detectado en movimientos_bancarios para venta_id=${ventaIdNumerico}, cuenta_id=${cuenta.id}, categoria=${categoria}. Se omite inserción.`);
@@ -547,9 +638,10 @@ exports.registrarMovimientoVenta = async (
 
       await dbConn.query(
         `INSERT INTO movimientos_bancarios 
-        (cuenta_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, numero_referencia, realizado_por)
-        VALUES (?, 'INGRESO', ?, ?, ?, ?, 'PENDIENTE', ?, ?)`,
+        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, numero_referencia, realizado_por)
+        VALUES (?, ?, 'INGRESO', ?, ?, ?, ?, 'PENDIENTE', ?, ?)`,
         [
+          empresaIdFinanciera,
           cuenta.id,
           montoQuetzales,
           concepto,
@@ -571,8 +663,8 @@ exports.registrarMovimientoVenta = async (
       // Anti-duplicado: verificar si ya existe movimiento de ingreso por venta en caja_chica
       if (ventaIdNumerico !== null) {
         const [dup] = await dbConn.query(
-          `SELECT id FROM caja_chica WHERE venta_id = ? AND tipo_movimiento = 'INGRESO' AND categoria = 'Venta' AND estado IN ('PENDIENTE', 'CONFIRMADO') LIMIT 1`,
-          [ventaIdNumerico]
+          `SELECT id FROM caja_chica WHERE empresa_id = ? AND venta_id = ? AND tipo_movimiento = 'INGRESO' AND categoria = 'Venta' AND estado IN ('PENDIENTE', 'CONFIRMADO') LIMIT 1`,
+          [empresaIdFinanciera, ventaIdNumerico]
         );
         if (dup.length > 0) {
           console.warn(`⚠️ Movimiento duplicado detectado en caja_chica para venta_id=${ventaIdNumerico}. Se omite inserción.`);
@@ -582,9 +674,9 @@ exports.registrarMovimientoVenta = async (
 
       await dbConn.query(
         `INSERT INTO caja_chica 
-         (tipo_movimiento, monto, concepto, venta_id, categoria, estado, realizado_por)
-         VALUES ('INGRESO', ?, ?, ?, 'Venta', 'PENDIENTE', ?)`,
-        [montoQuetzales, concepto, ventaIdNumerico, usuarioNombre]
+         (empresa_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, realizado_por)
+         VALUES (?, 'INGRESO', ?, ?, ?, 'Venta', 'PENDIENTE', ?)`,
+        [empresaIdFinanciera, montoQuetzales, concepto, ventaIdNumerico, usuarioNombre]
       );
 
       console.log(
@@ -658,8 +750,8 @@ exports.registrarMovimientoVenta = async (
 
       if (bancoId) {
         const [cuentas] = await dbConn.query(
-          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-          [bancoId]
+          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+          [bancoId, empresaIdFinanciera]
         );
 
         cuenta = cuentas.length > 0 ? cuentas[0] : null;
@@ -713,18 +805,21 @@ exports.registrarMovimientoReparacion = async (
   usuarioNombre,
   connection = null,
   bancoId = null,
-  referencia = null
+  referencia = null,
+  empresaId = null
 ) => {
   const dbConn = connection || db;
 
   try {
+    const empresaIdFinanciera = resolveFinancialEmpresaId({ empresaId });
     const metodo = String(metodoPago || '').toUpperCase();
     const montoQuetzales = Number(monto || 0) / 100;
     const concepto = `Pago final reparación ${reparacionId}${clienteNombre ? ` - ${clienteNombre}` : ''}`;
 
     const buscarPrimeraCuentaActiva = async () => {
       const [cuentas] = await dbConn.query(
-        'SELECT id, nombre FROM cuentas_bancarias WHERE activa = TRUE ORDER BY id LIMIT 1'
+        'SELECT id, nombre FROM cuentas_bancarias WHERE empresa_id = ? AND activa = TRUE ORDER BY id LIMIT 1',
+        [empresaIdFinanciera]
       );
       return cuentas.length > 0 ? cuentas[0] : null;
     };
@@ -738,16 +833,16 @@ exports.registrarMovimientoReparacion = async (
         const condiciones = patrones.map(() => '(nombre LIKE ? OR pos_asociado LIKE ?)').join(' OR ');
         const params = patrones.flatMap(p => [p, p]);
         const [rows] = await dbConn.query(
-          `SELECT id, nombre FROM cuentas_bancarias WHERE (${condiciones}) AND activa = TRUE ORDER BY id LIMIT 1`,
-          params
+          `SELECT id, nombre FROM cuentas_bancarias WHERE (${condiciones}) AND empresa_id = ? AND activa = TRUE ORDER BY id LIMIT 1`,
+          [...params, empresaIdFinanciera]
         );
         return rows.length > 0 ? rows[0] : null;
       } catch (err) {
         if (err.code === 'ER_BAD_FIELD_ERROR' || String(err.message).includes('pos_asociado')) {
           const conds = patrones.map(() => 'nombre LIKE ?').join(' OR ');
           const [rows] = await dbConn.query(
-            `SELECT id, nombre FROM cuentas_bancarias WHERE (${conds}) AND activa = TRUE ORDER BY id LIMIT 1`,
-            patrones
+            `SELECT id, nombre FROM cuentas_bancarias WHERE (${conds}) AND empresa_id = ? AND activa = TRUE ORDER BY id LIMIT 1`,
+            [...patrones, empresaIdFinanciera]
           );
           return rows.length > 0 ? rows[0] : null;
         }
@@ -761,9 +856,9 @@ exports.registrarMovimientoReparacion = async (
       // Anti-duplicado: verificar si ya existe movimiento para esta reparación/cuenta
       const [dup] = await dbConn.query(
         `SELECT id FROM movimientos_bancarios
-         WHERE referencia_tipo = 'reparacion' AND referencia_id = ? AND cuenta_id = ?
+         WHERE empresa_id = ? AND referencia_tipo = 'reparacion' AND referencia_id = ? AND cuenta_id = ?
            AND tipo_movimiento = 'INGRESO' AND estado IN ('PENDIENTE','CONFIRMADO') LIMIT 1`,
-        [reparacionId, cuenta.id]
+        [empresaIdFinanciera, reparacionId, cuenta.id]
       );
       if (dup.length > 0) {
         console.warn(`⚠️ Movimiento duplicado para reparacion_id=${reparacionId}, cuenta_id=${cuenta.id}. Se omite.`);
@@ -772,10 +867,10 @@ exports.registrarMovimientoReparacion = async (
 
       await dbConn.query(
         `INSERT INTO movimientos_bancarios
-         (cuenta_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado,
+         (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado,
           numero_referencia, realizado_por, referencia_tipo, referencia_id)
-         VALUES (?, 'INGRESO', ?, ?, NULL, ?, 'PENDIENTE', ?, ?, 'reparacion', ?)`,
-        [cuenta.id, montoQuetzales, concepto, categoria, referencia, usuarioNombre, reparacionId]
+         VALUES (?, ?, 'INGRESO', ?, ?, NULL, ?, 'PENDIENTE', ?, ?, 'reparacion', ?)`,
+        [empresaIdFinanciera, cuenta.id, montoQuetzales, concepto, categoria, referencia, usuarioNombre, reparacionId]
       );
       console.log(`✅ Movimiento banco registrado (${cuenta.nombre}, id=${cuenta.id}): Q${montoQuetzales} — ${concepto}`);
       return true;
@@ -785,9 +880,9 @@ exports.registrarMovimientoReparacion = async (
       // Anti-duplicado
       const [dup] = await dbConn.query(
         `SELECT id FROM caja_chica
-         WHERE referencia_tipo = 'reparacion' AND referencia_id = ?
+         WHERE empresa_id = ? AND referencia_tipo = 'reparacion' AND referencia_id = ?
            AND tipo_movimiento = 'INGRESO' AND estado IN ('PENDIENTE','CONFIRMADO') LIMIT 1`,
-        [reparacionId]
+        [empresaIdFinanciera, reparacionId]
       );
       if (dup.length > 0) {
         console.warn(`⚠️ Movimiento duplicado caja_chica para reparacion_id=${reparacionId}. Se omite.`);
@@ -795,9 +890,9 @@ exports.registrarMovimientoReparacion = async (
       }
       await dbConn.query(
         `INSERT INTO caja_chica
-         (tipo_movimiento, monto, concepto, venta_id, categoria, estado, realizado_por, referencia_tipo, referencia_id)
-         VALUES ('INGRESO', ?, ?, NULL, 'Reparación', 'PENDIENTE', ?, 'reparacion', ?)`,
-        [montoQuetzales, concepto, usuarioNombre, reparacionId]
+         (empresa_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, realizado_por, referencia_tipo, referencia_id)
+         VALUES (?, 'INGRESO', ?, ?, NULL, 'Reparación', 'PENDIENTE', ?, 'reparacion', ?)`,
+        [empresaIdFinanciera, montoQuetzales, concepto, usuarioNombre, reparacionId]
       );
       console.log(`✅ Movimiento caja_chica registrado: Q${montoQuetzales} — ${concepto}`);
 
@@ -805,8 +900,8 @@ exports.registrarMovimientoReparacion = async (
       let cuenta = null;
       if (bancoId) {
         const [rows] = await dbConn.query(
-          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-          [bancoId]
+          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+          [bancoId, empresaIdFinanciera]
         );
         cuenta = rows.length > 0 ? rows[0] : null;
       }
@@ -836,8 +931,8 @@ exports.registrarMovimientoReparacion = async (
       let cuenta = null;
       if (bancoId) {
         const [rows] = await dbConn.query(
-          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-          [bancoId]
+          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+          [bancoId, empresaIdFinanciera]
         );
         cuenta = rows.length > 0 ? rows[0] : null;
       }
@@ -863,11 +958,13 @@ exports.registrarMovimientoReparacion = async (
 exports.registrarReversaMovimientoVenta = async (
   venta,
   usuarioNombre = 'Sistema',
-  connection = null
+  connection = null,
+  empresaId = null
 ) => {
   const dbConn = connection || db;
 
   try {
+    const empresaIdFinanciera = resolveFinancialEmpresaId({ empresaId });
     if (!venta) {
       console.warn('⚠️ No se recibió información de venta para reversar movimiento financiero.');
       return { success: false, message: 'Venta no proporcionada' };
@@ -902,12 +999,13 @@ exports.registrarReversaMovimientoVenta = async (
     // Anti-duplicado: no crear reversa si ya existe
     const [reversaCajaExistente] = await dbConn.query(
       `SELECT id FROM caja_chica
-       WHERE venta_id = ?
+       WHERE empresa_id = ?
+         AND venta_id = ?
          AND tipo_movimiento = 'EGRESO'
          AND categoria = 'Anulacion Venta'
          AND estado IN ('PENDIENTE', 'CONFIRMADO')
        LIMIT 1`,
-      [ventaIdNumerico]
+      [empresaIdFinanciera, ventaIdNumerico]
     );
 
     let reversasCajaCreadas = 0;
@@ -920,31 +1018,33 @@ exports.registrarReversaMovimientoVenta = async (
         `UPDATE caja_chica
          SET estado = 'ANULADO',
              observaciones = CONCAT(COALESCE(observaciones, ''), ' | ANULADO AUTOMATICAMENTE POR CANCELACION DE VENTA')
-         WHERE venta_id = ?
+         WHERE empresa_id = ?
+           AND venta_id = ?
            AND tipo_movimiento = 'INGRESO'
            AND categoria = 'Venta'
            AND estado = 'PENDIENTE'`,
-        [ventaIdNumerico]
+        [empresaIdFinanciera, ventaIdNumerico]
       );
 
       // B. Buscar ingresos CONFIRMADOS para reversar
       const [ingresosConfirmadosCaja] = await dbConn.query(
         `SELECT * FROM caja_chica
-         WHERE venta_id = ?
+         WHERE empresa_id = ?
+           AND venta_id = ?
            AND tipo_movimiento = 'INGRESO'
            AND categoria = 'Venta'
            AND estado = 'CONFIRMADO'
          ORDER BY id ASC`,
-        [ventaIdNumerico]
+        [empresaIdFinanciera, ventaIdNumerico]
       );
 
       // C. Crear una reversa CONFIRMADA por cada ingreso confirmado
       for (const movimiento of ingresosConfirmadosCaja) {
         await dbConn.query(
           `INSERT INTO caja_chica
-           (tipo_movimiento, monto, concepto, venta_id, categoria, estado, realizado_por)
-           VALUES ('EGRESO', ?, ?, ?, 'Anulacion Venta', 'CONFIRMADO', ?)`,
-          [movimiento.monto, conceptoReversa, ventaIdNumerico, usuarioNombre]
+           (empresa_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, realizado_por)
+           VALUES (?, 'EGRESO', ?, ?, ?, 'Anulacion Venta', 'CONFIRMADO', ?)`,
+          [empresaIdFinanciera, movimiento.monto, conceptoReversa, ventaIdNumerico, usuarioNombre]
         );
         reversasCajaCreadas++;
         console.log(`✅ Reversa de caja registrada: Q${movimiento.monto} - ${conceptoReversa}`);
@@ -956,12 +1056,13 @@ exports.registrarReversaMovimientoVenta = async (
     // Anti-duplicado: no crear reversa si ya existe
     const [reversaBancoExistente] = await dbConn.query(
       `SELECT id FROM movimientos_bancarios
-       WHERE venta_id = ?
+       WHERE empresa_id = ?
+         AND venta_id = ?
          AND tipo_movimiento = 'EGRESO'
          AND categoria = 'Anulacion Venta'
          AND estado IN ('PENDIENTE', 'CONFIRMADO')
        LIMIT 1`,
-      [ventaIdNumerico]
+      [empresaIdFinanciera, ventaIdNumerico]
     );
 
     let reversasBancoCreadas = 0;
@@ -974,31 +1075,34 @@ exports.registrarReversaMovimientoVenta = async (
         `UPDATE movimientos_bancarios
          SET estado = 'ANULADO',
              observaciones = CONCAT(COALESCE(observaciones, ''), ' | ANULADO AUTOMATICAMENTE POR CANCELACION DE VENTA')
-         WHERE venta_id = ?
+         WHERE empresa_id = ?
+           AND venta_id = ?
            AND tipo_movimiento = 'INGRESO'
            AND categoria IN ('POS', 'Transferencia', 'Deposito')
            AND estado = 'PENDIENTE'`,
-        [ventaIdNumerico]
+        [empresaIdFinanciera, ventaIdNumerico]
       );
 
       // B. Buscar ingresos bancarios CONFIRMADOS para reversar
       const [ingresosConfirmadosBanco] = await dbConn.query(
         `SELECT * FROM movimientos_bancarios
-         WHERE venta_id = ?
+         WHERE empresa_id = ?
+           AND venta_id = ?
            AND tipo_movimiento = 'INGRESO'
            AND categoria IN ('POS', 'Transferencia', 'Deposito')
            AND estado = 'CONFIRMADO'
          ORDER BY id ASC`,
-        [ventaIdNumerico]
+        [empresaIdFinanciera, ventaIdNumerico]
       );
 
       // C. Crear una reversa CONFIRMADA por cada ingreso bancario confirmado
       for (const movimiento of ingresosConfirmadosBanco) {
         await dbConn.query(
           `INSERT INTO movimientos_bancarios
-           (cuenta_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, numero_referencia, realizado_por)
-           VALUES (?, 'EGRESO', ?, ?, ?, 'Anulacion Venta', 'CONFIRMADO', ?, ?)`,
+           (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, numero_referencia, realizado_por)
+           VALUES (?, ?, 'EGRESO', ?, ?, ?, 'Anulacion Venta', 'CONFIRMADO', ?, ?)`,
           [
+            empresaIdFinanciera,
             movimiento.cuenta_id,
             movimiento.monto,
             conceptoReversa,
@@ -1010,8 +1114,8 @@ exports.registrarReversaMovimientoVenta = async (
 
         // D. Actualizar saldo_actual restando el monto reversado
         await dbConn.query(
-          'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ?',
-          [movimiento.monto, movimiento.cuenta_id]
+          'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ? AND empresa_id = ?',
+          [movimiento.monto, movimiento.cuenta_id, empresaIdFinanciera]
         );
 
         reversasBancoCreadas++;
@@ -1048,6 +1152,7 @@ exports.retirarDeBanco = async (req, res) => {
   const conn = await db.getConnection();
   try {
     const { cuenta_id, monto, concepto, a_caja_chica, observaciones, realizado_por } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     if (!cuenta_id || !monto || Number(monto) <= 0) {
       return res.status(400).json({ success: false, message: 'cuenta_id y monto son requeridos' });
@@ -1059,8 +1164,8 @@ exports.retirarDeBanco = async (req, res) => {
     const montoNum = Number(monto);
 
     const [cuentas] = await conn.query(
-      'SELECT * FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-      [cuenta_id]
+      'SELECT * FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+      [cuenta_id, empresaId]
     );
 
     if (cuentas.length === 0) {
@@ -1083,23 +1188,23 @@ exports.retirarDeBanco = async (req, res) => {
     // Egreso del banco
     await conn.query(
       `INSERT INTO movimientos_bancarios
-        (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, 'EGRESO', ?, ?, 'Retiro', 'CONFIRMADO', ?, ?)`,
-      [cuenta_id, montoNum, concepto, usuario, observaciones || null]
+        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+       VALUES (?, ?, 'EGRESO', ?, ?, 'Retiro', 'CONFIRMADO', ?, ?)`,
+      [empresaId, cuenta_id, montoNum, concepto, usuario, observaciones || null]
     );
 
     await conn.query(
-      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ?',
-      [montoNum, cuenta_id]
+      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ? AND empresa_id = ?',
+      [montoNum, cuenta_id, empresaId]
     );
 
     // Ingreso a caja chica (opcional)
     if (a_caja_chica) {
       await conn.query(
         `INSERT INTO caja_chica
-          (tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-         VALUES ('INGRESO', ?, ?, 'Retiro Banco', 'CONFIRMADO', ?, ?)`,
-        [montoNum, `Retiro de ${cuenta.nombre} - ${concepto}`, usuario, observaciones || null]
+          (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+         VALUES (?, 'INGRESO', ?, ?, 'Retiro Banco', 'CONFIRMADO', ?, ?)`,
+        [empresaId, montoNum, `Retiro de ${cuenta.nombre} - ${concepto}`, usuario, observaciones || null]
       );
     }
 
@@ -1126,6 +1231,7 @@ exports.depositarAlBanco = async (req, res) => {
   const conn = await db.getConnection();
   try {
     const { cuenta_id, monto, concepto, observaciones, realizado_por } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     if (!cuenta_id || !monto || Number(monto) <= 0) {
       return res.status(400).json({ success: false, message: 'cuenta_id y monto son requeridos' });
@@ -1139,7 +1245,8 @@ exports.depositarAlBanco = async (req, res) => {
     // Validar saldo de caja chica (solo CONFIRMADOS)
     const [[saldoRow]] = await conn.query(
       `SELECT COALESCE(SUM(CASE WHEN tipo_movimiento = 'INGRESO' THEN monto ELSE -monto END), 0) AS saldo
-       FROM caja_chica WHERE estado = 'CONFIRMADO'`
+       FROM caja_chica WHERE estado = 'CONFIRMADO' AND empresa_id = ?`,
+      [empresaId]
     );
     const saldoCaja = Number(saldoRow.saldo);
 
@@ -1151,8 +1258,8 @@ exports.depositarAlBanco = async (req, res) => {
     }
 
     const [cuentas] = await conn.query(
-      'SELECT * FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-      [cuenta_id]
+      'SELECT * FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+      [cuenta_id, empresaId]
     );
 
     if (cuentas.length === 0) {
@@ -1168,23 +1275,23 @@ exports.depositarAlBanco = async (req, res) => {
     // Egreso de caja chica
     await conn.query(
       `INSERT INTO caja_chica
-        (tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES ('EGRESO', ?, ?, 'Deposito Banco', 'CONFIRMADO', ?, ?)`,
-      [montoNum, `Depósito a ${cuenta.nombre} - ${concepto}`, usuario, observaciones || null]
+        (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+       VALUES (?, 'EGRESO', ?, ?, 'Deposito Banco', 'CONFIRMADO', ?, ?)`,
+      [empresaId, montoNum, `Depósito a ${cuenta.nombre} - ${concepto}`, usuario, observaciones || null]
     );
 
     // Ingreso al banco
     await conn.query(
       `INSERT INTO movimientos_bancarios
-        (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, 'INGRESO', ?, ?, 'Deposito', 'CONFIRMADO', ?, ?)`,
-      [cuenta_id, montoNum, `Depósito desde Caja Chica - ${concepto}`, usuario, observaciones || null]
+        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+       VALUES (?, ?, 'INGRESO', ?, ?, 'Deposito', 'CONFIRMADO', ?, ?)`,
+      [empresaId, cuenta_id, montoNum, `Depósito desde Caja Chica - ${concepto}`, usuario, observaciones || null]
     );
 
     // Actualizar saldo banco
     await conn.query(
-      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ?',
-      [montoNum, cuenta_id]
+      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ? AND empresa_id = ?',
+      [montoNum, cuenta_id, empresaId]
     );
 
     await conn.commit();
@@ -1208,6 +1315,7 @@ exports.ingresoBanco = async (req, res) => {
   const conn = await db.getConnection();
   try {
     const { cuenta_id, monto, concepto, observaciones, realizado_por, categoria } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     if (!cuenta_id || !monto || Number(monto) <= 0) {
       conn.release();
@@ -1221,8 +1329,8 @@ exports.ingresoBanco = async (req, res) => {
     const montoNum = Number(monto);
 
     const [cuentas] = await conn.query(
-      'SELECT * FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-      [cuenta_id]
+      'SELECT * FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+      [cuenta_id, empresaId]
     );
 
     if (cuentas.length === 0) {
@@ -1238,14 +1346,14 @@ exports.ingresoBanco = async (req, res) => {
     // Solo ingreso al banco — no se descuenta de ningún lado
     await conn.query(
       `INSERT INTO movimientos_bancarios
-        (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, 'INGRESO', ?, ?, ?, 'CONFIRMADO', ?, ?)`,
-      [cuenta_id, montoNum, concepto, categoria || 'Ingreso Manual', usuario, observaciones || null]
+        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+       VALUES (?, ?, 'INGRESO', ?, ?, ?, 'CONFIRMADO', ?, ?)`,
+      [empresaId, cuenta_id, montoNum, concepto, categoria || 'Ingreso Manual', usuario, observaciones || null]
     );
 
     await conn.query(
-      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ?',
-      [montoNum, cuenta_id]
+      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ? AND empresa_id = ?',
+      [montoNum, cuenta_id, empresaId]
     );
 
     await conn.commit();
@@ -1269,6 +1377,7 @@ exports.transferenciaBancos = async (req, res) => {
   const conn = await db.getConnection();
   try {
     const { cuenta_origen_id, cuenta_destino_id, monto, concepto, observaciones, realizado_por } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     if (!cuenta_origen_id || !cuenta_destino_id || !monto || Number(monto) <= 0) {
       return res.status(400).json({ success: false, message: 'cuenta_origen_id, cuenta_destino_id y monto son requeridos' });
@@ -1283,16 +1392,16 @@ exports.transferenciaBancos = async (req, res) => {
     const montoNum = Number(monto);
 
     const [cuentasOrigen] = await conn.query(
-      'SELECT * FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-      [cuenta_origen_id]
+      'SELECT * FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+      [cuenta_origen_id, empresaId]
     );
     if (cuentasOrigen.length === 0) {
       return res.status(404).json({ success: false, message: 'Cuenta de origen no encontrada o inactiva' });
     }
 
     const [cuentasDestino] = await conn.query(
-      'SELECT * FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-      [cuenta_destino_id]
+      'SELECT * FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+      [cuenta_destino_id, empresaId]
     );
     if (cuentasDestino.length === 0) {
       return res.status(404).json({ success: false, message: 'Cuenta de destino no encontrada o inactiva' });
@@ -1315,27 +1424,27 @@ exports.transferenciaBancos = async (req, res) => {
     // Egreso del origen
     await conn.query(
       `INSERT INTO movimientos_bancarios
-        (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, 'EGRESO', ?, ?, 'Transferencia', 'CONFIRMADO', ?, ?)`,
-      [cuenta_origen_id, montoNum, `Transferencia a ${destino.nombre} - ${concepto}`, usuario, observaciones || null]
+        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+       VALUES (?, ?, 'EGRESO', ?, ?, 'Transferencia', 'CONFIRMADO', ?, ?)`,
+      [empresaId, cuenta_origen_id, montoNum, `Transferencia a ${destino.nombre} - ${concepto}`, usuario, observaciones || null]
     );
 
     // Ingreso al destino
     await conn.query(
       `INSERT INTO movimientos_bancarios
-        (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, 'INGRESO', ?, ?, 'Transferencia', 'CONFIRMADO', ?, ?)`,
-      [cuenta_destino_id, montoNum, `Transferencia desde ${origen.nombre} - ${concepto}`, usuario, observaciones || null]
+        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+       VALUES (?, ?, 'INGRESO', ?, ?, 'Transferencia', 'CONFIRMADO', ?, ?)`,
+      [empresaId, cuenta_destino_id, montoNum, `Transferencia desde ${origen.nombre} - ${concepto}`, usuario, observaciones || null]
     );
 
     // Actualizar saldos
     await conn.query(
-      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ?',
-      [montoNum, cuenta_origen_id]
+      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ? AND empresa_id = ?',
+      [montoNum, cuenta_origen_id, empresaId]
     );
     await conn.query(
-      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ?',
-      [montoNum, cuenta_destino_id]
+      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ? AND empresa_id = ?',
+      [montoNum, cuenta_destino_id, empresaId]
     );
 
     await conn.commit();
@@ -1358,10 +1467,11 @@ exports.transferenciaBancos = async (req, res) => {
 exports.crearCuentaBancaria = async (req, res) => {
   try {
     const { nombre, numero_cuenta, tipo_cuenta, pos_asociado } = req.body;
+    const empresaId = getTenantEmpresaId(req);
     if (!nombre?.trim()) return res.status(400).json({ success: false, message: 'El nombre es requerido' });
     await db.query(
-      'INSERT INTO cuentas_bancarias (nombre, numero_cuenta, tipo_cuenta, pos_asociado, saldo_actual, activa) VALUES (?, ?, ?, ?, 0, 1)',
-      [nombre.trim(), numero_cuenta || null, tipo_cuenta || 'Corriente', pos_asociado || null]
+      'INSERT INTO cuentas_bancarias (empresa_id, nombre, numero_cuenta, tipo_cuenta, pos_asociado, saldo_actual, activa) VALUES (?, ?, ?, ?, ?, 0, 1)',
+      [empresaId, nombre.trim(), numero_cuenta || null, tipo_cuenta || 'Corriente', pos_asociado || null]
     );
     res.status(201).json({ success: true, message: 'Cuenta bancaria creada exitosamente' });
   } catch (error) {
@@ -1374,10 +1484,11 @@ exports.editarCuentaBancaria = async (req, res) => {
   try {
     const { id } = req.params;
     const { nombre, numero_cuenta, tipo_cuenta, pos_asociado } = req.body;
+    const empresaId = getTenantEmpresaId(req);
     if (!nombre?.trim()) return res.status(400).json({ success: false, message: 'El nombre es requerido' });
     const [result] = await db.query(
-      'UPDATE cuentas_bancarias SET nombre = ?, numero_cuenta = ?, tipo_cuenta = ?, pos_asociado = ? WHERE id = ?',
-      [nombre.trim(), numero_cuenta || null, tipo_cuenta || 'Corriente', pos_asociado || null, id]
+      'UPDATE cuentas_bancarias SET nombre = ?, numero_cuenta = ?, tipo_cuenta = ?, pos_asociado = ? WHERE id = ? AND empresa_id = ?',
+      [nombre.trim(), numero_cuenta || null, tipo_cuenta || 'Corriente', pos_asociado || null, id, empresaId]
     );
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Cuenta no encontrada' });
     res.json({ success: true, message: 'Cuenta bancaria actualizada exitosamente' });
@@ -1390,8 +1501,9 @@ exports.editarCuentaBancaria = async (req, res) => {
 exports.desactivarCuentaBancaria = async (req, res) => {
   try {
     const { id } = req.params;
+    const empresaId = getTenantEmpresaId(req);
     const [result] = await db.query(
-      'UPDATE cuentas_bancarias SET activa = 0 WHERE id = ?', [id]
+      'UPDATE cuentas_bancarias SET activa = 0 WHERE id = ? AND empresa_id = ?', [id, empresaId]
     );
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Cuenta no encontrada' });
     res.json({ success: true, message: 'Cuenta bancaria desactivada exitosamente' });
@@ -1408,6 +1520,7 @@ exports.transferirCajaABanco = async (req, res) => {
   const conn = await db.getConnection();
   try {
     const { banco_id, monto, fecha, referencia, observacion } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     if (!banco_id) {
       return res.status(400).json({ success: false, message: 'banco_id es obligatorio' });
@@ -1419,8 +1532,8 @@ exports.transferirCajaABanco = async (req, res) => {
 
     // Verificar banco activo
     const [[banco]] = await conn.query(
-      'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-      [banco_id]
+      'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+      [banco_id, empresaId]
     );
     if (!banco) {
       return res.status(404).json({ success: false, message: 'Banco no encontrado o inactivo' });
@@ -1429,7 +1542,8 @@ exports.transferirCajaABanco = async (req, res) => {
     // Validar saldo disponible en caja chica (solo movimientos CONFIRMADOS)
     const [[saldoRow]] = await conn.query(
       `SELECT COALESCE(SUM(CASE WHEN tipo_movimiento = 'INGRESO' THEN monto ELSE -monto END), 0) AS saldo
-       FROM caja_chica WHERE estado = 'CONFIRMADO'`
+       FROM caja_chica WHERE estado = 'CONFIRMADO' AND empresa_id = ?`,
+      [empresaId]
     );
     const saldoCaja = parseFloat(saldoRow.saldo);
     if (montoNum > saldoCaja) {
@@ -1450,11 +1564,12 @@ exports.transferirCajaABanco = async (req, res) => {
     // 1. Egreso en caja_chica → CONFIRMADO (el dinero sale físicamente de caja)
     await conn.query(
       `INSERT INTO caja_chica
-         (tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones,
+         (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones,
           fecha_movimiento, confirmado_en, confirmado_por, referencia_tipo, referencia_id)
-       VALUES ('EGRESO', ?, ?, 'Traslado a Banco', 'CONFIRMADO', ?, ?,
+       VALUES (?, 'EGRESO', ?, ?, 'Traslado a Banco', 'CONFIRMADO', ?, ?,
                ?, NOW(), ?, 'TRASLADO_BANCO', ?)`,
       [
+        empresaId,
         montoNum,
         `Depósito a banco - ${banco.nombre}`,
         userName,
@@ -1468,11 +1583,12 @@ exports.transferirCajaABanco = async (req, res) => {
     // 2. Ingreso en movimientos_bancarios → PENDIENTE (el admin lo confirma después)
     await conn.query(
       `INSERT INTO movimientos_bancarios
-         (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
+         (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
           numero_referencia, realizado_por, observaciones, fecha_movimiento, referencia_tipo)
-       VALUES (?, 'INGRESO', ?, 'Depósito desde caja chica', 'Traslado Caja', 'PENDIENTE',
+       VALUES (?, ?, 'INGRESO', ?, 'Depósito desde caja chica', 'Traslado Caja', 'PENDIENTE',
                ?, ?, ?, ?, 'TRASLADO_CAJA')`,
       [
+        empresaId,
         banco_id,
         montoNum,
         referencia || null,

@@ -1506,7 +1506,8 @@ exports.completarReparacion = async (req, res) => {
         }
         // Verificar que la cuenta bancaria existe y está activa
         const [[cuenta]] = await connection.query(
-          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND activa = TRUE', [cuentaBancariaId]
+          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE',
+          [cuentaBancariaId, inventarioEmpresaId]
         );
         if (!cuenta) {
           await connection.rollback();
@@ -1621,7 +1622,8 @@ exports.completarReparacion = async (req, res) => {
           authUserName,
           null,          // connection separada (fuera de TX)
           cuentaBancariaId,
-          referenciaPago
+          referenciaPago,
+          inventarioEmpresaId
         );
       } catch (cajaErr) {
         // No revertir la reparación por error financiero; solo loguear
