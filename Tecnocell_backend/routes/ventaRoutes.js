@@ -2,9 +2,11 @@ const express = require('express');
 const router = express.Router();
 const ventaController = require('../controllers/ventaController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
-// Autenticación deshabilitada temporalmente para desarrollo
-// router.use(verifyToken);
+// Todas las rutas de ventas requieren autenticación y tenant scope
+router.use(verifyToken);
+router.use(tenantScope);
 
 // Rutas de ventas
 router.post('/', ventaController.createVenta);

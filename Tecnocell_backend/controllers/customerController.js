@@ -29,12 +29,13 @@ const getAllCustomers = async (req, res) => {
        FROM clientes c
        LEFT JOIN (
          SELECT cliente_id,
+           empresa_id,
            COUNT(*) AS total_ventas,
            SUM(total) AS total_gastado
          FROM ventas
          WHERE estado != 'ANULADA'
-         GROUP BY cliente_id
-       ) v ON v.cliente_id = c.id
+         GROUP BY cliente_id, empresa_id
+       ) v ON v.cliente_id = c.id AND v.empresa_id = c.empresa_id
        LEFT JOIN (
          SELECT cliente_id,
            COUNT(*) AS total_reparaciones,
@@ -113,6 +114,7 @@ const searchCustomers = async (req, res) => {
 const getCustomerById = async (req, res) => {
   try {
     const { id } = req.params;
+    const empresaId = getTenantEmpresaId(req);
     const conditions = ['c.id = ?', 'c.activo = true'];
     const params = [id];
     addTenantCondition(req, conditions, params);
@@ -298,6 +300,8 @@ const getCustomerPurchases = async (req, res) => {
     const conditions = ['c.id = ?', 'c.activo = true'];
     const params = [id];
     addTenantCondition(req, conditions, params);
+    const ventasTenantSql = req.tenant?.isSuperadmin ? '' : ' AND v.empresa_id = ?';
+    const ventasTenantParams = req.tenant?.isSuperadmin ? [] : [getTenantEmpresaId(req)];
 
     const [customers] = await db.query(`SELECT c.id FROM clientes c WHERE ${conditions.join(' AND ')}`, params);
     if (customers.length === 0) {
@@ -317,9 +321,9 @@ const getCustomerPurchases = async (req, res) => {
         v.metodo_pago as paymentMethod,
         v.items,
         v.observaciones as notes,
-        'sale' as type
+       'sale' as type
        FROM ventas v
-       WHERE v.cliente_id = ?
+       WHERE v.cliente_id = ?${ventasTenantSql}
        UNION ALL
        SELECT
         r.id,
@@ -334,7 +338,7 @@ const getCustomerPurchases = async (req, res) => {
        FROM reparaciones r
        WHERE r.cliente_id = ? AND r.estado != 'CANCELADA'
        ORDER BY date DESC`,
-      [id, id]
+      [id, ...ventasTenantParams, id]
     );
     
     // Parsear items JSON y formatear datos
