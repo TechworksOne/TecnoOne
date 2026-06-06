@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const repuestoController = require('../controllers/repuestoController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
-// Autenticación deshabilitada temporalmente para desarrollo
-// router.use(verifyToken);
+router.use(verifyToken);
+router.use(tenantScope);
 
 // GET /api/repuestos/stock-bajo - Debe ir antes de /:id
 router.get('/stock-bajo', repuestoController.getStockBajo);
@@ -46,7 +47,7 @@ router.put('/:id', repuestoController.uploadRepuestos, repuestoController.update
 router.delete('/:id', repuestoController.deleteRepuesto);
 
 // GET /api/repuestos/:id/movimientos - Historial de movimientos de stock
-router.get('/:id/movimientos', verifyToken, repuestoController.getMovimientosRepuesto);
+router.get('/:id/movimientos', repuestoController.getMovimientosRepuesto);
 
 // POST /api/repuestos/:id/movimiento - Registrar movimiento de stock
 router.post('/:id/movimiento', repuestoController.registrarMovimiento);
