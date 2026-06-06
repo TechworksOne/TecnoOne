@@ -6,6 +6,7 @@ const path = require('path');
 
 const productController = require('../controllers/productController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -50,17 +51,18 @@ const uploadImagenesProducto = (req, res, next) => {
   });
 };
 
-// Rutas públicas
+router.use(verifyToken);
+router.use(tenantScope);
+
 router.get('/search', productController.searchProducts);
 router.get('/alerts/critical-stock', productController.getCriticalStockProducts);
 router.get('/', productController.getAllProducts);
 router.get('/:id', productController.getProductById);
 router.get('/:id/kardex', productController.getProductKardex);
 
-// Rutas protegidas
-router.post('/', verifyToken, uploadImagenesProducto, productController.createProduct);
-router.put('/:id', verifyToken, uploadImagenesProducto, productController.updateProduct);
-router.patch('/:id/stock', verifyToken, productController.adjustStock);
-router.delete('/:id', verifyToken, productController.deleteProduct);
+router.post('/', uploadImagenesProducto, productController.createProduct);
+router.put('/:id', uploadImagenesProducto, productController.updateProduct);
+router.patch('/:id/stock', productController.adjustStock);
+router.delete('/:id', productController.deleteProduct);
 
 module.exports = router;

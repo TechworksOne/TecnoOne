@@ -1392,10 +1392,11 @@ exports.completarReparacion = async (req, res) => {
     const authUserName = await getAuthUserName(req, connection);
 
     // ── 2. Procesar repuestos utilizados ─────────────────────────────────
+    const inventarioEmpresaId = reparacion.empresa_id ?? getTenantEmpresaId(req);
     let costoRepuestosTotal = 0;
     for (const item of repuestosUsados) {
       const [[rep]] = await connection.query(
-        'SELECT id, nombre, precio_costo, stock FROM repuestos WHERE id = ?', [item.repuesto_id]
+        'SELECT id, nombre, precio_costo, stock FROM repuestos WHERE id = ? AND empresa_id = ?', [item.repuesto_id, inventarioEmpresaId]
       );
       if (!rep) {
         await connection.rollback();
@@ -1412,7 +1413,7 @@ exports.completarReparacion = async (req, res) => {
       const subtotal   = costoUnit * item.cantidad;
       costoRepuestosTotal += subtotal;
 
-      await connection.query('UPDATE repuestos SET stock = stock - ? WHERE id = ?', [item.cantidad, rep.id]);
+      await connection.query('UPDATE repuestos SET stock = stock - ? WHERE id = ? AND empresa_id = ?', [item.cantidad, rep.id, inventarioEmpresaId]);
       await connection.query(
         `INSERT INTO reparacion_repuestos (reparacion_id, repuesto_id, nombre, cantidad, costo_unitario, subtotal)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -1428,7 +1429,7 @@ exports.completarReparacion = async (req, res) => {
 
       if (item.tipo === 'producto') {
         const [[prod]] = await connection.query(
-          'SELECT id, nombre, precio_costo, stock FROM productos WHERE id = ?', [item.id]
+          'SELECT id, nombre, precio_costo, stock FROM productos WHERE id = ? AND empresa_id = ?', [item.id, inventarioEmpresaId]
         );
         if (!prod) {
           await connection.rollback();
@@ -1443,10 +1444,10 @@ exports.completarReparacion = async (req, res) => {
         }
         costoUnit  = Math.round((prod.precio_costo || 0) * 100); // quetzales → centavos
         nombreItem = prod.nombre;
-        await connection.query('UPDATE productos SET stock = stock - ? WHERE id = ?', [item.cantidad, prod.id]);
+        await connection.query('UPDATE productos SET stock = stock - ? WHERE id = ? AND empresa_id = ?', [item.cantidad, prod.id, inventarioEmpresaId]);
       } else {
         const [[rep]] = await connection.query(
-          'SELECT id, nombre, precio_costo, stock FROM repuestos WHERE id = ?', [item.id]
+          'SELECT id, nombre, precio_costo, stock FROM repuestos WHERE id = ? AND empresa_id = ?', [item.id, inventarioEmpresaId]
         );
         if (!rep) {
           await connection.rollback();
@@ -1461,7 +1462,7 @@ exports.completarReparacion = async (req, res) => {
         }
         costoUnit  = rep.precio_costo || 0;
         nombreItem = rep.nombre;
-        await connection.query('UPDATE repuestos SET stock = stock - ? WHERE id = ?', [item.cantidad, rep.id]);
+        await connection.query('UPDATE repuestos SET stock = stock - ? WHERE id = ? AND empresa_id = ?', [item.cantidad, rep.id, inventarioEmpresaId]);
       }
 
       const subtotal = costoUnit * item.cantidad;
