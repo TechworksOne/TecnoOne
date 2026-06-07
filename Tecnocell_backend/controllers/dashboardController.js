@@ -34,6 +34,7 @@ exports.getDashboardStats = async (req, res) => {
     const connection = await pool.getConnection();
     const ventasTenant = tenantClause(req);
     const cajaTenant = tenantClause(req);
+    const comprasTenant = tenantClause(req);
     const productosTenant = tenantClause(req);
     const reparacionesTenant = tenantClause(req);
     const reparacionesAliasTenant = tenantClause(req, 'r');
@@ -84,24 +85,24 @@ exports.getDashboardStats = async (req, res) => {
     `, cajaTenant.params);
 
     // ── Compras mes actual ───────────────────────────────────────────────────
-    // Compras aun no tiene empresa_id; queda global hasta Sprint 1.8 compras.
     const [[comprasMes]] = await connection.query(`
       SELECT COALESCE(SUM(total), 0) AS total
       FROM compras
       WHERE MONTH(fecha_compra) = MONTH(CURDATE())
         AND YEAR(fecha_compra)  = YEAR(CURDATE())
         AND estado IN ('CONFIRMADA', 'RECIBIDA')
-    `);
+        ${comprasTenant.sql}
+    `, comprasTenant.params);
 
     // ── Compras mes anterior ─────────────────────────────────────────────────
-    // Compras aun no tiene empresa_id; queda global hasta Sprint 1.8 compras.
     const [[comprasMesAnterior]] = await connection.query(`
       SELECT COALESCE(SUM(total), 0) AS total
       FROM compras
       WHERE MONTH(fecha_compra) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
         AND YEAR(fecha_compra)  = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
         AND estado IN ('CONFIRMADA', 'RECIBIDA')
-    `);
+        ${comprasTenant.sql}
+    `, comprasTenant.params);
 
     // ── Tendencia 7 días ─────────────────────────────────────────────────────
     const [tendenciaRows] = await connection.query(`
