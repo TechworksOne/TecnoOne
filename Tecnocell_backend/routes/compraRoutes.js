@@ -3,9 +3,11 @@ const express = require('express');
 const router = express.Router();
 const compraController = require('../controllers/compraController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
+router.use(tenantScope);
 
 // Rutas de compras de PRODUCTOS
 router.post('/productos', compraController.createCompraProductos);
@@ -15,10 +17,11 @@ router.post('/repuestos', compraController.createCompraRepuestos);
 
 // Rutas generales (ambos tipos)
 router.get('/', compraController.getAllCompras);
-router.get('/:id', compraController.getCompraById);
-router.post('/:id/anular', compraController.anularCompra);
 
 // Rutas de series
 router.get('/series/producto/:productoId', compraController.getSeriesByProducto);
+
+router.get('/:id', compraController.getCompraById);
+router.post('/:id/anular', compraController.anularCompra);
 
 module.exports = router;
