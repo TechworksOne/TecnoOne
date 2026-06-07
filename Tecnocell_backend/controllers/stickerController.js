@@ -1,12 +1,82 @@
 const db = require('../config/database');
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true;
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  return isSuperadminTenant(req) ? getTenantEmpresaId(req) : getTenantEmpresaId(req);
+}
+
+function stickerTenantClause(req, alias = 's') {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+
+  return {
+    sql: ` AND ${alias}.empresa_id = ?`,
+    params: [getTenantEmpresaId(req)]
+  };
+}
+
+function loteTenantClause(req, alias = 'sl') {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+
+  return {
+    sql: ` AND ${alias}.empresa_id = ?`,
+    params: [getTenantEmpresaId(req)]
+  };
+}
+
+async function validateEmpresaExists(connectionOrDb, empresaId) {
+  const [empresas] = await connectionOrDb.query(
+    'SELECT id FROM empresas WHERE id = ? LIMIT 1',
+    [empresaId]
+  );
+
+  return empresas.length > 0;
+}
+
+async function getEmpresaIdForLote(connectionOrDb, req, body = {}) {
+  if (!isSuperadminTenant(req)) return requireTenantEmpresaId(req);
+
+  const empresaId = body.empresa_id !== undefined && body.empresa_id !== ''
+    ? Number(body.empresa_id)
+    : requireTenantEmpresaId(req);
+
+  if (!empresaId) return null;
+
+  const exists = await validateEmpresaExists(connectionOrDb, empresaId);
+  return exists ? empresaId : null;
+}
+
+async function validateReparacionForTenant(connectionOrDb, reparacionId, req) {
+  const tenant = isSuperadminTenant(req)
+    ? { sql: '', params: [] }
+    : { sql: ' AND r.empresa_id = ?', params: [getTenantEmpresaId(req)] };
+
+  const [reparaciones] = await connectionOrDb.query(
+    `SELECT r.id, r.empresa_id
+     FROM reparaciones r
+     WHERE r.id = ?${tenant.sql}
+     LIMIT 1`,
+    [reparacionId, ...tenant.params]
+  );
+
+  return reparaciones[0] || null;
+}
+
 // Obtener todos los stickers disponibles
 exports.getStickersDisponibles = async (req, res) => {
   try {
+    const tenant = stickerTenantClause(req, 's');
     const [stickers] = await db.query(
-      `SELECT * FROM stickers_garantia 
-       WHERE estado = 'DISPONIBLE' 
-       ORDER BY numero_sticker ASC`
+      `SELECT s.* FROM stickers_garantia s
+       WHERE s.estado = 'DISPONIBLE'${tenant.sql}
+       ORDER BY s.numero_sticker ASC`,
+      tenant.params
     );
 
     res.json({
@@ -27,12 +97,14 @@ exports.getStickersDisponibles = async (req, res) => {
 // Obtener todos los stickers asignados
 exports.getStickersAsignados = async (req, res) => {
   try {
+    const tenant = stickerTenantClause(req, 's');
     const [stickers] = await db.query(
       `SELECT s.*, r.cliente_nombre as clienteNombre, r.estado as estado_reparacion
        FROM stickers_garantia s
-       LEFT JOIN reparaciones r ON s.reparacion_id = r.id
-       WHERE s.estado IN ('ASIGNADO', 'USADO')
-       ORDER BY s.fecha_asignacion DESC`
+       LEFT JOIN reparaciones r ON s.reparacion_id = r.id AND r.empresa_id = s.empresa_id
+       WHERE s.estado IN ('ASIGNADO', 'USADO')${tenant.sql}
+       ORDER BY s.fecha_asignacion DESC`,
+      tenant.params
     );
 
     res.json({
@@ -63,9 +135,19 @@ exports.asignarSticker = async (req, res) => {
     }
 
     // Verificar que el sticker esté disponible
+    const reparacion = await validateReparacionForTenant(db, reparacionId, req);
+    if (!reparacion) {
+      return res.status(404).json({
+        success: false,
+        message: 'Reparación no encontrada'
+      });
+    }
+
+    const reparacionEmpresaId = reparacion.empresa_id;
+
     const [sticker] = await db.query(
-      'SELECT * FROM stickers_garantia WHERE id = ? AND estado = "DISPONIBLE"',
-      [stickerId]
+      'SELECT * FROM stickers_garantia WHERE id = ? AND estado = "DISPONIBLE" AND empresa_id = ?',
+      [stickerId, reparacionEmpresaId]
     );
 
     if (sticker.length === 0) {
@@ -82,8 +164,8 @@ exports.asignarSticker = async (req, res) => {
            reparacion_id = ?, 
            ubicacion_sticker = ?,
            fecha_asignacion = NOW()
-       WHERE id = ?`,
-      [reparacionId, ubicacion, stickerId]
+       WHERE id = ? AND empresa_id = ?`,
+      [reparacionId, ubicacion, stickerId, reparacionEmpresaId]
     );
 
     // Actualizar reparación
@@ -91,8 +173,8 @@ exports.asignarSticker = async (req, res) => {
       `UPDATE reparaciones 
        SET sticker_serie_interna = ?, 
            sticker_ubicacion = ?
-       WHERE id = ?`,
-      [sticker[0].numero_sticker, ubicacion, reparacionId]
+       WHERE id = ? AND empresa_id = ?`,
+      [sticker[0].numero_sticker, ubicacion, reparacionId, reparacionEmpresaId]
     );
 
     res.json({
@@ -117,13 +199,16 @@ exports.asignarSticker = async (req, res) => {
 // Obtener estadísticas de stickers
 exports.getEstadisticas = async (req, res) => {
   try {
+    const tenant = stickerTenantClause(req, 's');
     const [stats] = await db.query(
       `SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN estado = 'DISPONIBLE' THEN 1 ELSE 0 END) as disponibles,
-        SUM(CASE WHEN estado = 'ASIGNADO' THEN 1 ELSE 0 END) as asignados,
-        SUM(CASE WHEN estado = 'USADO' THEN 1 ELSE 0 END) as usados
-       FROM stickers_garantia`
+        SUM(CASE WHEN s.estado = 'DISPONIBLE' THEN 1 ELSE 0 END) as disponibles,
+        SUM(CASE WHEN s.estado = 'ASIGNADO' THEN 1 ELSE 0 END) as asignados,
+        SUM(CASE WHEN s.estado = 'USADO' THEN 1 ELSE 0 END) as usados
+       FROM stickers_garantia s
+       WHERE 1=1${tenant.sql}`,
+      tenant.params
     );
 
     res.json({
@@ -144,6 +229,30 @@ exports.getEstadisticas = async (req, res) => {
 exports.liberarSticker = async (req, res) => {
   try {
     const { id } = req.params;
+    const tenant = stickerTenantClause(req, 's');
+    const [stickers] = await db.query(
+      `SELECT s.*, r.empresa_id AS reparacion_empresa_id
+       FROM stickers_garantia s
+       LEFT JOIN reparaciones r ON r.id = s.reparacion_id
+       WHERE s.id = ?${tenant.sql}
+       LIMIT 1`,
+      [id, ...tenant.params]
+    );
+
+    if (stickers.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sticker no encontrado'
+      });
+    }
+
+    const sticker = stickers[0];
+    if (sticker.reparacion_id && sticker.reparacion_empresa_id !== sticker.empresa_id) {
+      return res.status(409).json({
+        success: false,
+        message: 'Sticker asociado a una reparación inconsistente'
+      });
+    }
 
     await db.query(
       `UPDATE stickers_garantia 
@@ -151,8 +260,8 @@ exports.liberarSticker = async (req, res) => {
            reparacion_id = NULL, 
            ubicacion_sticker = NULL,
            fecha_asignacion = NULL
-       WHERE id = ?`,
-      [id]
+       WHERE id = ? AND empresa_id = ?`,
+      [id, sticker.empresa_id]
     );
 
     res.json({
@@ -322,6 +431,15 @@ exports.createLote = async (req, res) => {
 
     const config = req.body;
     const { cantidad, diasGarantia = 0, tipoGarantia = '', notas = '' } = config;
+    const empresaId = await getEmpresaIdForLote(connection, req, config);
+
+    if (!empresaId) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Empresa requerida para crear lote de stickers'
+      });
+    }
 
     if (!cantidad || Number(cantidad) <= 0) {
       await connection.rollback();
@@ -358,10 +476,11 @@ exports.createLote = async (req, res) => {
     const codigoLote = `LOTE-${Date.now()}`;
     const [loteResult] = await connection.query(
       `INSERT INTO sticker_lotes
-         (codigo_lote, tipo_generacion, estructura, prefijo, cantidad, numero_inicial, digitos,
+         (empresa_id, codigo_lote, tipo_generacion, estructura, prefijo, cantidad, numero_inicial, digitos,
           dias_garantia, tipo_garantia, notas, creado_por)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        empresaId,
         codigoLote,
         config.tipo,
         config.estructura || null,
@@ -379,6 +498,7 @@ exports.createLote = async (req, res) => {
 
     if (codes.length > 0) {
       const values = codes.map((code) => [
+        empresaId,
         code,
         'DISPONIBLE',
         loteId,
@@ -388,7 +508,7 @@ exports.createLote = async (req, res) => {
       ]);
       await connection.query(
         `INSERT INTO stickers_garantia
-           (numero_sticker, estado, lote_id, tipo_garantia, dias_garantia, notas)
+           (empresa_id, numero_sticker, estado, lote_id, tipo_garantia, dias_garantia, notas)
          VALUES ?`,
         [values],
       );
@@ -414,6 +534,7 @@ exports.createLote = async (req, res) => {
 exports.getLotes = async (req, res) => {
   try {
     await ensureLoteTables();
+    const tenant = loteTenantClause(req, 'sl');
     const [lotes] = await db.query(`
       SELECT sl.*,
              COUNT(sg.id)                                                    AS total_generados,
@@ -421,10 +542,11 @@ exports.getLotes = async (req, res) => {
              SUM(CASE WHEN sg.estado = 'ASIGNADO'   THEN 1 ELSE 0 END)      AS asignados,
              SUM(CASE WHEN sg.estado = 'ANULADO'    THEN 1 ELSE 0 END)      AS anulados
         FROM sticker_lotes sl
-        LEFT JOIN stickers_garantia sg ON sg.lote_id = sl.id
+        LEFT JOIN stickers_garantia sg ON sg.lote_id = sl.id AND sg.empresa_id = sl.empresa_id
+       WHERE 1=1${tenant.sql}
        GROUP BY sl.id
        ORDER BY sl.created_at DESC
-    `);
+    `, tenant.params);
     res.json({ success: true, data: lotes });
   } catch (error) {
     console.error('Error al obtener lotes:', error);
@@ -437,13 +559,14 @@ exports.getLotes = async (req, res) => {
 exports.getAllStickers = async (req, res) => {
   try {
     const { estado, lote_id, codigo, page = 1, limit = 200 } = req.query;
+    const tenant = stickerTenantClause(req, 's');
 
     let query = `
       SELECT s.*, sl.codigo_lote, sl.tipo_generacion
         FROM stickers_garantia s
-        LEFT JOIN sticker_lotes sl ON sl.id = s.lote_id
-       WHERE 1=1`;
-    const params = [];
+        LEFT JOIN sticker_lotes sl ON sl.id = s.lote_id AND sl.empresa_id = s.empresa_id
+       WHERE 1=1${tenant.sql}`;
+    const params = [...tenant.params];
 
     if (estado)   { query += ' AND s.estado = ?';              params.push(estado); }
     if (lote_id)  { query += ' AND s.lote_id = ?';             params.push(Number(lote_id)); }
@@ -465,9 +588,12 @@ exports.getAllStickers = async (req, res) => {
 exports.anularSticker = async (req, res) => {
   try {
     const { id } = req.params;
+    const tenant = stickerTenantClause(req, 's');
     const [result] = await db.query(
-      `UPDATE stickers_garantia SET estado = 'ANULADO' WHERE id = ? AND estado = 'DISPONIBLE'`,
-      [id],
+      `UPDATE stickers_garantia s
+       SET s.estado = 'ANULADO'
+       WHERE s.id = ? AND s.estado = 'DISPONIBLE'${tenant.sql}`,
+      [id, ...tenant.params],
     );
     if (result.affectedRows === 0) {
       return res.status(400).json({ success: false, message: 'Sticker no encontrado o no está disponible para anular' });
