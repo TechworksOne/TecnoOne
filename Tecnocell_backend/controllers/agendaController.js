@@ -1,5 +1,5 @@
-// Controller: Agenda de entregas de reparaciones
-// Devuelve reparaciones con fecha_entrega_programada para el calendario de entregas.
+// Controller: Agenda de entregas de reparaciones.
+// Devuelve reparaciones con fecha_entrega_programada y eventos del calendario.
 
 const db = require('../config/database');
 
@@ -7,19 +7,148 @@ function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
 }
 
+function isGlobalSuperadminTenant(req) {
+  return isSuperadminTenant(req) && (req.tenant?.empresa_id ?? req.user?.empresa_id ?? null) == null;
+}
+
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId == null) {
+    throw new Error('Empresa requerida');
+  }
+  return empresaId;
 }
 
 function repairTenantClause(req, alias = 'r') {
-  return isSuperadminTenant(req)
+  return isGlobalSuperadminTenant(req)
     ? { sql: '', params: [] }
-    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
-// ─── GET /api/agenda/entregas ─────────────────────────────────────────────
-// Retorna reparaciones que tienen fecha_entrega_programada asignada.
-// Filtros opcionales: fecha_inicio, fecha_fin, estado (query params)
+function agendaTenantClause(req, alias = 'ae') {
+  return isGlobalSuperadminTenant(req)
+    ? { sql: '', params: [] }
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
+}
+
+function userTenantClause(req, alias = 'u') {
+  return isGlobalSuperadminTenant(req)
+    ? { sql: '', params: [] }
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
+}
+
+async function validateEmpresaExists(connectionOrDb, empresaId) {
+  if (empresaId == null) return false;
+  const [[empresa]] = await connectionOrDb.query(
+    'SELECT id FROM empresas WHERE id = ? LIMIT 1',
+    [empresaId]
+  );
+  return Boolean(empresa);
+}
+
+function normalizeEmpresaId(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const empresaId = Number(value);
+  return Number.isInteger(empresaId) && empresaId > 0 ? empresaId : NaN;
+}
+
+async function validateAgendaUserForTenant(connectionOrDb, userId, req, empresaId = null) {
+  if (!userId) return null;
+
+  const normalizedUserId = Number(userId);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    return null;
+  }
+
+  const params = [normalizedUserId];
+  let query = 'SELECT id, empresa_id FROM users WHERE id = ? AND (active = 1 OR active IS NULL)';
+
+  if (empresaId != null) {
+    query += ' AND empresa_id = ?';
+    params.push(empresaId);
+  } else if (!isGlobalSuperadminTenant(req)) {
+    query += ' AND empresa_id = ?';
+    params.push(requireTenantEmpresaId(req));
+  }
+
+  const [[user]] = await connectionOrDb.query(query, params);
+  return user || null;
+}
+
+async function validateEventoForTenant(connectionOrDb, eventoId, req) {
+  const tenant = agendaTenantClause(req, 'ae');
+  const [[evento]] = await connectionOrDb.query(
+    `SELECT ae.* FROM agenda_eventos ae WHERE ae.id = ?${tenant.sql} LIMIT 1`,
+    [eventoId, ...tenant.params]
+  );
+  return evento || null;
+}
+
+async function ensureColumn(tableName, columnName, alterSql) {
+  const [[col]] = await db.query(
+    `SELECT COUNT(*) AS cnt
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?`,
+    [tableName, columnName]
+  );
+
+  if (col.cnt === 0) {
+    await db.query(alterSql);
+  }
+}
+
+async function ensureIndex(tableName, indexName, createSql) {
+  const [[idx]] = await db.query(
+    `SELECT COUNT(*) AS cnt
+       FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND INDEX_NAME = ?`,
+    [tableName, indexName]
+  );
+
+  if (idx.cnt === 0) {
+    await db.query(createSql);
+  }
+}
+
+async function resolveEventoEmpresaId(req, body) {
+  if (!isSuperadminTenant(req)) {
+    return requireTenantEmpresaId(req);
+  }
+
+  const tenantEmpresaId = getTenantEmpresaId(req);
+  if (tenantEmpresaId != null) {
+    return tenantEmpresaId;
+  }
+
+  const bodyEmpresaId = normalizeEmpresaId(body?.empresa_id);
+  if (Number.isNaN(bodyEmpresaId)) {
+    const error = new Error('Empresa invalida');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (bodyEmpresaId == null) {
+    const error = new Error('Empresa requerida para crear evento');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!(await validateEmpresaExists(db, bodyEmpresaId))) {
+    const error = new Error('Empresa no encontrada');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return bodyEmpresaId;
+}
+
+// GET /api/agenda/entregas
 exports.getEntregas = async (req, res) => {
   try {
     const { fecha_inicio, fecha_fin, estado } = req.query;
@@ -78,8 +207,7 @@ exports.getEntregas = async (req, res) => {
   }
 };
 
-// ─── PATCH /api/reparaciones/:id/fecha-entrega ────────────────────────────
-// Actualiza fecha_entrega_programada y nota_entrega_programada
+// PATCH /api/reparaciones/:id/fecha-entrega
 exports.patchFechaEntrega = async (req, res) => {
   try {
     const { id } = req.params;
@@ -92,11 +220,13 @@ exports.patchFechaEntrega = async (req, res) => {
       });
     }
 
-    // Verificar que la reparación exista
     const tenant = repairTenantClause(req);
-    const [rows] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`, [id, ...tenant.params]);
+    const [rows] = await db.query(
+      `SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`,
+      [id, ...tenant.params]
+    );
     if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
+      return res.status(404).json({ success: false, message: 'Reparacion no encontrada' });
     }
 
     await db.query(
@@ -108,7 +238,6 @@ exports.patchFechaEntrega = async (req, res) => {
       [fecha_entrega_programada, nota_entrega_programada ?? null, id, ...tenant.params]
     );
 
-    // Devolver la reparación actualizada (campos de entrega)
     const [[updated]] = await db.query(
       `SELECT id, fecha_entrega_programada, nota_entrega_programada, estado
          FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`,
@@ -122,16 +251,18 @@ exports.patchFechaEntrega = async (req, res) => {
   }
 };
 
-// ─── DELETE /api/reparaciones/:id/fecha-entrega ───────────────────────────
-// Limpia la fecha programada de entrega (sin borrar la reparación)
+// DELETE /api/reparaciones/:id/fecha-entrega
 exports.deleteFechaEntrega = async (req, res) => {
   try {
     const { id } = req.params;
 
     const tenant = repairTenantClause(req);
-    const [rows] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`, [id, ...tenant.params]);
+    const [rows] = await db.query(
+      `SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`,
+      [id, ...tenant.params]
+    );
     if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
+      return res.status(404).json({ success: false, message: 'Reparacion no encontrada' });
     }
 
     await db.query(
@@ -150,11 +281,12 @@ exports.deleteFechaEntrega = async (req, res) => {
   }
 };
 
-// ─── Auto-crear tabla agenda_eventos si no existe ─────────────────────────────
+// Auto-crear tabla agenda_eventos si no existe.
 const ensureEventosTable = async () => {
   await db.query(`
     CREATE TABLE IF NOT EXISTS agenda_eventos (
       id INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id INT(11) NOT NULL,
       titulo VARCHAR(200) NOT NULL,
       fecha DATE NOT NULL,
       hora TIME DEFAULT NULL,
@@ -167,23 +299,26 @@ const ensureEventosTable = async () => {
       para_usuario_id INT DEFAULT NULL,
       para_usuario_nombre VARCHAR(150) DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_agenda_eventos_empresa_id (empresa_id),
+      INDEX idx_agenda_eventos_empresa_fecha (empresa_id, fecha),
+      INDEX idx_agenda_eventos_empresa_usuario (empresa_id, para_usuario_id),
+      CONSTRAINT fk_agenda_eventos_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
-  // Migración: agregar columnas nuevas si la tabla ya existía sin ellas
-  const [[col]] = await db.query(
-    `SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'agenda_eventos' AND COLUMN_NAME = 'para_rol'`
-  );
-  if (col.cnt === 0) {
-    await db.query(`ALTER TABLE agenda_eventos ADD COLUMN creado_por_id INT DEFAULT NULL`);
-    await db.query(`ALTER TABLE agenda_eventos ADD COLUMN para_rol VARCHAR(50) DEFAULT NULL`);
-    await db.query(`ALTER TABLE agenda_eventos ADD COLUMN para_usuario_id INT DEFAULT NULL`);
-    await db.query(`ALTER TABLE agenda_eventos ADD COLUMN para_usuario_nombre VARCHAR(150) DEFAULT NULL`);
-  }
+
+  await ensureColumn('agenda_eventos', 'empresa_id', 'ALTER TABLE agenda_eventos ADD COLUMN empresa_id INT(11) NULL AFTER id');
+  await ensureColumn('agenda_eventos', 'creado_por_id', 'ALTER TABLE agenda_eventos ADD COLUMN creado_por_id INT DEFAULT NULL');
+  await ensureColumn('agenda_eventos', 'para_rol', 'ALTER TABLE agenda_eventos ADD COLUMN para_rol VARCHAR(50) DEFAULT NULL');
+  await ensureColumn('agenda_eventos', 'para_usuario_id', 'ALTER TABLE agenda_eventos ADD COLUMN para_usuario_id INT DEFAULT NULL');
+  await ensureColumn('agenda_eventos', 'para_usuario_nombre', 'ALTER TABLE agenda_eventos ADD COLUMN para_usuario_nombre VARCHAR(150) DEFAULT NULL');
+
+  await ensureIndex('agenda_eventos', 'idx_agenda_eventos_empresa_id', 'CREATE INDEX idx_agenda_eventos_empresa_id ON agenda_eventos (empresa_id)');
+  await ensureIndex('agenda_eventos', 'idx_agenda_eventos_empresa_fecha', 'CREATE INDEX idx_agenda_eventos_empresa_fecha ON agenda_eventos (empresa_id, fecha)');
+  await ensureIndex('agenda_eventos', 'idx_agenda_eventos_empresa_usuario', 'CREATE INDEX idx_agenda_eventos_empresa_usuario ON agenda_eventos (empresa_id, para_usuario_id)');
 };
 
-// ─── GET /api/agenda/eventos ──────────────────────────────────────────────────
+// GET /api/agenda/eventos
 exports.getEventos = async (req, res) => {
   try {
     await ensureEventosTable();
@@ -193,23 +328,24 @@ exports.getEventos = async (req, res) => {
       ? req.user.roles
       : (req.user?.role ? [req.user.role] : []);
 
-    let query = 'SELECT * FROM agenda_eventos WHERE 1=1';
-    const params = [];
-    if (fecha_inicio) { query += ' AND fecha >= ?'; params.push(fecha_inicio); }
-    if (fecha_fin)    { query += ' AND fecha <= ?'; params.push(fecha_fin); }
+    const tenant = agendaTenantClause(req, 'ae');
+    let query = `SELECT ae.* FROM agenda_eventos ae WHERE 1=1${tenant.sql}`;
+    const params = [...tenant.params];
 
-    // Filtro de visibilidad: públicos + asignados a mí + mi rol + los que yo creé
+    if (fecha_inicio) { query += ' AND ae.fecha >= ?'; params.push(fecha_inicio); }
+    if (fecha_fin)    { query += ' AND ae.fecha <= ?'; params.push(fecha_fin); }
+
     const rolePH = userRoles.length > 0 ? userRoles.map(() => '?').join(',') : null;
     query += ` AND (
-      (para_rol IS NULL AND para_usuario_id IS NULL)
-      OR para_usuario_id = ?
-      OR creado_por_id = ?
-      ${rolePH ? `OR para_rol IN (${rolePH})` : ''}
+      (ae.para_rol IS NULL AND ae.para_usuario_id IS NULL)
+      OR ae.para_usuario_id = ?
+      OR ae.creado_por_id = ?
+      ${rolePH ? `OR ae.para_rol IN (${rolePH})` : ''}
     )`;
     params.push(userId, userId);
     if (rolePH) params.push(...userRoles);
 
-    query += ' ORDER BY fecha ASC, COALESCE(hora, "00:00:00") ASC';
+    query += ' ORDER BY ae.fecha ASC, COALESCE(ae.hora, "00:00:00") ASC';
     const [rows] = await db.query(query, params);
     res.json({ success: true, data: rows });
   } catch (error) {
@@ -218,7 +354,7 @@ exports.getEventos = async (req, res) => {
   }
 };
 
-// ─── POST /api/agenda/eventos ─────────────────────────────────────────────────
+// POST /api/agenda/eventos
 exports.createEvento = async (req, res) => {
   try {
     await ensureEventosTable();
@@ -226,52 +362,78 @@ exports.createEvento = async (req, res) => {
     if (!titulo || !fecha) {
       return res.status(400).json({ success: false, message: 'titulo y fecha son obligatorios' });
     }
+
+    const empresaId = await resolveEventoEmpresaId(req, req.body);
+    let paraUsuarioId = null;
+    if (para_usuario_id) {
+      const user = await validateAgendaUserForTenant(db, para_usuario_id, req, empresaId);
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+      }
+      paraUsuarioId = user.id;
+    }
+
     const creadorNombre = req.user?.name || req.user?.email || null;
     const creadorId = req.user?.id || null;
     const [result] = await db.query(
       `INSERT INTO agenda_eventos
-        (titulo, fecha, hora, descripcion, tipo, creado_por, creado_por_id, para_rol, para_usuario_id, para_usuario_nombre)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (empresa_id, titulo, fecha, hora, descripcion, tipo, creado_por, creado_por_id, para_rol, para_usuario_id, para_usuario_nombre)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        empresaId,
         titulo.trim(), fecha, hora || null, descripcion?.trim() || null, tipo || 'nota',
         creadorNombre, creadorId,
         para_rol || null,
-        para_usuario_id ? Number(para_usuario_id) : null,
+        paraUsuarioId,
         para_usuario_nombre || null,
       ]
     );
-    const [rows] = await db.query('SELECT * FROM agenda_eventos WHERE id = ?', [result.insertId]);
+    const [rows] = await db.query('SELECT * FROM agenda_eventos WHERE id = ? AND empresa_id = ?', [result.insertId, empresaId]);
     res.status(201).json({ success: true, data: rows[0] });
   } catch (error) {
     console.error('[agendaController] createEvento error:', error);
-    res.status(500).json({ success: false, message: 'Error al crear evento' });
+    res.status(error.statusCode || 500).json({ success: false, message: error.statusCode ? error.message : 'Error al crear evento' });
   }
 };
 
-// ─── PUT /api/agenda/eventos/:id ──────────────────────────────────────────────
+// PUT /api/agenda/eventos/:id
 exports.updateEvento = async (req, res) => {
   try {
+    await ensureEventosTable();
     const { id } = req.params;
     const { titulo, fecha, hora, descripcion, tipo } = req.body;
     if (!titulo || !fecha) {
       return res.status(400).json({ success: false, message: 'titulo y fecha son obligatorios' });
     }
-    const [check] = await db.query('SELECT id FROM agenda_eventos WHERE id = ?', [id]);
-    if (check.length === 0) {
+
+    const evento = await validateEventoForTenant(db, id, req);
+    if (!evento) {
       return res.status(404).json({ success: false, message: 'Evento no encontrado' });
     }
+
     const { para_rol, para_usuario_id, para_usuario_nombre } = req.body;
+    let paraUsuarioId = null;
+    if (para_usuario_id) {
+      const user = await validateAgendaUserForTenant(db, para_usuario_id, req, evento.empresa_id);
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+      }
+      paraUsuarioId = user.id;
+    }
+
+    const tenant = agendaTenantClause(req, 'ae');
     await db.query(
-      `UPDATE agenda_eventos
-         SET titulo=?, fecha=?, hora=?, descripcion=?, tipo=?,
-             para_rol=?, para_usuario_id=?, para_usuario_nombre=?
-       WHERE id=?`,
+      `UPDATE agenda_eventos ae
+         SET ae.titulo=?, ae.fecha=?, ae.hora=?, ae.descripcion=?, ae.tipo=?,
+             ae.para_rol=?, ae.para_usuario_id=?, ae.para_usuario_nombre=?
+       WHERE ae.id=?${tenant.sql}`,
       [
         titulo.trim(), fecha, hora || null, descripcion?.trim() || null, tipo || 'nota',
         para_rol || null,
-        para_usuario_id ? Number(para_usuario_id) : null,
+        paraUsuarioId,
         para_usuario_nombre || null,
         id,
+        ...tenant.params,
       ]
     );
     const [rows] = await db.query('SELECT * FROM agenda_eventos WHERE id = ?', [id]);
@@ -282,15 +444,24 @@ exports.updateEvento = async (req, res) => {
   }
 };
 
-// ─── DELETE /api/agenda/eventos/:id ──────────────────────────────────────────
+// DELETE /api/agenda/eventos/:id
 exports.deleteEvento = async (req, res) => {
   try {
+    await ensureEventosTable();
     const { id } = req.params;
-    const [check] = await db.query('SELECT id FROM agenda_eventos WHERE id = ?', [id]);
-    if (check.length === 0) {
+    const evento = await validateEventoForTenant(db, id, req);
+    if (!evento) {
       return res.status(404).json({ success: false, message: 'Evento no encontrado' });
     }
-    await db.query('DELETE FROM agenda_eventos WHERE id = ?', [id]);
+
+    const tenant = agendaTenantClause(req, 'ae');
+    const [result] = await db.query(
+      `DELETE FROM agenda_eventos WHERE id = ?${tenant.sql.replace(/ae\./g, '')}`,
+      [id, ...tenant.params]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: 'Evento no encontrado' });
+    }
     res.json({ success: true, message: 'Evento eliminado' });
   } catch (error) {
     console.error('[agendaController] deleteEvento error:', error);
@@ -298,9 +469,10 @@ exports.deleteEvento = async (req, res) => {
   }
 };
 
-// ─── GET /api/agenda/usuarios — lista simple para el selector del admin ───────
+// GET /api/agenda/usuarios
 exports.getUsuariosSimple = async (req, res) => {
   try {
+    const tenant = userTenantClause(req, 'u');
     const [rows] = await db.query(
       `SELECT u.id,
               TRIM(CONCAT(COALESCE(p.nombres,''), ' ', COALESCE(p.apellidos,''))) AS nombre_completo,
@@ -310,9 +482,10 @@ exports.getUsuariosSimple = async (req, res) => {
          LEFT JOIN user_profiles p ON p.user_id = u.id
          LEFT JOIN user_roles ur ON ur.user_id = u.id
          LEFT JOIN roles r ON r.id = ur.role_id
-        WHERE u.active = 1 OR u.active IS NULL
+        WHERE (u.active = 1 OR u.active IS NULL)${tenant.sql}
         GROUP BY u.id
-        ORDER BY COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.nombres,''),' ',COALESCE(p.apellidos,''))),''), u.username)`
+        ORDER BY COALESCE(NULLIF(TRIM(CONCAT(COALESCE(p.nombres,''),' ',COALESCE(p.apellidos,''))),''), u.username)`,
+      tenant.params
     );
     const data = rows.map(r => ({
       id: r.id,
