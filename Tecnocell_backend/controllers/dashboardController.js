@@ -10,6 +10,20 @@ function resolveRole(user) {
   return 'ventas'; // empleado sin rol específico → sin datos sensibles
 }
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
+function tenantClause(req, alias = null) {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+  const prefix = alias ? `${alias}.` : '';
+  return { sql: ` AND ${prefix}empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
 exports.getDashboardStats = async (req, res) => {
   const callerRole = resolveRole(req.user);
   if (callerRole === 'tecnico') {
@@ -18,6 +32,12 @@ exports.getDashboardStats = async (req, res) => {
 
   try {
     const connection = await pool.getConnection();
+    const ventasTenant = tenantClause(req);
+    const cajaTenant = tenantClause(req);
+    const productosTenant = tenantClause(req);
+    const reparacionesTenant = tenantClause(req);
+    const reparacionesAliasTenant = tenantClause(req, 'r');
+    const clientesTenant = tenantClause(req);
 
     // ── Ventas hoy ───────────────────────────────────────────────────────────
     const [[ventasHoy]] = await connection.query(`
@@ -27,7 +47,8 @@ exports.getDashboardStats = async (req, res) => {
       FROM ventas
       WHERE DATE(COALESCE(fecha_venta, created_at)) = CURDATE()
         AND estado != 'ANULADA'
-    `);
+        ${ventasTenant.sql}
+    `, ventasTenant.params);
 
     // ── Ventas mes actual ────────────────────────────────────────────────────
     const [[ventasMes]] = await connection.query(`
@@ -38,7 +59,8 @@ exports.getDashboardStats = async (req, res) => {
       WHERE MONTH(COALESCE(fecha_venta, created_at)) = MONTH(CURDATE())
         AND YEAR(COALESCE(fecha_venta, created_at))  = YEAR(CURDATE())
         AND estado != 'ANULADA'
-    `);
+        ${ventasTenant.sql}
+    `, ventasTenant.params);
 
     // ── Ventas mes anterior (para comparación %) ─────────────────────────────
     const [[ventasMesAnterior]] = await connection.query(`
@@ -47,7 +69,8 @@ exports.getDashboardStats = async (req, res) => {
       WHERE MONTH(COALESCE(fecha_venta, created_at)) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
         AND YEAR(COALESCE(fecha_venta, created_at))  = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
         AND estado != 'ANULADA'
-    `);
+        ${ventasTenant.sql}
+    `, ventasTenant.params);
 
     // ── Egresos de caja mes (gastos operativos) ──────────────────────────────
     const [[egresosCaja]] = await connection.query(`
@@ -57,9 +80,11 @@ exports.getDashboardStats = async (req, res) => {
         AND estado = 'CONFIRMADO'
         AND MONTH(fecha_movimiento) = MONTH(CURDATE())
         AND YEAR(fecha_movimiento)  = YEAR(CURDATE())
-    `);
+        ${cajaTenant.sql}
+    `, cajaTenant.params);
 
     // ── Compras mes actual ───────────────────────────────────────────────────
+    // Compras aun no tiene empresa_id; queda global hasta Sprint 1.8 compras.
     const [[comprasMes]] = await connection.query(`
       SELECT COALESCE(SUM(total), 0) AS total
       FROM compras
@@ -69,6 +94,7 @@ exports.getDashboardStats = async (req, res) => {
     `);
 
     // ── Compras mes anterior ─────────────────────────────────────────────────
+    // Compras aun no tiene empresa_id; queda global hasta Sprint 1.8 compras.
     const [[comprasMesAnterior]] = await connection.query(`
       SELECT COALESCE(SUM(total), 0) AS total
       FROM compras
@@ -86,9 +112,10 @@ exports.getDashboardStats = async (req, res) => {
       FROM ventas
       WHERE COALESCE(fecha_venta, created_at) >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
         AND estado != 'ANULADA'
+        ${ventasTenant.sql}
       GROUP BY DATE(COALESCE(fecha_venta, created_at))
       ORDER BY fecha ASC
-    `);
+    `, ventasTenant.params);
 
     // ── Productos ────────────────────────────────────────────────────────────
     const [[productos]] = await connection.query(`
@@ -97,7 +124,8 @@ exports.getDashboardStats = async (req, res) => {
         SUM(CASE WHEN stock > 0 AND stock <= stock_minimo THEN 1 ELSE 0 END) AS bajo_stock,
         SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END) AS sin_stock
       FROM productos
-    `);
+      WHERE 1=1${productosTenant.sql}
+    `, productosTenant.params);
 
     // ── Reparaciones activas ─────────────────────────────────────────────────
     const [[reparaciones]] = await connection.query(`
@@ -108,7 +136,8 @@ exports.getDashboardStats = async (req, res) => {
         SUM(CASE WHEN estado = 'COMPLETADA' THEN 1 ELSE 0 END) AS completadas
       FROM reparaciones r
       WHERE estado NOT IN ('ENTREGADA', 'CANCELADA')
-    `);
+        ${reparacionesAliasTenant.sql}
+    `, reparacionesAliasTenant.params);
 
     // ── Reparaciones completadas este mes ────────────────────────────────────
     const [[repsMes]] = await connection.query(`
@@ -117,7 +146,8 @@ exports.getDashboardStats = async (req, res) => {
       WHERE estado IN ('COMPLETADA', 'ENTREGADA')
         AND MONTH(COALESCE(fecha_cierre, updated_at)) = MONTH(CURDATE())
         AND YEAR(COALESCE(fecha_cierre, updated_at))  = YEAR(CURDATE())
-    `);
+        ${reparacionesTenant.sql}
+    `, reparacionesTenant.params);
 
     // ── Reparaciones atrasadas ───────────────────────────────────────────────
     const [[repsAtrasadas]] = await connection.query(`
@@ -126,9 +156,11 @@ exports.getDashboardStats = async (req, res) => {
       WHERE estado NOT IN ('COMPLETADA', 'ENTREGADA', 'CANCELADA')
         AND fecha_estimada_entrega IS NOT NULL
         AND fecha_estimada_entrega < CURDATE()
-    `);
+        ${reparacionesTenant.sql}
+    `, reparacionesTenant.params);
 
     // ── Cotizaciones ─────────────────────────────────────────────────────────
+    // Cotizaciones aun no tiene empresa_id; queda global hasta sprint especifico de cotizaciones.
     const [[cotizaciones]] = await connection.query(`
       SELECT
         COUNT(*) AS total,
@@ -137,6 +169,7 @@ exports.getDashboardStats = async (req, res) => {
     `);
 
     // ── Tasa conversión cotizaciones (mes actual) ────────────────────────────
+    // Cotizaciones aun no tiene empresa_id; queda global hasta sprint especifico de cotizaciones.
     const [[cotizMes]] = await connection.query(`
       SELECT
         COUNT(*) AS total,
@@ -154,8 +187,9 @@ exports.getDashboardStats = async (req, res) => {
         SELECT COUNT(*) AS total FROM clientes
         WHERE MONTH(created_at) = MONTH(CURDATE())
           AND YEAR(created_at)  = YEAR(CURDATE())
-      `);
-      const [[cliTotal]] = await connection.query(`SELECT COUNT(*) AS total FROM clientes`);
+          ${clientesTenant.sql}
+      `, clientesTenant.params);
+      const [[cliTotal]] = await connection.query(`SELECT COUNT(*) AS total FROM clientes WHERE 1=1${clientesTenant.sql}`, clientesTenant.params);
       clientesNuevosMes = Number(cliNuevos.total) || 0;
       clientesTotal     = Number(cliTotal.total)  || 0;
     } catch (_) { /* tabla puede no tener created_at */ }
@@ -299,6 +333,8 @@ exports.getTecnicoDashboardStats = async (req, res) => {
   console.log('[DashboardTecnico] usando filtro tecnico_asignado_id:', req.user?.id);
 
   const tecnicoId = req.user.id;
+  const reparacionesTenant = tenantClause(req);
+  const reparacionesAliasTenant = tenantClause(req, 'r');
 
   try {
     const connection = await pool.getConnection();
@@ -319,7 +355,8 @@ exports.getTecnicoDashboardStats = async (req, res) => {
       SELECT COUNT(*) AS total FROM reparaciones
       WHERE tecnico_asignado_id = ?
         AND estado NOT IN ('ENTREGADA', 'CANCELADA')
-    `, [tecnicoId]);
+        ${reparacionesTenant.sql}
+    `, [tecnicoId, ...reparacionesTenant.params]);
 
     // 2. En proceso
     const [[enProceso]] = await connection.query(`
@@ -327,20 +364,23 @@ exports.getTecnicoDashboardStats = async (req, res) => {
       WHERE tecnico_asignado_id = ?
         AND estado IN ('EN_DIAGNOSTICO','EN_REPARACION','EN_PROCESO',
                        'AUTORIZADA','ESPERANDO_AUTORIZACION','STAND_BY','ESPERANDO_PIEZA')
-    `, [tecnicoId]);
+        ${reparacionesTenant.sql}
+    `, [tecnicoId, ...reparacionesTenant.params]);
 
     // 3. Pendientes (recibidas pero sin iniciar trabajo)
     const [[pendientes]] = await connection.query(`
       SELECT COUNT(*) AS total FROM reparaciones
       WHERE tecnico_asignado_id = ?
         AND estado IN ('RECIBIDA','ANTICIPO_REGISTRADO')
-    `, [tecnicoId]);
+        ${reparacionesTenant.sql}
+    `, [tecnicoId, ...reparacionesTenant.params]);
 
     // 4. Listas para entregar
     const [[listas]] = await connection.query(`
       SELECT COUNT(*) AS total FROM reparaciones
       WHERE tecnico_asignado_id = ? AND estado = 'COMPLETADA'
-    `, [tecnicoId]);
+        ${reparacionesTenant.sql}
+    `, [tecnicoId, ...reparacionesTenant.params]);
 
     // 5. Atrasadas (fecha_estimada_entrega pasó y aún no cerrada)
     const [[atrasadas]] = await connection.query(`
@@ -349,7 +389,8 @@ exports.getTecnicoDashboardStats = async (req, res) => {
         AND estado NOT IN ('COMPLETADA','ENTREGADA','CANCELADA')
         AND fecha_estimada_entrega IS NOT NULL
         AND fecha_estimada_entrega < CURDATE()
-    `, [tecnicoId]);
+        ${reparacionesTenant.sql}
+    `, [tecnicoId, ...reparacionesTenant.params]);
 
     // 6. Sin checklist (activas sin entrada en check_equipo)
     const [[sinChecklist]] = await connection.query(`
@@ -357,7 +398,8 @@ exports.getTecnicoDashboardStats = async (req, res) => {
       WHERE r.tecnico_asignado_id = ?
         AND r.estado NOT IN ('ENTREGADA','CANCELADA')
         AND r.id NOT IN (SELECT DISTINCT reparacion_id FROM check_equipo)
-    `, [tecnicoId]);
+        ${reparacionesAliasTenant.sql}
+    `, [tecnicoId, ...reparacionesAliasTenant.params]);
 
     // 7. Finalizadas hoy
     const [[finalizadasHoy]] = await connection.query(`
@@ -365,7 +407,8 @@ exports.getTecnicoDashboardStats = async (req, res) => {
       WHERE tecnico_asignado_id = ?
         AND estado IN ('COMPLETADA','ENTREGADA')
         AND DATE(COALESCE(fecha_cierre, updated_at)) = CURDATE()
-    `, [tecnicoId]);
+        ${reparacionesTenant.sql}
+    `, [tecnicoId, ...reparacionesTenant.params]);
 
     // 8. Finalizadas este mes
     const [[finalizadasMes]] = await connection.query(`
@@ -374,7 +417,8 @@ exports.getTecnicoDashboardStats = async (req, res) => {
         AND estado IN ('COMPLETADA','ENTREGADA')
         AND MONTH(COALESCE(fecha_cierre, updated_at)) = MONTH(CURDATE())
         AND YEAR(COALESCE(fecha_cierre, updated_at))  = YEAR(CURDATE())
-    `, [tecnicoId]);
+        ${reparacionesTenant.sql}
+    `, [tecnicoId, ...reparacionesTenant.params]);
 
     // 9. Repuestos/ítems usados este mes
     const [[repuestosUsados]] = await connection.query(`
@@ -384,15 +428,17 @@ exports.getTecnicoDashboardStats = async (req, res) => {
       WHERE r.tecnico_asignado_id = ?
         AND MONTH(r.fecha_ingreso) = MONTH(CURDATE())
         AND YEAR(r.fecha_ingreso)  = YEAR(CURDATE())
-    `, [tecnicoId]);
+        ${reparacionesAliasTenant.sql}
+    `, [tecnicoId, ...reparacionesAliasTenant.params]);
 
     // 10. Conteo por estado
     const [estadosBD] = await connection.query(`
       SELECT estado, COUNT(*) AS total
       FROM reparaciones
       WHERE tecnico_asignado_id = ? AND estado NOT IN ('ENTREGADA','CANCELADA')
+        ${reparacionesTenant.sql}
       GROUP BY estado
-    `, [tecnicoId]);
+    `, [tecnicoId, ...reparacionesTenant.params]);
 
     // 11. Lista de reparaciones activas (hasta 10, priorizando ALTA)
     const [reparacionesActivas] = await connection.query(`
@@ -403,11 +449,12 @@ exports.getTecnicoDashboardStats = async (req, res) => {
       FROM reparaciones r
       LEFT JOIN users t ON t.id = r.tecnico_asignado_id
       WHERE r.tecnico_asignado_id = ? AND r.estado NOT IN ('ENTREGADA','CANCELADA')
+        ${reparacionesAliasTenant.sql}
       ORDER BY
         CASE r.prioridad WHEN 'ALTA' THEN 1 WHEN 'MEDIA' THEN 2 ELSE 3 END,
         r.created_at DESC
       LIMIT 10
-    `, [tecnicoId]);
+    `, [tecnicoId, ...reparacionesAliasTenant.params]);
 
     // 12. Actividad reciente (últimos 8 eventos del historial de sus reparaciones)
     const [actividadReciente] = await connection.query(`
@@ -416,9 +463,10 @@ exports.getTecnicoDashboardStats = async (req, res) => {
       FROM reparaciones_historial h
       JOIN reparaciones r ON r.id = h.reparacion_id
       WHERE r.tecnico_asignado_id = ?
+        ${reparacionesAliasTenant.sql}
       ORDER BY h.created_at DESC
       LIMIT 8
-    `, [tecnicoId]);
+    `, [tecnicoId, ...reparacionesAliasTenant.params]);
 
     connection.release();
 
@@ -457,6 +505,9 @@ exports.getTecnicoDashboardStats = async (req, res) => {
 exports.getVentasDashboard = async (req, res) => {
   try {
     const connection = await pool.getConnection();
+    const ventasTenant = tenantClause(req);
+    const reparacionesTenant = tenantClause(req);
+    const productosTenant = tenantClause(req);
 
     // ── Ventas hoy ───────────────────────────────────────────────────────────
     const [[ventasHoy]] = await connection.query(`
@@ -464,7 +515,8 @@ exports.getVentasDashboard = async (req, res) => {
       FROM ventas
       WHERE DATE(COALESCE(fecha_venta, created_at)) = CURDATE()
         AND estado != 'ANULADA'
-    `);
+        ${ventasTenant.sql}
+    `, ventasTenant.params);
 
     // ── Ventas mes actual ────────────────────────────────────────────────────
     const [[ventasMes]] = await connection.query(`
@@ -473,7 +525,8 @@ exports.getVentasDashboard = async (req, res) => {
       WHERE MONTH(COALESCE(fecha_venta, created_at)) = MONTH(CURDATE())
         AND YEAR(COALESCE(fecha_venta, created_at))  = YEAR(CURDATE())
         AND estado != 'ANULADA'
-    `);
+        ${ventasTenant.sql}
+    `, ventasTenant.params);
 
     // ── Ventas mes anterior (comparación %) ──────────────────────────────────
     const [[ventasMesAnterior]] = await connection.query(`
@@ -482,9 +535,11 @@ exports.getVentasDashboard = async (req, res) => {
       WHERE MONTH(COALESCE(fecha_venta, created_at)) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
         AND YEAR(COALESCE(fecha_venta, created_at))  = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
         AND estado != 'ANULADA'
-    `);
+        ${ventasTenant.sql}
+    `, ventasTenant.params);
 
     // ── Cotizaciones abiertas (BORRADOR + ENVIADA) con valor total ────────────
+    // Cotizaciones aun no tiene empresa_id; queda global hasta sprint especifico de cotizaciones.
     const [[cotizaciones]] = await connection.query(`
       SELECT
         COUNT(*) AS total,
@@ -499,14 +554,16 @@ exports.getVentasDashboard = async (req, res) => {
         COUNT(CASE WHEN estado NOT IN ('ENTREGADA', 'CANCELADA', 'COMPLETADA') THEN 1 END) AS activas,
         COUNT(CASE WHEN estado = 'COMPLETADA' THEN 1 END) AS listas
       FROM reparaciones
-    `);
+      WHERE 1=1${reparacionesTenant.sql}
+    `, reparacionesTenant.params);
 
     // ── Ventas con saldo pendiente (PARCIAL) ──────────────────────────────────
     const [[ventasParciales]] = await connection.query(`
       SELECT COUNT(*) AS cantidad, COALESCE(SUM(saldo_pendiente), 0) AS saldo
       FROM ventas
       WHERE estado = 'PARCIAL'
-    `);
+        ${ventasTenant.sql}
+    `, ventasTenant.params);
 
     // ── Stock ─────────────────────────────────────────────────────────────────
     const [[stockInfo]] = await connection.query(`
@@ -514,7 +571,8 @@ exports.getVentasDashboard = async (req, res) => {
         SUM(CASE WHEN stock = 0 AND activo = 1 THEN 1 ELSE 0 END) AS sin_stock,
         SUM(CASE WHEN stock > 0 AND stock <= stock_minimo AND activo = 1 THEN 1 ELSE 0 END) AS bajo_stock
       FROM productos
-    `);
+      WHERE 1=1${productosTenant.sql}
+    `, productosTenant.params);
 
     // ── Clientes únicos hoy y este mes ────────────────────────────────────────
     const [[clientesInfo]] = await connection.query(`
@@ -525,7 +583,8 @@ exports.getVentasDashboard = async (req, res) => {
           AND YEAR(COALESCE(fecha_venta, created_at)) = YEAR(CURDATE())
           AND estado != 'ANULADA' THEN cliente_id END) AS mes
       FROM ventas
-    `);
+      WHERE 1=1${ventasTenant.sql}
+    `, ventasTenant.params);
 
     // ── Tendencia 7 días ──────────────────────────────────────────────────────
     const [tendenciaRows] = await connection.query(`
@@ -536,9 +595,10 @@ exports.getVentasDashboard = async (req, res) => {
       FROM ventas
       WHERE COALESCE(fecha_venta, created_at) >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
         AND estado != 'ANULADA'
+        ${ventasTenant.sql}
       GROUP BY DATE(COALESCE(fecha_venta, created_at))
       ORDER BY fecha ASC
-    `);
+    `, ventasTenant.params);
 
     connection.release();
 

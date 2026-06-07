@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 const reportesController = require('../controllers/reportesController');
 
-const soloAdmin = [verifyToken, verifyRole('ADMINISTRADOR')];
+const soloAdmin = [verifyToken, tenantScope, verifyRole('ADMINISTRADOR', 'admin')];
 
 router.get('/resumen',               ...soloAdmin, reportesController.getResumen);
 router.get('/diario',                ...soloAdmin, reportesController.getDiario);
