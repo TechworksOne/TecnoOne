@@ -1,9 +1,28 @@
 const db = require('../config/database');
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
+function deudorTenantClause(req, alias = 'd') {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+  return { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
+function pagoTenantClause(req, alias = 'p') {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+  return { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
 // ── Listar todos los créditos ──────────────────────────────────────────────
 exports.getDeudores = async (req, res) => {
   try {
     const { estado, cliente_id, search, tipo_origen } = req.query;
+    const tenant = deudorTenantClause(req, 'd');
 
     let query = `
       SELECT 
@@ -11,10 +30,11 @@ exports.getDeudores = async (req, res) => {
         TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS cliente_nombre_actual,
         c.telefono AS cliente_telefono_actual
       FROM deudores d
-      LEFT JOIN clientes c ON d.cliente_id = c.id
+      LEFT JOIN clientes c ON d.cliente_id = c.id AND c.empresa_id = d.empresa_id
       WHERE 1=1
     `;
-    const params = [];
+    const params = [...tenant.params];
+    query += tenant.sql;
 
     if (estado) {
       query += ' AND d.estado = ?';
@@ -47,21 +67,23 @@ exports.getDeudores = async (req, res) => {
 exports.getDeudorById = async (req, res) => {
   try {
     const { id } = req.params;
+    const deudorTenant = deudorTenantClause(req, 'd');
     const [rows] = await db.query(
       `SELECT d.*, TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS cliente_nombre_actual, c.telefono AS cliente_telefono_actual
        FROM deudores d
-       LEFT JOIN clientes c ON d.cliente_id = c.id
-       WHERE d.id = ?`,
-      [id]
+       LEFT JOIN clientes c ON d.cliente_id = c.id AND c.empresa_id = d.empresa_id
+       WHERE d.id = ?${deudorTenant.sql}`,
+      [id, ...deudorTenant.params]
     );
     if (rows.length === 0) return res.status(404).json({ success: false, message: 'Crédito no encontrado' });
 
     const deudor = rows[0];
     // Pagos del crédito (incluye cuotas pre-programadas y pagos reales)
+    const pagoTenant = pagoTenantClause(req, 'deudores_pagos');
     const [pagos] = await db.query(
-      `SELECT * FROM deudores_pagos WHERE deudor_id = ?
+      `SELECT * FROM deudores_pagos WHERE deudor_id = ?${pagoTenant.sql}
        ORDER BY numero_cuota ASC, fecha_pago ASC`,
-      [id]
+      [id, ...pagoTenant.params]
     );
     deudor.pagos = pagos;
     res.json({ success: true, data: deudor });
@@ -102,17 +124,51 @@ exports.createDeudor = async (req, res) => {
     const total    = parseFloat(monto_total);
     const cuotaBase = parseFloat((total / cuotas).toFixed(2));
     const cuotaUlt  = parseFloat((total - cuotaBase * (cuotas - 1)).toFixed(2));
+    const empresaId = getTenantEmpresaId(req);
+
+    if (cliente_id) {
+      const [clientes] = await connection.query(
+        'SELECT id FROM clientes WHERE id = ? AND empresa_id = ? LIMIT 1',
+        [cliente_id, empresaId]
+      );
+      if (!clientes.length) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Cliente no encontrado para la empresa' });
+      }
+    }
+
+    if (referencia_venta_id) {
+      const [ventas] = await connection.query(
+        'SELECT id FROM ventas WHERE id = ? AND empresa_id = ? LIMIT 1',
+        [referencia_venta_id, empresaId]
+      );
+      if (!ventas.length) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Venta no encontrada para la empresa' });
+      }
+    }
+
+    if (referencia_reparacion_id) {
+      const [reparaciones] = await connection.query(
+        'SELECT id FROM reparaciones WHERE id = ? AND empresa_id = ? LIMIT 1',
+        [referencia_reparacion_id, empresaId]
+      );
+      if (!reparaciones.length) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Reparacion no encontrada para la empresa' });
+      }
+    }
 
     const [result] = await connection.query(
       `INSERT INTO deudores
-         (cliente_id, cliente_nombre, cliente_telefono, descripcion,
+         (empresa_id, cliente_id, cliente_nombre, cliente_telefono, descripcion,
           monto_total, monto_pagado, saldo_pendiente,
           fecha_vencimiento, referencia_venta_id, referencia_reparacion_id,
           tipo_origen, numero_cuotas, monto_cuota, frecuencia_pago, fecha_primer_pago,
           items_detalle, notas, estado, created_by)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDIENTE', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDIENTE', ?)`,
       [
-        cliente_id || null, cliente_nombre, cliente_telefono || null,
+        empresaId, cliente_id || null, cliente_nombre, cliente_telefono || null,
         descripcion || null, total, total,
         fecha_vencimiento || null,
         referencia_venta_id || null,
@@ -134,6 +190,7 @@ exports.createDeudor = async (req, res) => {
       for (let i = 1; i <= cuotas; i++) {
         const montoCuota = i === cuotas ? cuotaUlt : cuotaBase;
         cuotasRows.push([
+          empresaId,
           deudorId,
           i,
           0,                            // monto pagado = 0
@@ -149,15 +206,15 @@ exports.createDeudor = async (req, res) => {
       for (const row of cuotasRows) {
         await connection.query(
           `INSERT INTO deudores_pagos
-             (deudor_id, numero_cuota, monto, monto_programado, fecha_vencimiento, estado_cuota, realizado_por)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             (empresa_id, deudor_id, numero_cuota, monto, monto_programado, fecha_vencimiento, estado_cuota, realizado_por)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           row
         );
       }
     }
 
     await connection.commit();
-    const [rows] = await db.query('SELECT * FROM deudores WHERE id = ?', [deudorId]);
+    const [rows] = await db.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ?', [deudorId, empresaId]);
     res.status(201).json({ success: true, data: rows[0] });
   } catch (error) {
     await connection.rollback();
@@ -173,6 +230,7 @@ exports.searchReparaciones = async (req, res) => {
   try {
     const { search = '', limit = 15 } = req.query;
     const like = `%${search}%`;
+    const empresaId = getTenantEmpresaId(req);
     const [rows] = await db.query(
       `SELECT id, sticker_serie_interna AS numero_reparacion,
               cliente_nombre, cliente_telefono,
@@ -182,10 +240,11 @@ exports.searchReparaciones = async (req, res) => {
        FROM reparaciones
        WHERE (cliente_nombre LIKE ? OR marca LIKE ? OR modelo LIKE ?
               OR sticker_serie_interna LIKE ?)
+         AND empresa_id = ?
          AND estado NOT IN ('CANCELADA')
        ORDER BY created_at DESC
        LIMIT ?`,
-      [like, like, like, like, parseInt(limit)]
+      [like, like, like, like, empresaId, parseInt(limit)]
     );
     res.json({ success: true, data: rows });
   } catch (error) {
@@ -195,7 +254,7 @@ exports.searchReparaciones = async (req, res) => {
 };
 
 // ── Helpers internos ──────────────────────────────────────────────────────
-async function _buscarCuentaPorPOS(conn, tipoPOS) {
+async function _buscarCuentaPorPOS(conn, tipoPOS, empresaId) {
   let patrones = [];
   if (tipoPOS === 'BAC')    patrones = ['%BAC%'];
   if (tipoPOS === 'NEONET') patrones = ['%NEONET%', '%Neonet%', '%Industrial%'];
@@ -203,15 +262,16 @@ async function _buscarCuentaPorPOS(conn, tipoPOS) {
   const conds = patrones.map(() => '(nombre LIKE ? OR pos_asociado LIKE ?)').join(' OR ');
   const params = patrones.flatMap(p => [p, p]);
   const [rows] = await conn.query(
-    `SELECT id, nombre FROM cuentas_bancarias WHERE activa = TRUE AND (${conds}) ORDER BY id LIMIT 1`,
-    params
+    `SELECT id, nombre FROM cuentas_bancarias WHERE activa = TRUE AND (${conds}) AND empresa_id = ? ORDER BY id LIMIT 1`,
+    [...params, empresaId]
   );
   return rows[0] || null;
 }
 
-async function _buscarPrimeraCuentaActiva(conn) {
+async function _buscarPrimeraCuentaActiva(conn, empresaId) {
   const [rows] = await conn.query(
-    'SELECT id, nombre FROM cuentas_bancarias WHERE activa = TRUE ORDER BY id LIMIT 1'
+    'SELECT id, nombre FROM cuentas_bancarias WHERE activa = TRUE AND empresa_id = ? ORDER BY id LIMIT 1',
+    [empresaId]
   );
   return rows[0] || null;
 }
@@ -229,13 +289,14 @@ exports.registrarPago = async (req, res) => {
       monto, metodo_pago = 'EFECTIVO', referencia, notas,
       realizado_por, porcentaje_recargo = 0, usuario_id,
     } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     if (!monto || Number(monto) <= 0) {
       await connection.rollback();
       return res.status(400).json({ error: 'El monto debe ser mayor a 0' });
     }
 
-    const [rows] = await connection.query('SELECT * FROM deudores WHERE id = ? LIMIT 1', [id]);
+    const [rows] = await connection.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ? LIMIT 1', [id, empresaId]);
     if (!rows.length) {
       await connection.rollback();
       return res.status(404).json({ error: 'Crédito no encontrado' });
@@ -269,10 +330,10 @@ exports.registrarPago = async (req, res) => {
     // ── Insertar registro en deudores_pagos ──
     const [pagoResult] = await connection.query(
       `INSERT INTO deudores_pagos
-         (deudor_id, monto, metodo_pago, referencia, notas, realizado_por,
+         (empresa_id, deudor_id, monto, metodo_pago, referencia, notas, realizado_por,
           porcentaje_recargo, monto_recargo, total_cobrado, estado_cuota)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAGADO')`,
-      [id, montoBase, metodo_pago, referencia || null, notas || null, agente,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAGADO')`,
+      [empresaId, id, montoBase, metodo_pago, referencia || null, notas || null, agente,
        pct, montoRecargo, totalCobrado]
     );
     const pagoId = pagoResult.insertId;
@@ -283,8 +344,8 @@ exports.registrarPago = async (req, res) => {
     const nuevoEstado      = nuevoSaldo <= 0 ? 'PAGADO' : 'PARCIAL';
 
     await connection.query(
-      'UPDATE deudores SET monto_pagado = ?, saldo_pendiente = ?, estado = ? WHERE id = ?',
-      [nuevoMontoPagado, nuevoSaldo, nuevoEstado, id]
+      'UPDATE deudores SET monto_pagado = ?, saldo_pendiente = ?, estado = ? WHERE id = ? AND empresa_id = ?',
+      [nuevoMontoPagado, nuevoSaldo, nuevoEstado, id, empresaId]
     );
 
     // ── Registrar movimiento en caja / banco ──
@@ -294,9 +355,9 @@ exports.registrarPago = async (req, res) => {
     if (metodo_pago === 'EFECTIVO') {
       const [cajaRes] = await connection.query(
         `INSERT INTO caja_chica
-           (tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-         VALUES ('INGRESO', ?, ?, 'Cobro Deuda', 'CONFIRMADO', ?, ?)`,
-        [montoBase, concepto, agente, notas || null]
+           (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+         VALUES (?, 'INGRESO', ?, ?, 'Cobro Deuda', 'CONFIRMADO', ?, ?)`,
+        [empresaId, montoBase, concepto, agente, notas || null]
       );
       cajaMovId = cajaRes.insertId;
 
@@ -304,65 +365,65 @@ exports.registrarPago = async (req, res) => {
       let cuenta = null;
       if (req.body.cuenta_id) {
         const [cs] = await connection.query(
-          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND activa = TRUE LIMIT 1',
-          [req.body.cuenta_id]
+          'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+          [req.body.cuenta_id, empresaId]
         );
         cuenta = cs[0] || null;
       }
-      if (!cuenta) cuenta = await _buscarPrimeraCuentaActiva(connection);
+      if (!cuenta) cuenta = await _buscarPrimeraCuentaActiva(connection, empresaId);
 
       if (cuenta) {
         const [bRes] = await connection.query(
           `INSERT INTO movimientos_bancarios
-             (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
+             (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
               numero_referencia, realizado_por, observaciones)
-           VALUES (?, 'INGRESO', ?, ?, 'Transferencia', 'CONFIRMADO', ?, ?, ?)`,
-          [cuenta.id, montoBase, concepto, referencia || null, agente, notas || null]
+           VALUES (?, ?, 'INGRESO', ?, ?, 'Transferencia', 'CONFIRMADO', ?, ?, ?)`,
+          [empresaId, cuenta.id, montoBase, concepto, referencia || null, agente, notas || null]
         );
         bancoMovId = bRes.insertId;
         await connection.query(
-          'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ?',
-          [montoBase, cuenta.id]
+          'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ? AND empresa_id = ?',
+          [montoBase, cuenta.id, empresaId]
         );
       }
 
     } else if (metodo_pago === 'TARJETA_BAC') {
-      let cuenta = await _buscarCuentaPorPOS(connection, 'BAC');
-      if (!cuenta) cuenta = await _buscarPrimeraCuentaActiva(connection);
+      let cuenta = await _buscarCuentaPorPOS(connection, 'BAC', empresaId);
+      if (!cuenta) cuenta = await _buscarPrimeraCuentaActiva(connection, empresaId);
       if (cuenta) {
         const [bRes] = await connection.query(
           `INSERT INTO movimientos_bancarios
-             (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
+             (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
               numero_referencia, realizado_por, observaciones)
-           VALUES (?, 'INGRESO', ?, ?, 'POS', 'PENDIENTE', ?, ?, ?)`,
-          [cuenta.id, montoBase, concepto, referencia || null, agente, notas || null]
+           VALUES (?, ?, 'INGRESO', ?, ?, 'POS', 'PENDIENTE', ?, ?, ?)`,
+          [empresaId, cuenta.id, montoBase, concepto, referencia || null, agente, notas || null]
         );
         bancoMovId = bRes.insertId;
       }
 
     } else if (metodo_pago === 'TARJETA_NEONET') {
-      let cuenta = await _buscarCuentaPorPOS(connection, 'NEONET');
-      if (!cuenta) cuenta = await _buscarPrimeraCuentaActiva(connection);
+      let cuenta = await _buscarCuentaPorPOS(connection, 'NEONET', empresaId);
+      if (!cuenta) cuenta = await _buscarPrimeraCuentaActiva(connection, empresaId);
       if (cuenta) {
         const [bRes] = await connection.query(
           `INSERT INTO movimientos_bancarios
-             (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
+             (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
               numero_referencia, realizado_por, observaciones)
-           VALUES (?, 'INGRESO', ?, ?, 'POS', 'PENDIENTE', ?, ?, ?)`,
-          [cuenta.id, montoBase, concepto, referencia || null, agente, notas || null]
+           VALUES (?, ?, 'INGRESO', ?, ?, 'POS', 'PENDIENTE', ?, ?, ?)`,
+          [empresaId, cuenta.id, montoBase, concepto, referencia || null, agente, notas || null]
         );
         bancoMovId = bRes.insertId;
       }
 
     } else if (metodo_pago === 'TARJETA_OTRA') {
-      const cuenta = await _buscarPrimeraCuentaActiva(connection);
+      const cuenta = await _buscarPrimeraCuentaActiva(connection, empresaId);
       if (cuenta) {
         const [bRes] = await connection.query(
           `INSERT INTO movimientos_bancarios
-             (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
+             (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
               numero_referencia, realizado_por, observaciones)
-           VALUES (?, 'INGRESO', ?, ?, 'POS', 'PENDIENTE', ?, ?, ?)`,
-          [cuenta.id, montoBase, concepto, referencia || null, agente, notas || null]
+           VALUES (?, ?, 'INGRESO', ?, ?, 'POS', 'PENDIENTE', ?, ?, ?)`,
+          [empresaId, cuenta.id, montoBase, concepto, referencia || null, agente, notas || null]
         );
         bancoMovId = bRes.insertId;
       }
@@ -371,14 +432,14 @@ exports.registrarPago = async (req, res) => {
     // ── Vincular movimiento al pago ──
     if (cajaMovId || bancoMovId) {
       await connection.query(
-        'UPDATE deudores_pagos SET caja_movimiento_id = ?, banco_movimiento_id = ? WHERE id = ?',
-        [cajaMovId, bancoMovId, pagoId]
+        'UPDATE deudores_pagos SET caja_movimiento_id = ?, banco_movimiento_id = ? WHERE id = ? AND empresa_id = ?',
+        [cajaMovId, bancoMovId, pagoId, empresaId]
       );
     }
 
     await connection.commit();
 
-    const [updated] = await db.query('SELECT * FROM deudores WHERE id = ?', [id]);
+    const [updated] = await db.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ?', [id, empresaId]);
     res.json({ success: true, data: updated[0] });
   } catch (error) {
     await connection.rollback();
@@ -397,13 +458,14 @@ exports.anularDeudor = async (req, res) => {
 
     const { id } = req.params;
     const { motivo, anulado_por } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     if (!motivo || !String(motivo).trim()) {
       await connection.rollback();
       return res.status(400).json({ error: 'El motivo de anulación es requerido' });
     }
 
-    const [rows] = await connection.query('SELECT * FROM deudores WHERE id = ? LIMIT 1', [id]);
+    const [rows] = await connection.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ? LIMIT 1', [id, empresaId]);
     if (!rows.length) {
       await connection.rollback();
       return res.status(404).json({ error: 'Crédito no encontrado' });
@@ -421,16 +483,16 @@ exports.anularDeudor = async (req, res) => {
            motivo_anulacion = ?,
            fecha_anulacion  = NOW(),
            anulado_por      = ?
-       WHERE id = ?`,
-      [String(motivo).trim(), anulado_por || null, id]
+       WHERE id = ? AND empresa_id = ?`,
+      [String(motivo).trim(), anulado_por || null, id, empresaId]
     );
 
     // ── Anular cuotas PENDIENTES ──
     await connection.query(
       `UPDATE deudores_pagos
        SET estado_cuota = 'ANULADA'
-       WHERE deudor_id = ? AND (estado_cuota = 'PENDIENTE' OR estado_cuota IS NULL) AND fecha_pago IS NULL`,
-      [id]
+       WHERE deudor_id = ? AND empresa_id = ? AND (estado_cuota = 'PENDIENTE' OR estado_cuota IS NULL) AND fecha_pago IS NULL`,
+      [id, empresaId]
     );
 
     // ── Restaurar stock si es VENTA con items_detalle ──
@@ -443,8 +505,8 @@ exports.anularDeudor = async (req, res) => {
         if (itemId > 0 && itemQty > 0) {
           // Update productos (items de venta siempre son productos)
           await connection.query(
-            'UPDATE productos SET stock = stock + ? WHERE id = ?',
-            [itemQty, itemId]
+            'UPDATE productos SET stock = stock + ? WHERE id = ? AND empresa_id = ?',
+            [itemQty, itemId, empresaId]
           );
         }
       }
@@ -453,9 +515,9 @@ exports.anularDeudor = async (req, res) => {
     // ── Reversas de pagos ya realizados ──
     const [pagosRealizados] = await connection.query(
       `SELECT * FROM deudores_pagos
-       WHERE deudor_id = ? AND monto > 0 AND fecha_pago IS NOT NULL
+       WHERE deudor_id = ? AND empresa_id = ? AND monto > 0 AND fecha_pago IS NOT NULL
          AND (estado_cuota != 'ANULADA' OR estado_cuota IS NULL)`,
-      [id]
+      [id, empresaId]
     );
 
     const agente     = anulado_por ? `Usuario #${anulado_por}` : 'Sistema';
@@ -469,38 +531,38 @@ exports.anularDeudor = async (req, res) => {
       if (pago.caja_movimiento_id) {
         await connection.query(
           `INSERT INTO caja_chica
-             (tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-           VALUES ('EGRESO', ?, ?, 'Reversa Deuda', 'CONFIRMADO', ?, ?)`,
-          [montoPago, concepto, agente, motivoCorto]
+             (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+           VALUES (?, 'EGRESO', ?, ?, 'Reversa Deuda', 'CONFIRMADO', ?, ?)`,
+          [empresaId, montoPago, concepto, agente, motivoCorto]
         );
       }
 
       if (pago.banco_movimiento_id) {
         // Fetch the original bank movement with its status
         const [movOrig] = await connection.query(
-          'SELECT id, cuenta_id, estado FROM movimientos_bancarios WHERE id = ? LIMIT 1',
-          [pago.banco_movimiento_id]
+          'SELECT id, cuenta_id, estado FROM movimientos_bancarios WHERE id = ? AND empresa_id = ? LIMIT 1',
+          [pago.banco_movimiento_id, empresaId]
         );
         if (movOrig.length) {
           const movEstado = movOrig[0].estado;
           if (movEstado === 'PENDIENTE') {
             // Movement was never confirmed — just delete it, no reversal needed
             await connection.query(
-              'DELETE FROM movimientos_bancarios WHERE id = ?',
-              [pago.banco_movimiento_id]
+              'DELETE FROM movimientos_bancarios WHERE id = ? AND empresa_id = ?',
+              [pago.banco_movimiento_id, empresaId]
             );
           } else if (movEstado === 'CONFIRMADO' && movOrig[0].cuenta_id) {
             // Movement was confirmed — register a reversal EGRESO and subtract balance
             await connection.query(
               `INSERT INTO movimientos_bancarios
-                 (cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
+                 (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
                   numero_referencia, realizado_por, observaciones)
-               VALUES (?, 'EGRESO', ?, ?, 'Reversa Deuda', 'CONFIRMADO', NULL, ?, ?)`,
-              [movOrig[0].cuenta_id, montoPago, concepto, agente, motivoCorto]
+               VALUES (?, ?, 'EGRESO', ?, ?, 'Reversa Deuda', 'CONFIRMADO', NULL, ?, ?)`,
+              [empresaId, movOrig[0].cuenta_id, montoPago, concepto, agente, motivoCorto]
             );
             await connection.query(
-              'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ?',
-              [montoPago, movOrig[0].cuenta_id]
+              'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ? AND empresa_id = ?',
+              [montoPago, movOrig[0].cuenta_id, empresaId]
             );
           }
           // Any other status (ANULADO, CANCELADO) — skip, no action needed
@@ -522,6 +584,7 @@ exports.anularDeudor = async (req, res) => {
 // ── Resumen / estadísticas ────────────────────────────────────────────────
 exports.getResumen = async (req, res) => {
   try {
+    const tenant = deudorTenantClause(req, 'deudores');
     const [[stats]] = await db.query(`
       SELECT
         COUNT(*) AS total_creditos,
@@ -532,7 +595,8 @@ exports.getResumen = async (req, res) => {
         SUM(CASE WHEN estado != 'ANULADO'  THEN saldo_pendiente ELSE 0 END) AS total_pendiente,
         SUM(CASE WHEN estado != 'ANULADO'  THEN monto_pagado   ELSE 0 END) AS total_cobrado
       FROM deudores
-    `);
+      WHERE 1=1${tenant.sql}
+    `, tenant.params);
     res.json({ success: true, data: stats });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
