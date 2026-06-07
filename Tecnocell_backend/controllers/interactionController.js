@@ -1,5 +1,35 @@
 const db = require('../config/database');
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true;
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? null;
+}
+
+function clienteTenantClause(req, alias = 'c') {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+
+  return {
+    sql: ` AND ${alias}.empresa_id = ?`,
+    params: [getTenantEmpresaId(req)]
+  };
+}
+
+async function validateClienteForTenant(connectionOrDb, clienteId, req) {
+  const tenant = clienteTenantClause(req, 'c');
+  const [clientes] = await connectionOrDb.query(
+    `SELECT c.id, c.empresa_id
+     FROM clientes c
+     WHERE c.id = ? AND c.activo = true${tenant.sql}
+     LIMIT 1`,
+    [clienteId, ...tenant.params]
+  );
+
+  return clientes[0] || null;
+}
+
 // Registrar nueva interacción
 const createInteraction = async (req, res) => {
   try {
@@ -10,6 +40,14 @@ const createInteraction = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'cliente_id y tipo son requeridos'
+      });
+    }
+
+    const cliente = await validateClienteForTenant(db, cliente_id, req);
+    if (!cliente) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cliente no encontrado'
       });
     }
 
@@ -42,13 +80,22 @@ const getCustomerInteractions = async (req, res) => {
     const { cliente_id } = req.params;
     const { tipo } = req.query;
 
+    const cliente = await validateClienteForTenant(db, cliente_id, req);
+    if (!cliente) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cliente no encontrado'
+      });
+    }
+
+    const tenant = clienteTenantClause(req, 'c');
     let query = `
       SELECT i.*, c.nombre, c.apellido 
       FROM interacciones_clientes i
       JOIN clientes c ON i.cliente_id = c.id
-      WHERE i.cliente_id = ?
+      WHERE i.cliente_id = ?${tenant.sql}
     `;
-    const params = [cliente_id];
+    const params = [cliente_id, ...tenant.params];
 
     if (tipo) {
       query += ' AND i.tipo = ?';
@@ -72,14 +119,37 @@ const getCustomerInteractions = async (req, res) => {
   }
 };
 
-// Obtener resumen de cliente (usando la vista)
+// Obtener resumen de cliente
 const getCustomerSummary = async (req, res) => {
   try {
     const { cliente_id } = req.params;
 
+    const cliente = await validateClienteForTenant(db, cliente_id, req);
+    if (!cliente) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cliente no encontrado'
+      });
+    }
+
+    const tenant = clienteTenantClause(req, 'c');
     const [summary] = await db.query(
-      'SELECT * FROM v_resumen_clientes WHERE cliente_id = ?',
-      [cliente_id]
+      `SELECT
+        c.id AS cliente_id,
+        c.nombre,
+        c.apellido,
+        COUNT(i.id) AS total_interacciones,
+        SUM(CASE WHEN i.tipo = 'cotizacion' THEN 1 ELSE 0 END) AS total_cotizaciones,
+        SUM(CASE WHEN i.tipo = 'venta' THEN 1 ELSE 0 END) AS total_ventas,
+        SUM(CASE WHEN i.tipo = 'reparacion' THEN 1 ELSE 0 END) AS total_reparaciones,
+        SUM(CASE WHEN i.tipo = 'visita' THEN 1 ELSE 0 END) AS total_visitas,
+        COALESCE(SUM(CASE WHEN i.tipo = 'venta' THEN i.monto ELSE 0 END), 0) AS total_gastado,
+        MAX(i.created_at) AS ultima_interaccion
+       FROM clientes c
+       LEFT JOIN interacciones_clientes i ON c.id = i.cliente_id
+       WHERE c.id = ? AND c.activo = true${tenant.sql}
+       GROUP BY c.id, c.nombre, c.apellido`,
+      [cliente_id, ...tenant.params]
     );
 
     if (summary.length === 0) {
@@ -107,24 +177,33 @@ const getInteractionStats = async (req, res) => {
   try {
     const { desde, hasta } = req.query;
 
-    let dateFilter = '';
+    const tenant = clienteTenantClause(req, 'c');
+    const conditions = [];
     const params = [];
 
+    if (!isSuperadminTenant(req)) {
+      conditions.push('c.empresa_id = ?');
+      params.push(...tenant.params);
+    }
+
     if (desde && hasta) {
-      dateFilter = 'WHERE created_at BETWEEN ? AND ?';
+      conditions.push('i.created_at BETWEEN ? AND ?');
       params.push(desde, hasta);
     }
 
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
     const [stats] = await db.query(`
       SELECT 
-        tipo,
+        i.tipo,
         COUNT(*) as total,
-        COALESCE(SUM(monto), 0) as monto_total,
-        DATE(created_at) as fecha
-      FROM interacciones_clientes
-      ${dateFilter}
-      GROUP BY tipo, DATE(created_at)
-      ORDER BY fecha DESC, tipo
+        COALESCE(SUM(i.monto), 0) as monto_total,
+        DATE(i.created_at) as fecha
+      FROM interacciones_clientes i
+      JOIN clientes c ON c.id = i.cliente_id
+      ${whereClause}
+      GROUP BY i.tipo, DATE(i.created_at)
+      ORDER BY fecha DESC, i.tipo
     `, params);
 
     res.json({
