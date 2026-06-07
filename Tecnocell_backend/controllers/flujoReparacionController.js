@@ -45,6 +45,36 @@ const upload = multer({
 
 exports.uploadMiddleware = upload.array('fotos', 10);
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true;
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? null;
+}
+
+function repairTenantClause(req, alias = 'r') {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+
+  return {
+    sql: ` AND ${alias}.empresa_id = ?`,
+    params: [getTenantEmpresaId(req)]
+  };
+}
+
+async function validateReparacionForTenant(connectionOrDb, reparacionId, req) {
+  const tenant = repairTenantClause(req, 'r');
+  const [reparaciones] = await connectionOrDb.query(
+    `SELECT r.*
+     FROM reparaciones r
+     WHERE r.id = ?${tenant.sql}
+     LIMIT 1`,
+    [reparacionId, ...tenant.params]
+  );
+
+  return reparaciones[0] || null;
+}
+
 // ========== GUARDAR/ACTUALIZAR CHECKLIST DE INGRESO DE EQUIPO ==========
 exports.saveIngresoEquipo = async (req, res) => {
   const connection = await db.getConnection();
@@ -65,12 +95,9 @@ exports.saveIngresoEquipo = async (req, res) => {
     }
     
     // Verificar que la reparación existe
-    const [reparaciones] = await connection.query(
-      'SELECT id, tipo_equipo FROM reparaciones WHERE id = ?',
-      [reparacionId]
-    );
+    const reparacion = await validateReparacionForTenant(connection, reparacionId, req);
     
-    if (reparaciones.length === 0) {
+    if (!reparacion) {
       await connection.rollback();
       return res.status(404).json({
         success: false,
@@ -78,7 +105,7 @@ exports.saveIngresoEquipo = async (req, res) => {
       });
     }
     
-    const tipoEquipo = reparaciones[0].tipo_equipo;
+    const tipoEquipo = reparacion.tipo_equipo;
     
     // Procesar fotos si fueron subidas
     const fotos = [];
@@ -158,6 +185,14 @@ exports.saveIngresoEquipo = async (req, res) => {
 exports.getIngresoEquipo = async (req, res) => {
   try {
     const { id: reparacionId } = req.params;
+
+    const reparacion = await validateReparacionForTenant(db, reparacionId, req);
+    if (!reparacion) {
+      return res.status(404).json({
+        success: false,
+        message: 'Reparacion no encontrada'
+      });
+    }
     
     const [checklist] = await db.query(
       `SELECT 
@@ -167,8 +202,8 @@ exports.getIngresoEquipo = async (req, res) => {
         r.modelo
        FROM ingreso_equipo_checklist ic
        INNER JOIN reparaciones r ON ic.reparacion_id = r.id
-       WHERE ic.reparacion_id = ?`,
-      [reparacionId]
+       WHERE ic.reparacion_id = ? AND r.empresa_id = ?`,
+      [reparacionId, reparacion.empresa_id]
     );
     
     if (checklist.length === 0) {
@@ -223,16 +258,25 @@ exports.cambiarEstado = async (req, res) => {
       });
     }
     
+    const reparacion = await validateReparacionForTenant(connection, reparacionId, req);
+    if (!reparacion) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Reparacion no encontrada'
+      });
+    }
+
     // Actualizar estado en reparaciones
     if (nuevoEstado === 'ENTREGADA') {
       await connection.query(
-        'UPDATE reparaciones SET estado = ?, fecha_entrega = NOW(), fecha_cierre = CURDATE(), updated_at = NOW() WHERE id = ?',
-        [nuevoEstado, reparacionId]
+        'UPDATE reparaciones SET estado = ?, fecha_entrega = NOW(), fecha_cierre = CURDATE(), updated_at = NOW() WHERE id = ? AND empresa_id = ?',
+        [nuevoEstado, reparacionId, reparacion.empresa_id]
       );
     } else {
       await connection.query(
-        'UPDATE reparaciones SET estado = ?, updated_at = NOW() WHERE id = ?',
-        [nuevoEstado, reparacionId]
+        'UPDATE reparaciones SET estado = ?, updated_at = NOW() WHERE id = ? AND empresa_id = ?',
+        [nuevoEstado, reparacionId, reparacion.empresa_id]
       );
     }
 
@@ -272,6 +316,14 @@ exports.cambiarEstado = async (req, res) => {
 exports.getHistorial = async (req, res) => {
   try {
     const { id: reparacionId } = req.params;
+
+    const reparacion = await validateReparacionForTenant(db, reparacionId, req);
+    if (!reparacion) {
+      return res.status(404).json({
+        success: false,
+        message: 'Reparacion no encontrada'
+      });
+    }
     
     const [historial] = await db.query(
       `SELECT 
@@ -315,10 +367,32 @@ exports.asignarTecnico = async (req, res) => {
   try {
     const { id: reparacionId } = req.params;
     const { tecnicoId, tecnicoNombre } = req.body;
+
+    const reparacion = await validateReparacionForTenant(db, reparacionId, req);
+    if (!reparacion) {
+      return res.status(404).json({
+        success: false,
+        message: 'Reparacion no encontrada'
+      });
+    }
+
+    if (tecnicoId) {
+      const [tecnicos] = await db.query(
+        'SELECT id FROM users WHERE id = ? AND empresa_id = ? AND active = TRUE LIMIT 1',
+        [tecnicoId, reparacion.empresa_id]
+      );
+
+      if (tecnicos.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Tecnico no encontrado'
+        });
+      }
+    }
     
     await db.query(
-      'UPDATE reparaciones SET tecnico_asignado = ?, updated_at = NOW() WHERE id = ?',
-      [tecnicoNombre, reparacionId]
+      'UPDATE reparaciones SET tecnico_asignado = ?, updated_at = NOW() WHERE id = ? AND empresa_id = ?',
+      [tecnicoNombre, reparacionId, reparacion.empresa_id]
     );
     
     res.json({
@@ -351,9 +425,17 @@ exports.cambiarPrioridad = async (req, res) => {
       });
     }
     
+    const reparacion = await validateReparacionForTenant(db, reparacionId, req);
+    if (!reparacion) {
+      return res.status(404).json({
+        success: false,
+        message: 'Reparacion no encontrada'
+      });
+    }
+
     await db.query(
-      'UPDATE reparaciones SET prioridad = ?, updated_at = NOW() WHERE id = ?',
-      [prioridad, reparacionId]
+      'UPDATE reparaciones SET prioridad = ?, updated_at = NOW() WHERE id = ? AND empresa_id = ?',
+      [prioridad, reparacionId, reparacion.empresa_id]
     );
     
     res.json({
@@ -377,15 +459,16 @@ const ESTADOS_EXCLUIDOS_FLUJO = ['ENTREGADA', 'CANCELADA', 'ANULADA', 'CANCELADO
 exports.getReparacionesFlujoActivo = async (req, res) => {
   try {
     const { search, prioridad, limit = 200 } = req.query;
+    const tenant = repairTenantClause(req, 'r');
 
     let query = `
       SELECT 
         r.*,
         (SELECT COUNT(*) FROM ingreso_equipo_checklist WHERE reparacion_id = r.id) as tiene_checklist
       FROM reparaciones r
-      WHERE r.estado NOT IN (${ESTADOS_EXCLUIDOS_FLUJO.map(() => '?').join(',')})
+      WHERE r.estado NOT IN (${ESTADOS_EXCLUIDOS_FLUJO.map(() => '?').join(',')})${tenant.sql}
     `;
-    const params = [...ESTADOS_EXCLUIDOS_FLUJO];
+    const params = [...ESTADOS_EXCLUIDOS_FLUJO, ...tenant.params];
 
     if (prioridad) {
       query += ' AND r.prioridad = ?';
@@ -425,6 +508,7 @@ exports.getReparacionesFlujoActivo = async (req, res) => {
 exports.getEntregadas = async (req, res) => {
   try {
     const { search, estado_garantia, fecha_inicio, fecha_fin, limit = 200 } = req.query;
+    const tenant = repairTenantClause(req, 'r');
 
     let query = `
       SELECT
@@ -439,9 +523,9 @@ exports.getEntregadas = async (req, res) => {
         END AS estado_garantia,
         DATE_ADD(COALESCE(DATE(r.fecha_entrega), r.fecha_cierre), INTERVAL r.garantia_dias DAY) AS fecha_garantia_fin
       FROM reparaciones r
-      WHERE r.estado = 'ENTREGADA'
+      WHERE r.estado = 'ENTREGADA'${tenant.sql}
     `;
-    const params = [];
+    const params = [...tenant.params];
 
     if (search) {
       query += ` AND (r.id LIKE ? OR r.cliente_nombre LIKE ? OR r.marca LIKE ? OR r.modelo LIKE ? OR r.cliente_telefono LIKE ?)`;
@@ -515,7 +599,7 @@ exports.reingresarGarantia = async (req, res) => {
     }
 
     // Obtener reparación
-    const [[rep]] = await connection.query('SELECT * FROM reparaciones WHERE id = ?', [reparacionId]);
+    const rep = await validateReparacionForTenant(connection, reparacionId, req);
 
     if (!rep) {
       await connection.rollback();
@@ -564,8 +648,8 @@ exports.reingresarGarantia = async (req, res) => {
         fecha_reingreso = NOW(),
         tecnico_asignado = COALESCE(?, tecnico_asignado),
         updated_at      = NOW()
-       WHERE id = ?`,
-      [motivo.trim(), repuesto.trim(), tecnico || null, reparacionId]
+       WHERE id = ? AND empresa_id = ?`,
+      [motivo.trim(), repuesto.trim(), tecnico || null, reparacionId, rep.empresa_id]
     );
 
     // Registrar en historial
