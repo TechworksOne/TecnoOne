@@ -6,13 +6,23 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function ventaTenantClause(req, alias = 'v') {
   return isSuperadminTenant(req)
     ? { sql: '', params: [] }
-    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 // Valores permitidos para metodo_pago (deben coincidir con el ENUM de la DB)
@@ -56,7 +66,7 @@ exports.createVenta = async (req, res) => {
       metodo_pago, pagos, monto_pagado, observaciones, notas_internas,
       created_by, interes_tarjeta
     } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     // Validaciones básicas
     if (!cliente_id || !cliente_nombre) {
@@ -177,6 +187,9 @@ exports.createVenta = async (req, res) => {
     res.status(201).json(venta);
   } catch (error) {
     console.error('Error al crear venta:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     // Detectar error de ENUM de MySQL (1292 = Data truncated, 1265 = Warn truncated)
     if (error.code === 'ER_WARN_DATA_TRUNCATED' || error.code === 'ER_BAD_NULL_ERROR' || error.errno === 1292 || error.errno === 1265) {
       return res.status(400).json({
@@ -200,7 +213,7 @@ exports.createVentaFromQuote = async (req, res) => {
   try {
     const { cotizacionId } = req.params;
     const { pagos, metodo_pago, observaciones, created_by } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     // Normalizar y validar metodo_pago
     const metodoPagoNorm = normalizeMetodoPago(metodo_pago);
@@ -369,6 +382,9 @@ exports.createVentaFromQuote = async (req, res) => {
     res.status(201).json(venta);
   } catch (error) {
     console.error('Error al convertir cotización a venta:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     if (error.code === 'ER_WARN_DATA_TRUNCATED' || error.errno === 1292 || error.errno === 1265) {
       return res.status(400).json({
         error: 'Valor inválido para la DB. El ENUM de metodo_pago necesita migración.',
@@ -454,6 +470,9 @@ exports.getAllVentas = async (req, res) => {
     res.json(ventasParsed);
   } catch (error) {
     console.error('Error al obtener ventas:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     res.status(500).json({ 
       error: 'Error al obtener ventas',
       details: error.message 
@@ -483,6 +502,9 @@ exports.getVentaById = async (req, res) => {
     res.json(venta);
   } catch (error) {
     console.error('Error al obtener venta:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     res.status(500).json({ 
       error: 'Error al obtener venta',
       details: error.message 
@@ -499,7 +521,7 @@ exports.registrarPago = async (req, res) => {
     const { id } = req.params;
     const { monto, metodo, referencia, comprobanteUrl, usuario_id } = req.body;
     const tenant = ventaTenantClause(req);
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     if (!monto || monto <= 0) {
       return res.status(400).json({ error: 'El monto debe ser mayor a 0' });
@@ -579,6 +601,9 @@ exports.registrarPago = async (req, res) => {
     res.json(venta);
   } catch (error) {
     console.error('Error al registrar pago:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     res.status(500).json({ 
       error: 'Error al registrar pago',
       details: error.message 
@@ -597,7 +622,7 @@ exports.anularVenta = async (req, res) => {
     const { id } = req.params;
     const { motivo, usuario_id } = req.body;
     const tenant = ventaTenantClause(req);
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     if (!motivo) {
       return res.status(400).json({
@@ -707,6 +732,9 @@ exports.anularVenta = async (req, res) => {
     }
 
     console.error('Error al anular venta:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
 
     res.status(500).json({
       error: 'Error al anular venta',
@@ -745,6 +773,9 @@ exports.getEstadisticas = async (req, res) => {
     res.json(stats[0] || {});
   } catch (error) {
     console.error('Error al obtener estadísticas:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     res.status(500).json({ 
       error: 'Error al obtener estadísticas',
       details: error.message 

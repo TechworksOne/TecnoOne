@@ -7,20 +7,30 @@ function isSuperadminTenant(req) {
 }
 
 function getCompraEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireCompraEmpresaId(req) {
+  const empresaId = getCompraEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('empresaId requerido');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function compraTenantClause(req, alias = null) {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
   const prefix = alias ? `${alias}.` : '';
-  return { sql: ` AND ${prefix}empresa_id = ?`, params: [getCompraEmpresaId(req)] };
+  return { sql: ` AND ${prefix}empresa_id = ?`, params: [requireCompraEmpresaId(req)] };
 }
 
 function resolveCompraEmpresaId(options = {}) {
-  const { req, empresaId, fallbackEmpresaId = 1 } = options;
+  const { req, empresaId } = options;
   if (empresaId !== undefined && empresaId !== null && empresaId !== '') return empresaId;
-  if (req) return getCompraEmpresaId(req);
-  return fallbackEmpresaId;
+  if (req) return requireCompraEmpresaId(req);
+  throw new Error('empresaId requerido');
 }
 
 async function validateProveedorForCompra(connection, proveedorId, empresaId) {
@@ -62,7 +72,7 @@ exports.createCompraProductos = async (req, res) => {
         message: 'Faltan campos requeridos'
       });
     }
-    const empresaId = getCompraEmpresaId(req);
+    const empresaId = requireCompraEmpresaId(req);
 
     const proveedorValido = await validateProveedorForCompra(connection, proveedor_id, empresaId);
     if (!proveedorValido) {
@@ -185,6 +195,9 @@ exports.createCompraProductos = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('❌ Error al crear compra de productos:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     res.status(500).json({
       success: false,
       message: 'Error al registrar la compra de productos',
@@ -223,7 +236,7 @@ exports.createCompraRepuestos = async (req, res) => {
         message: 'Faltan campos requeridos'
       });
     }
-    const empresaId = getCompraEmpresaId(req);
+    const empresaId = requireCompraEmpresaId(req);
 
     const proveedorValido = await validateProveedorForCompra(connection, proveedor_id, empresaId);
     if (!proveedorValido) {
@@ -334,6 +347,9 @@ exports.createCompraRepuestos = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('❌ Error al crear compra de repuestos:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     res.status(500).json({
       success: false,
       message: 'Error al registrar la compra de repuestos',
@@ -371,7 +387,7 @@ exports.createCompra = async (req, res) => {
         message: 'Faltan campos requeridos: fecha_compra, proveedor_nombre, items'
       });
     }
-    const empresaId = getCompraEmpresaId(req);
+    const empresaId = requireCompraEmpresaId(req);
 
     const proveedorValido = await validateProveedorForCompra(connection, proveedor_id, empresaId);
     if (!proveedorValido) {
@@ -515,6 +531,9 @@ exports.createCompra = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('❌ Error al crear compra:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     res.status(500).json({
       success: false,
       message: 'Error al crear compra',
@@ -592,6 +611,9 @@ exports.getAllCompras = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error al obtener compras:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     res.status(500).json({
       success: false,
       message: 'Error al obtener compras',
@@ -617,7 +639,7 @@ exports.getCompraById = async (req, res) => {
     }
 
     const compra = compras[0];
-    const empresaId = compra.empresa_id ?? getCompraEmpresaId(req);
+    const empresaId = compra.empresa_id ?? requireCompraEmpresaId(req);
 
     // Obtener items de la compra
     const [items] = await db.query(
@@ -647,6 +669,9 @@ exports.getCompraById = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error al obtener compra:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     res.status(500).json({
       success: false,
       message: 'Error al obtener compra',
@@ -660,7 +685,7 @@ exports.getSeriesByProducto = async (req, res) => {
   try {
     const { productoId } = req.params;
     const { estado } = req.query;
-    const empresaId = getCompraEmpresaId(req);
+    const empresaId = requireCompraEmpresaId(req);
 
     const [productos] = await db.query(
       'SELECT id FROM productos WHERE id = ? AND empresa_id = ? LIMIT 1',
@@ -688,6 +713,9 @@ exports.getSeriesByProducto = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error al obtener series:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     res.status(500).json({
       success: false,
       message: 'Error al obtener series',
@@ -714,7 +742,7 @@ exports.anularCompra = async (req, res) => {
     }
 
     const compra = compras[0];
-    const empresaId = compra.empresa_id ?? getCompraEmpresaId(req);
+    const empresaId = compra.empresa_id ?? requireCompraEmpresaId(req);
 
     if (compra.estado === 'CANCELADA') {
       await connection.rollback();
@@ -752,6 +780,9 @@ exports.anularCompra = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('❌ Error al anular compra:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     res.status(500).json({ success: false, message: 'Error al anular la compra', error: error.message });
   } finally {
     connection.release();

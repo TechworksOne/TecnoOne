@@ -19,17 +19,27 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('empresaId requerido');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function tarjetaTenantClause(req, alias = 't') {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
-  return { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+  return { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 function movimientoTarjetaTenantClause(req, alias = 'm') {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
-  return { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+  return { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 // ── GET /api/tarjetas-credito ──────────────────────────────────────────────
@@ -57,7 +67,7 @@ exports.getTarjetas = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error getTarjetas:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -74,7 +84,7 @@ exports.createTarjeta = async (req, res) => {
     if (dia_pago < 1 || dia_pago > 31)   return res.status(400).json({ success: false, message: 'Día de pago inválido (1-31)' });
     if (Number(tasa_interes) < 0) return res.status(400).json({ success: false, message: 'La tasa de interés no puede ser negativa' });
 
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
     const [result] = await db.query(
       `INSERT INTO tarjetas_credito (empresa_id, banco, alias, ultimos4, tasa_interes, dia_corte, dia_pago, limite_credito, moneda, notas, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -88,7 +98,7 @@ exports.createTarjeta = async (req, res) => {
     res.status(201).json({ success: true, message: 'Tarjeta creada', data: { id: result.insertId } });
   } catch (error) {
     console.error('Error createTarjeta:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -123,7 +133,7 @@ exports.updateTarjeta = async (req, res) => {
     res.json({ success: true, message: 'Tarjeta actualizada' });
   } catch (error) {
     console.error('Error updateTarjeta:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -141,7 +151,7 @@ exports.desactivarTarjeta = async (req, res) => {
     res.json({ success: true, message: 'Tarjeta desactivada' });
   } catch (error) {
     console.error('Error desactivarTarjeta:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -169,7 +179,7 @@ exports.getMovimientos = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error getMovimientos:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -182,7 +192,7 @@ exports.registrarPago = async (req, res) => {
     await connection.beginTransaction();
     const { id } = req.params;
     const { cuenta_origen_id, tipo_cuenta_origen, monto, fecha, observaciones } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     if (!monto || Number(monto) <= 0) {
       await connection.rollback();
@@ -244,7 +254,7 @@ exports.registrarPago = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error registrarPago:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   } finally {
     connection.release();
   }
@@ -259,7 +269,7 @@ exports.registrarAjuste = async (req, res) => {
 
     if (!monto) return res.status(400).json({ success: false, message: 'El monto es requerido' });
 
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
     const [tarjetas] = await db.query(
       'SELECT id FROM tarjetas_credito WHERE id = ? AND empresa_id = ? AND activo = 1',
       [id, empresaId]
@@ -275,18 +285,20 @@ exports.registrarAjuste = async (req, res) => {
     res.status(201).json({ success: true, message: 'Ajuste registrado' });
   } catch (error) {
     console.error('Error registrarAjuste:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
 // ── POST /api/tarjetas-credito/movimiento-compra (interno) ────────────────
 // Usado por compraController cuando metodo_pago = 'tarjeta_credito'
 exports.registrarCompra = async (connection, tarjetaId, montoCentavos, compraId, descripcion, userId, empresaId = null) => {
-  // Fallback temporal a empresa 1 hasta Sprint 1.8 compras.
-  const resolvedEmpresaId = Number(empresaId ?? 1) || 1;
+  const empresaIdFinanciera = Number(empresaId);
+  if (!Number.isInteger(empresaIdFinanciera) || empresaIdFinanciera <= 0) {
+    throw new Error('empresaId requerido');
+  }
   const [tarjetas] = await connection.query(
     'SELECT id FROM tarjetas_credito WHERE id = ? AND empresa_id = ? AND activo = 1 LIMIT 1',
-    [tarjetaId, resolvedEmpresaId]
+    [tarjetaId, empresaIdFinanciera]
   );
   if (!tarjetas.length) {
     throw new Error('Tarjeta no encontrada o inactiva para la empresa');
@@ -295,6 +307,6 @@ exports.registrarCompra = async (connection, tarjetaId, montoCentavos, compraId,
   await connection.query(
     `INSERT INTO tarjeta_credito_movimientos (empresa_id, tarjeta_id, tipo, monto, descripcion, referencia_tipo, referencia_id, fecha_movimiento, created_by)
      VALUES (?, ?, 'compra', ?, ?, 'compra', ?, NOW(), ?)`,
-    [resolvedEmpresaId, tarjetaId, montoCentavos, descripcion || 'Compra pagada con tarjeta de crédito', compraId, userId]
+    [empresaIdFinanciera, tarjetaId, montoCentavos, descripcion || 'Compra pagada con tarjeta de crédito', compraId, userId]
   );
 };
