@@ -23,6 +23,17 @@ function resolveCompraEmpresaId(options = {}) {
   return fallbackEmpresaId;
 }
 
+async function validateProveedorForCompra(connection, proveedorId, empresaId) {
+  if (proveedorId === undefined || proveedorId === null || proveedorId === '') return true;
+
+  const [proveedores] = await connection.query(
+    'SELECT id FROM proveedores WHERE id = ? AND empresa_id = ? AND activo = 1 LIMIT 1',
+    [proveedorId, empresaId]
+  );
+
+  return proveedores.length > 0;
+}
+
 // ========== CREAR COMPRA DE PRODUCTOS ==========
 exports.createCompraProductos = async (req, res) => {
   const connection = await db.getConnection();
@@ -52,6 +63,12 @@ exports.createCompraProductos = async (req, res) => {
       });
     }
     const empresaId = getCompraEmpresaId(req);
+
+    const proveedorValido = await validateProveedorForCompra(connection, proveedor_id, empresaId);
+    if (!proveedorValido) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Proveedor no encontrado para la empresa' });
+    }
 
     // Calcular totales
     let subtotal = 0;
@@ -208,6 +225,12 @@ exports.createCompraRepuestos = async (req, res) => {
     }
     const empresaId = getCompraEmpresaId(req);
 
+    const proveedorValido = await validateProveedorForCompra(connection, proveedor_id, empresaId);
+    if (!proveedorValido) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Proveedor no encontrado para la empresa' });
+    }
+
     // Calcular totales
     let subtotal = 0;
     items.forEach(item => {
@@ -349,6 +372,12 @@ exports.createCompra = async (req, res) => {
       });
     }
     const empresaId = getCompraEmpresaId(req);
+
+    const proveedorValido = await validateProveedorForCompra(connection, proveedor_id, empresaId);
+    if (!proveedorValido) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Proveedor no encontrado para la empresa' });
+    }
 
     // Calcular totales
     let subtotal = 0;
