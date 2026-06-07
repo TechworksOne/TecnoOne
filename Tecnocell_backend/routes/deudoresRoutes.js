@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const deudoresController = require('../controllers/deudoresController');
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
 // Deudores: exclusivo para administradores
-const soloAdmin = [verifyToken, verifyRole('ADMINISTRADOR', 'admin')];
+const soloAdmin = [verifyToken, tenantScope, verifyRole('ADMINISTRADOR', 'admin')];
 
 router.get('/',                    ...soloAdmin, deudoresController.getDeudores);
 router.get('/resumen',             ...soloAdmin, deudoresController.getResumen);
