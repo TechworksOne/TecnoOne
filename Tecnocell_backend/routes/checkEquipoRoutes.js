@@ -2,9 +2,11 @@ const express = require('express');
 const router = express.Router();
 const checkEquipoController = require('../controllers/checkEquipoController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
+router.use(tenantScope);
 
 // Obtener todos los checklists
 router.get('/', checkEquipoController.getAllChecks);
