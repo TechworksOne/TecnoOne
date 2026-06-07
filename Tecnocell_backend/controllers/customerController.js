@@ -46,10 +46,11 @@ const getAllCustomers = async (req, res) => {
        ) rep ON rep.cliente_id = c.id
        LEFT JOIN (
          SELECT cliente_id,
+           empresa_id,
            COUNT(*) AS total_cotizaciones
          FROM cotizaciones
-         GROUP BY cliente_id
-       ) cot ON cot.cliente_id = c.id
+         GROUP BY cliente_id, empresa_id
+       ) cot ON cot.cliente_id = c.id AND cot.empresa_id = c.empresa_id
        WHERE ${conditions.join(' AND ')}
        ORDER BY c.created_at DESC`,
       params
