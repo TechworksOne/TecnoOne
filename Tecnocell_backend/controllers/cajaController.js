@@ -5,7 +5,7 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
 }
 
 function financialTenantClause(req, alias = null) {
@@ -15,18 +15,20 @@ function financialTenantClause(req, alias = null) {
 }
 
 function resolveFinancialEmpresaId(options = {}) {
-  const { req, empresaId, fallbackEmpresaId = 1 } = options;
+  const { req, empresaId } = options;
 
   if (empresaId !== undefined && empresaId !== null && empresaId !== '') {
     return empresaId;
   }
 
   if (req) {
-    return getTenantEmpresaId(req);
+    const reqEmpresaId = getTenantEmpresaId(req);
+    if (reqEmpresaId !== null && reqEmpresaId !== undefined && reqEmpresaId !== '') {
+      return reqEmpresaId;
+    }
   }
 
-  // Temporal hasta Sprint 1.7.2: ventas todavia no tiene empresa_id.
-  return fallbackEmpresaId;
+  throw new Error('empresaId requerido');
 }
 
 // ========== CAJA CHICA ==========
@@ -390,7 +392,8 @@ exports.confirmarMovimientoCajaChica = async (req, res) => {
     // No se puede confirmar un anticipo de una reparación cancelada
     if (mov.referencia_tipo === 'REPARACION' && mov.referencia_id) {
       const [[rep]] = await db.query(
-        'SELECT estado FROM reparaciones WHERE id = ?', [mov.referencia_id]
+        'SELECT estado FROM reparaciones WHERE id = ? AND empresa_id = ?',
+        [mov.referencia_id, mov.empresa_id]
       );
       if (rep && rep.estado === 'CANCELADA') {
         return res.status(409).json({
@@ -452,7 +455,8 @@ exports.confirmarMovimientoBancario = async (req, res) => {
     // No se puede confirmar un anticipo de una reparación cancelada
     if (mov.referencia_tipo === 'REPARACION' && mov.referencia_id) {
       const [[rep]] = await db.query(
-        'SELECT estado FROM reparaciones WHERE id = ?', [mov.referencia_id]
+        'SELECT estado FROM reparaciones WHERE id = ? AND empresa_id = ?',
+        [mov.referencia_id, mov.empresa_id]
       );
       if (rep && rep.estado === 'CANCELADA') {
         return res.status(409).json({
@@ -517,8 +521,8 @@ exports.registrarMovimientoVenta = async (
       if (ventaIdNumerico !== null) {
         // Llegó como ID numérico: buscar numero_venta para usar en el concepto legible.
         const [filas] = await dbConn.query(
-          'SELECT numero_venta FROM ventas WHERE id = ? LIMIT 1',
-          [ventaIdNumerico]
+          'SELECT numero_venta FROM ventas WHERE id = ? AND empresa_id = ? LIMIT 1',
+          [ventaIdNumerico, empresaIdFinanciera]
         );
         if (filas.length > 0 && filas[0].numero_venta) {
           referenciaVenta = filas[0].numero_venta;
@@ -526,8 +530,8 @@ exports.registrarMovimientoVenta = async (
       } else if (referenciaVenta) {
         // Llegó como correlativo (p.ej. "V-2026-0008"): buscar id y numero_venta.
         const [filas] = await dbConn.query(
-          'SELECT id, numero_venta FROM ventas WHERE numero_venta = ? LIMIT 1',
-          [referenciaVenta]
+          'SELECT id, numero_venta FROM ventas WHERE numero_venta = ? AND empresa_id = ? LIMIT 1',
+          [referenciaVenta, empresaIdFinanciera]
         );
         if (filas.length > 0) {
           ventaIdNumerico = filas[0].id;
@@ -982,8 +986,8 @@ exports.registrarReversaMovimientoVenta = async (
     let referenciaVenta = String(ventaIdNumerico);
     try {
       const [filas] = await dbConn.query(
-        'SELECT numero_venta FROM ventas WHERE id = ? LIMIT 1',
-        [ventaIdNumerico]
+        'SELECT numero_venta FROM ventas WHERE id = ? AND empresa_id = ? LIMIT 1',
+        [ventaIdNumerico, empresaIdFinanciera]
       );
       if (filas.length > 0 && filas[0].numero_venta) {
         referenciaVenta = filas[0].numero_venta;
