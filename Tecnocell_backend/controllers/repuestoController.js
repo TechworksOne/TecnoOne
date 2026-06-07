@@ -15,13 +15,23 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function repuestoTenantClause(req, alias = 'r') {
   return isSuperadminTenant(req)
     ? { sql: '', params: [] }
-    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 const storageRepuestos = multer.diskStorage({
@@ -150,7 +160,7 @@ exports.createRepuesto = async (req, res) => {
       tags,
       activo,
     } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     if (!nombre || !tipo || !marca) {
       await connection.rollback();
@@ -225,7 +235,7 @@ exports.createRepuesto = async (req, res) => {
 
     console.error('Error al crear repuesto:', error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al crear el repuesto',
       details: error.message,
     });
@@ -317,7 +327,7 @@ exports.getAllRepuestos = async (req, res) => {
   } catch (error) {
     console.error('Error al obtener repuestos:', error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al obtener repuestos',
       details: error.message,
     });
@@ -348,7 +358,7 @@ exports.getRepuestoById = async (req, res) => {
   } catch (error) {
     console.error('Error al obtener repuesto:', error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al obtener el repuesto',
       details: error.message,
     });
@@ -518,7 +528,7 @@ exports.updateRepuesto = async (req, res) => {
 
     console.error('Error al actualizar repuesto:', error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al actualizar el repuesto',
       details: error.message,
     });
@@ -553,7 +563,7 @@ exports.deleteRepuesto = async (req, res) => {
   } catch (error) {
     console.error('Error al eliminar repuesto:', error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al eliminar el repuesto',
       details: error.message,
     });
@@ -580,7 +590,7 @@ exports.getStockBajo = async (req, res) => {
   } catch (error) {
     console.error('Error al obtener repuestos con stock bajo:', error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al obtener repuestos con stock bajo',
       details: error.message,
     });
@@ -626,7 +636,7 @@ exports.getEstadisticas = async (req, res) => {
   } catch (error) {
     console.error('Error al obtener estadísticas:', error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al obtener estadísticas',
       details: error.message,
     });
@@ -747,7 +757,7 @@ exports.registrarMovimiento = async (req, res) => {
     await connection.rollback();
     console.error('Error al registrar movimiento:', error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al registrar movimiento',
       details: error.message,
     });
@@ -772,7 +782,7 @@ exports.getTiposRepuesto = async (_req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Error al obtener tipos de repuesto:', error);
-    res.status(500).json({ error: 'Error al obtener tipos de repuesto' });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener tipos de repuesto' });
   }
 };
 
@@ -796,7 +806,7 @@ exports.createTipoRepuesto = async (req, res) => {
       return res.status(400).json({ error: 'Ya existe un tipo con ese nombre' });
     }
     console.error('Error al crear tipo de repuesto:', error);
-    res.status(500).json({ error: 'Error al crear tipo de repuesto' });
+    res.status(error.statusCode || 500).json({ error: 'Error al crear tipo de repuesto' });
   }
 };
 
@@ -816,7 +826,7 @@ exports.getMarcasRepuesto = async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Error al obtener marcas de repuesto:', error);
-    res.status(500).json({ error: 'Error al obtener marcas de repuesto' });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener marcas de repuesto' });
   }
 };
 
@@ -845,7 +855,7 @@ exports.createMarcaRepuesto = async (req, res) => {
       return res.status(400).json({ error: 'Ya existe esa marca para este tipo' });
     }
     console.error('Error al crear marca de repuesto:', error);
-    res.status(500).json({ error: 'Error al crear marca de repuesto' });
+    res.status(error.statusCode || 500).json({ error: 'Error al crear marca de repuesto' });
   }
 };
 
@@ -865,7 +875,7 @@ exports.getModelosRepuesto = async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Error al obtener modelos de repuesto:', error);
-    res.status(500).json({ error: 'Error al obtener modelos de repuesto' });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener modelos de repuesto' });
   }
 };
 
@@ -897,7 +907,7 @@ exports.createModeloRepuesto = async (req, res) => {
       return res.status(400).json({ error: 'Ya existe ese modelo para este tipo y marca' });
     }
     console.error('Error al crear modelo de repuesto:', error);
-    res.status(500).json({ error: 'Error al crear modelo de repuesto' });
+    res.status(error.statusCode || 500).json({ error: 'Error al crear modelo de repuesto' });
   }
 };
 
@@ -926,7 +936,7 @@ exports.getMovimientosRepuesto = async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Error al obtener movimientos de repuesto:', error);
-    res.status(500).json({ error: 'Error al obtener movimientos', details: error.message });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener movimientos', details: error.message });
   }
 };
 

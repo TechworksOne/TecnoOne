@@ -21,20 +21,30 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function addRepairTenantCondition(req, conditions, params, alias = 'r') {
   if (!isSuperadminTenant(req)) {
     conditions.push(`${alias}.empresa_id = ?`);
-    params.push(getTenantEmpresaId(req));
+    params.push(requireTenantEmpresaId(req));
   }
 }
 
 function repairTenantClause(req, alias = 'r') {
   return isSuperadminTenant(req)
     ? { sql: '', params: [] }
-    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 // Ruta base de uploads — siempre absoluta para ser compatible con Docker bind mount
@@ -174,7 +184,7 @@ exports.createReparacion = async (req, res) => {
     
     // Generar ID único
     const repairId = `REP${Date.now()}`;
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     if (clienteId && !isSuperadminTenant(req)) {
       const [[cliente]] = await connection.query(
@@ -369,7 +379,7 @@ exports.createReparacion = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al crear reparación:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al crear la reparación',
       error: error.message
@@ -454,7 +464,7 @@ exports.getAllReparaciones = async (req, res) => {
     
   } catch (error) {
     console.error('Error al obtener reparaciones:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener las reparaciones',
       error: error.message
@@ -552,7 +562,7 @@ exports.getReparacionById = async (req, res) => {
     
   } catch (error) {
     console.error('Error al obtener reparación:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener la reparación',
       error: error.message
@@ -707,7 +717,7 @@ exports.changeRepairState = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al cambiar estado:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al cambiar el estado',
       error: error.message
@@ -769,7 +779,7 @@ exports.updateEstadoReparacion = async (req, res) => {
 
   } catch (error) {
     console.error('Error al actualizar estado:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al actualizar el estado',
       error: error.message
@@ -951,7 +961,7 @@ exports.getHistorialCompleto = async (req, res) => {
 
   } catch (error) {
     console.error('Error al obtener historial completo:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener el historial',
       error: error.message
@@ -1022,7 +1032,7 @@ exports.updatePrioridad = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al actualizar prioridad:', error);
-    res.status(500).json({ success: false, message: 'Error al actualizar la prioridad', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: 'Error al actualizar la prioridad', error: error.message });
   } finally {
     connection.release();
   }
@@ -1115,7 +1125,7 @@ exports.registrarPagoSaldo = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al registrar pago de saldo:', error);
-    res.status(500).json({ success: false, message: 'Error al registrar el pago', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: 'Error al registrar el pago', error: error.message });
   } finally {
     connection.release();
   }
@@ -1353,7 +1363,7 @@ exports.cancelarReparacion = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al cancelar reparación:', error);
-    res.status(500).json({ success: false, message: 'Error al cancelar la reparación', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: 'Error al cancelar la reparación', error: error.message });
   } finally {
     connection.release();
   }
@@ -1392,7 +1402,7 @@ exports.completarReparacion = async (req, res) => {
     const authUserName = await getAuthUserName(req, connection);
 
     // ── 2. Procesar repuestos utilizados ─────────────────────────────────
-    const inventarioEmpresaId = reparacion.empresa_id ?? getTenantEmpresaId(req);
+    const inventarioEmpresaId = reparacion.empresa_id ?? requireTenantEmpresaId(req);
     let costoRepuestosTotal = 0;
     for (const item of repuestosUsados) {
       const [[rep]] = await connection.query(
@@ -1649,7 +1659,7 @@ exports.completarReparacion = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al completar reparación:', error);
-    res.status(500).json({ success: false, message: error.message || 'Error al completar la reparación' });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al completar la reparación' });
   } finally {
     connection.release();
   }
