@@ -14,10 +14,29 @@ const soloAdmin = (req, res) => {
 const centsToQ = v => Number(v) / 100;
 const qToCents = v => Math.round(Number(v) * 100);
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
+function tarjetaTenantClause(req, alias = 't') {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+  return { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
+function movimientoTarjetaTenantClause(req, alias = 'm') {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+  return { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
 // ── GET /api/tarjetas-credito ──────────────────────────────────────────────
 exports.getTarjetas = async (req, res) => {
   if (!soloAdmin(req, res)) return;
   try {
+    const tenant = tarjetaTenantClause(req, 't');
     const [rows] = await db.query(`
       SELECT
         t.*,
@@ -29,12 +48,12 @@ exports.getTarjetas = async (req, res) => {
         ) AS saldo_centavos,
         u.name AS creado_por_nombre
       FROM tarjetas_credito t
-      LEFT JOIN tarjeta_credito_movimientos m ON m.tarjeta_id = t.id
+      LEFT JOIN tarjeta_credito_movimientos m ON m.tarjeta_id = t.id AND m.empresa_id = t.empresa_id
       LEFT JOIN users u ON u.id = t.created_by
-      WHERE t.activo = 1
+      WHERE t.activo = 1${tenant.sql}
       GROUP BY t.id
       ORDER BY t.banco ASC, t.alias ASC
-    `);
+    `, tenant.params);
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error getTarjetas:', error);
@@ -55,11 +74,12 @@ exports.createTarjeta = async (req, res) => {
     if (dia_pago < 1 || dia_pago > 31)   return res.status(400).json({ success: false, message: 'Día de pago inválido (1-31)' });
     if (Number(tasa_interes) < 0) return res.status(400).json({ success: false, message: 'La tasa de interés no puede ser negativa' });
 
+    const empresaId = getTenantEmpresaId(req);
     const [result] = await db.query(
-      `INSERT INTO tarjetas_credito (banco, alias, ultimos4, tasa_interes, dia_corte, dia_pago, limite_credito, moneda, notas, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tarjetas_credito (empresa_id, banco, alias, ultimos4, tasa_interes, dia_corte, dia_pago, limite_credito, moneda, notas, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        banco.trim(), alias?.trim() || null, String(ultimos4).trim(),
+        empresaId, banco.trim(), alias?.trim() || null, String(ultimos4).trim(),
         Number(tasa_interes) || 0, Number(dia_corte), Number(dia_pago),
         qToCents(limite_credito || 0), moneda || 'GTQ',
         notas?.trim() || null, req.user.id
@@ -83,17 +103,21 @@ exports.updateTarjeta = async (req, res) => {
     if (!ultimos4 || !/^\d{4}$/.test(String(ultimos4).trim()))
       return res.status(400).json({ success: false, message: 'Los últimos 4 dígitos deben ser exactamente 4 números' });
 
-    const [existing] = await db.query('SELECT id FROM tarjetas_credito WHERE id = ? AND activo = 1', [id]);
+    const tenant = tarjetaTenantClause(req, 'tarjetas_credito');
+    const [existing] = await db.query(
+      `SELECT id FROM tarjetas_credito WHERE id = ? AND activo = 1${tenant.sql}`,
+      [id, ...tenant.params]
+    );
     if (!existing.length) return res.status(404).json({ success: false, message: 'Tarjeta no encontrada' });
 
     await db.query(
       `UPDATE tarjetas_credito SET banco=?, alias=?, ultimos4=?, tasa_interes=?, dia_corte=?, dia_pago=?, limite_credito=?, moneda=?, notas=?
-       WHERE id = ?`,
+       WHERE id = ?${tenant.sql}`,
       [
         banco.trim(), alias?.trim() || null, String(ultimos4).trim(),
         Number(tasa_interes) || 0, Number(dia_corte), Number(dia_pago),
         qToCents(limite_credito || 0), moneda || 'GTQ',
-        notas?.trim() || null, id
+        notas?.trim() || null, id, ...tenant.params
       ]
     );
     res.json({ success: true, message: 'Tarjeta actualizada' });
@@ -108,7 +132,11 @@ exports.desactivarTarjeta = async (req, res) => {
   if (!soloAdmin(req, res)) return;
   try {
     const { id } = req.params;
-    const [result] = await db.query('UPDATE tarjetas_credito SET activo = 0 WHERE id = ?', [id]);
+    const tenant = tarjetaTenantClause(req, 'tarjetas_credito');
+    const [result] = await db.query(
+      `UPDATE tarjetas_credito SET activo = 0 WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
+    );
     if (!result.affectedRows) return res.status(404).json({ success: false, message: 'Tarjeta no encontrada' });
     res.json({ success: true, message: 'Tarjeta desactivada' });
   } catch (error) {
@@ -122,13 +150,21 @@ exports.getMovimientos = async (req, res) => {
   if (!soloAdmin(req, res)) return;
   try {
     const { id } = req.params;
+    const tarjetaTenant = tarjetaTenantClause(req, 't');
+    const [tarjetas] = await db.query(
+      `SELECT id FROM tarjetas_credito t WHERE t.id = ?${tarjetaTenant.sql}`,
+      [id, ...tarjetaTenant.params]
+    );
+    if (!tarjetas.length) return res.status(404).json({ success: false, message: 'Tarjeta no encontrada' });
+
+    const movimientoTenant = movimientoTarjetaTenantClause(req, 'm');
     const [rows] = await db.query(
       `SELECT m.*, u.name AS creado_por_nombre
        FROM tarjeta_credito_movimientos m
        LEFT JOIN users u ON u.id = m.created_by
-       WHERE m.tarjeta_id = ?
+       WHERE m.tarjeta_id = ?${movimientoTenant.sql}
        ORDER BY m.fecha_movimiento DESC`,
-      [id]
+      [id, ...movimientoTenant.params]
     );
     res.json({ success: true, data: rows });
   } catch (error) {
@@ -146,6 +182,7 @@ exports.registrarPago = async (req, res) => {
     await connection.beginTransaction();
     const { id } = req.params;
     const { cuenta_origen_id, tipo_cuenta_origen, monto, fecha, observaciones } = req.body;
+    const empresaId = getTenantEmpresaId(req);
 
     if (!monto || Number(monto) <= 0) {
       await connection.rollback();
@@ -153,7 +190,10 @@ exports.registrarPago = async (req, res) => {
     }
 
     // Verificar tarjeta activa
-    const [tarjetas] = await connection.query('SELECT * FROM tarjetas_credito WHERE id = ? AND activo = 1', [id]);
+    const [tarjetas] = await connection.query(
+      'SELECT * FROM tarjetas_credito WHERE id = ? AND empresa_id = ? AND activo = 1',
+      [id, empresaId]
+    );
     if (!tarjetas.length) {
       await connection.rollback();
       return res.status(404).json({ success: false, message: 'Tarjeta no encontrada o inactiva' });
@@ -164,29 +204,39 @@ exports.registrarPago = async (req, res) => {
 
     // Registrar egreso en la cuenta de origen
     if (tipo_cuenta_origen === 'banco' && cuenta_origen_id) {
+      const [cuentas] = await connection.query(
+        'SELECT id FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+        [cuenta_origen_id, empresaId]
+      );
+      if (!cuentas.length) {
+        await connection.rollback();
+        return res.status(404).json({ success: false, message: 'Cuenta bancaria no encontrada o inactiva' });
+      }
+
       await connection.query(
-        `INSERT INTO movimientos_bancarios (cuenta_id, tipo, monto, concepto, referencia_tipo, referencia_id, confirmado, realizado_por, fecha_movimiento)
-         VALUES (?, 'EGRESO', ?, ?, 'tarjeta_credito', ?, 1, ?, ?)`,
-        [cuenta_origen_id, montoCentavos, descripcion, id, req.user.id, fecha || new Date()]
+        `INSERT INTO movimientos_bancarios
+         (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, fecha_movimiento, referencia_tipo, referencia_id)
+         VALUES (?, ?, 'EGRESO', ?, ?, 'PAGO_TARJETA', 'CONFIRMADO', ?, ?, 'tarjeta_credito', ?)`,
+        [empresaId, cuenta_origen_id, montoCentavos, descripcion, req.user.id, fecha || new Date(), id]
       );
       // Actualizar saldo banco
       await connection.query(
-        'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ?',
-        [montoCentavos, cuenta_origen_id]
+        'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ? AND empresa_id = ?',
+        [montoCentavos, cuenta_origen_id, empresaId]
       );
     } else if (tipo_cuenta_origen === 'caja') {
       await connection.query(
-        `INSERT INTO caja_chica (tipo_movimiento, monto, concepto, categoria, realizado_por, estado, fecha_movimiento)
-         VALUES ('EGRESO', ?, ?, 'PAGO_TARJETA', ?, 'CONFIRMADO', ?)`,
-        [montoCentavos, descripcion, req.user.id, fecha || new Date()]
+        `INSERT INTO caja_chica (empresa_id, tipo_movimiento, monto, concepto, categoria, realizado_por, estado, fecha_movimiento)
+         VALUES (?, 'EGRESO', ?, ?, 'PAGO_TARJETA', ?, 'CONFIRMADO', ?)`,
+        [empresaId, montoCentavos, descripcion, req.user.id, fecha || new Date()]
       );
     }
 
     // Registrar movimiento en tarjeta
     const [movResult] = await connection.query(
-      `INSERT INTO tarjeta_credito_movimientos (tarjeta_id, tipo, monto, descripcion, referencia_tipo, referencia_id, cuenta_origen_id, fecha_movimiento, created_by)
-       VALUES (?, 'pago', ?, ?, 'pago_manual', NULL, ?, ?, ?)`,
-      [id, montoCentavos, descripcion, cuenta_origen_id || null, fecha || new Date(), req.user.id]
+      `INSERT INTO tarjeta_credito_movimientos (empresa_id, tarjeta_id, tipo, monto, descripcion, referencia_tipo, referencia_id, cuenta_origen_id, fecha_movimiento, created_by)
+       VALUES (?, ?, 'pago', ?, ?, 'pago_manual', NULL, ?, ?, ?)`,
+      [empresaId, id, montoCentavos, descripcion, cuenta_origen_id || null, fecha || new Date(), req.user.id]
     );
 
     await connection.commit();
@@ -209,14 +259,18 @@ exports.registrarAjuste = async (req, res) => {
 
     if (!monto) return res.status(400).json({ success: false, message: 'El monto es requerido' });
 
-    const [tarjetas] = await db.query('SELECT id FROM tarjetas_credito WHERE id = ? AND activo = 1', [id]);
+    const empresaId = getTenantEmpresaId(req);
+    const [tarjetas] = await db.query(
+      'SELECT id FROM tarjetas_credito WHERE id = ? AND empresa_id = ? AND activo = 1',
+      [id, empresaId]
+    );
     if (!tarjetas.length) return res.status(404).json({ success: false, message: 'Tarjeta no encontrada o inactiva' });
 
     // monto puede ser positivo (suma deuda) o negativo (resta deuda)
     await db.query(
-      `INSERT INTO tarjeta_credito_movimientos (tarjeta_id, tipo, monto, descripcion, fecha_movimiento, created_by)
-       VALUES (?, 'ajuste', ?, ?, ?, ?)`,
-      [id, qToCents(monto), descripcion?.trim() || 'Ajuste manual', fecha || new Date(), req.user.id]
+      `INSERT INTO tarjeta_credito_movimientos (empresa_id, tarjeta_id, tipo, monto, descripcion, fecha_movimiento, created_by)
+       VALUES (?, ?, 'ajuste', ?, ?, ?, ?)`,
+      [empresaId, id, qToCents(monto), descripcion?.trim() || 'Ajuste manual', fecha || new Date(), req.user.id]
     );
     res.status(201).json({ success: true, message: 'Ajuste registrado' });
   } catch (error) {
@@ -227,10 +281,20 @@ exports.registrarAjuste = async (req, res) => {
 
 // ── POST /api/tarjetas-credito/movimiento-compra (interno) ────────────────
 // Usado por compraController cuando metodo_pago = 'tarjeta_credito'
-exports.registrarCompra = async (connection, tarjetaId, montoCentavos, compraId, descripcion, userId) => {
+exports.registrarCompra = async (connection, tarjetaId, montoCentavos, compraId, descripcion, userId, empresaId = null) => {
+  // Fallback temporal a empresa 1 hasta Sprint 1.8 compras.
+  const resolvedEmpresaId = Number(empresaId ?? 1) || 1;
+  const [tarjetas] = await connection.query(
+    'SELECT id FROM tarjetas_credito WHERE id = ? AND empresa_id = ? AND activo = 1 LIMIT 1',
+    [tarjetaId, resolvedEmpresaId]
+  );
+  if (!tarjetas.length) {
+    throw new Error('Tarjeta no encontrada o inactiva para la empresa');
+  }
+
   await connection.query(
-    `INSERT INTO tarjeta_credito_movimientos (tarjeta_id, tipo, monto, descripcion, referencia_tipo, referencia_id, fecha_movimiento, created_by)
-     VALUES (?, 'compra', ?, ?, 'compra', ?, NOW(), ?)`,
-    [tarjetaId, montoCentavos, descripcion || 'Compra pagada con tarjeta de crédito', compraId, userId]
+    `INSERT INTO tarjeta_credito_movimientos (empresa_id, tarjeta_id, tipo, monto, descripcion, referencia_tipo, referencia_id, fecha_movimiento, created_by)
+     VALUES (?, ?, 'compra', ?, ?, 'compra', ?, NOW(), ?)`,
+    [resolvedEmpresaId, tarjetaId, montoCentavos, descripcion || 'Compra pagada con tarjeta de crédito', compraId, userId]
   );
 };

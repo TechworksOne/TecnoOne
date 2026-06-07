@@ -2,6 +2,10 @@
 const db = require('../config/database');
 const tarjetaCtrl = require('./tarjetaCreditoController');
 
+function getCompraEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
 // ========== CREAR COMPRA DE PRODUCTOS ==========
 exports.createCompraProductos = async (req, res) => {
   const connection = await db.getConnection();
@@ -65,7 +69,11 @@ exports.createCompraProductos = async (req, res) => {
         await connection.rollback();
         return res.status(400).json({ success: false, message: 'Debes seleccionar una tarjeta de crédito' });
       }
-      const [tarjetas] = await connection.query('SELECT * FROM tarjetas_credito WHERE id = ? AND activo = 1', [tarjeta_id]);
+      const empresaId = getCompraEmpresaId(req);
+      const [tarjetas] = await connection.query(
+        'SELECT * FROM tarjetas_credito WHERE id = ? AND empresa_id = ? AND activo = 1',
+        [tarjeta_id, empresaId]
+      );
       if (!tarjetas.length) {
         await connection.rollback();
         return res.status(400).json({ success: false, message: 'Tarjeta no encontrada o inactiva' });
@@ -75,7 +83,8 @@ exports.createCompraProductos = async (req, res) => {
       await tarjetaCtrl.registrarCompra(
         connection, tarjeta_id, montoCentavos, compraId,
         `Compra ${numero_compra} con tarjeta ${t.banco} ****${t.ultimos4}`,
-        req.user?.id
+        req.user?.id,
+        empresaId
       );
     }
     
@@ -206,7 +215,11 @@ exports.createCompraRepuestos = async (req, res) => {
         await connection.rollback();
         return res.status(400).json({ success: false, message: 'Debes seleccionar una tarjeta de crédito' });
       }
-      const [tarjetas] = await connection.query('SELECT * FROM tarjetas_credito WHERE id = ? AND activo = 1', [tarjeta_id]);
+      const empresaId = getCompraEmpresaId(req);
+      const [tarjetas] = await connection.query(
+        'SELECT * FROM tarjetas_credito WHERE id = ? AND empresa_id = ? AND activo = 1',
+        [tarjeta_id, empresaId]
+      );
       if (!tarjetas.length) {
         await connection.rollback();
         return res.status(400).json({ success: false, message: 'Tarjeta no encontrada o inactiva' });
@@ -216,7 +229,8 @@ exports.createCompraRepuestos = async (req, res) => {
       await tarjetaCtrl.registrarCompra(
         connection, tarjeta_id, montoCentavos, compraId,
         `Compra ${numero_compra} con tarjeta ${t.banco} ****${t.ultimos4}`,
-        req.user?.id
+        req.user?.id,
+        empresaId
       );
     }
     
