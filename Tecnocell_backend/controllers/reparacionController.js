@@ -663,8 +663,8 @@ exports.changeRepairState = async (req, res) => {
                reparacion_id = ?, 
                ubicacion_sticker = ?,
                fecha_asignacion = NOW()
-           WHERE id = ? AND estado = 'DISPONIBLE'`,
-          [id, stickerUbicacion, stickerId]
+           WHERE id = ? AND estado = 'DISPONIBLE' AND empresa_id = ?`,
+          [id, stickerUbicacion, stickerId, reparacion.empresa_id]
         );
       }
     }
@@ -1537,8 +1537,8 @@ exports.completarReparacion = async (req, res) => {
       await connection.query(
         `UPDATE stickers_garantia
          SET estado = 'ASIGNADO', reparacion_id = ?, ubicacion_sticker = ?, fecha_asignacion = NOW()
-         WHERE id = ? AND estado = 'DISPONIBLE'`,
-        [id, stickerUbicacion || null, stickerId]
+         WHERE id = ? AND estado = 'DISPONIBLE' AND empresa_id = ?`,
+        [id, stickerUbicacion || null, stickerId, reparacion.empresa_id]
       );
     }
 

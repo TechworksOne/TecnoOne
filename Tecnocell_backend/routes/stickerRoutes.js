@@ -2,9 +2,11 @@ const express = require('express');
 const router = express.Router();
 const stickerController = require('../controllers/stickerController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
+router.use(tenantScope);
 
 // Estadísticas
 router.get('/estadisticas', stickerController.getEstadisticas);
