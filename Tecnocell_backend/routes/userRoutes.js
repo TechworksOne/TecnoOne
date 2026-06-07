@@ -2,9 +2,11 @@ const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
+router.use(tenantScope);
 
 // Obtener todos los usuarios (solo admin)
 router.get('/', verifyRole('admin'), userController.getAllUsers);
