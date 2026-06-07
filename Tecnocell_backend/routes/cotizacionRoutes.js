@@ -2,12 +2,15 @@ const express = require('express');
 const router = express.Router();
 const cotizacionController = require('../controllers/cotizacionController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 
 /**
  * RUTAS DE COTIZACIONES
- * GET: Sin autenticación (lectura pública)
- * POST/PUT/DELETE: Con autenticación (escritura protegida)
+ * Todas las rutas requieren autenticacion y tenantScope.
  */
+
+router.use(verifyToken);
+router.use(tenantScope);
 
 // Obtener todas las cotizaciones (con filtros opcionales)
 // Query params: ?tipo=VENTA&estado=ENVIADA&cliente_id=1&desde=2025-01-01&hasta=2025-12-31&page=1&limit=20
@@ -34,6 +37,6 @@ router.put('/:id', cotizacionController.updateCotizacion);
 router.patch('/:id/estado', cotizacionController.cambiarEstado);
 
 // Eliminar cotización (requiere autenticación)
-router.delete('/:id', verifyToken, cotizacionController.deleteCotizacion);
+router.delete('/:id', cotizacionController.deleteCotizacion);
 
 module.exports = router;

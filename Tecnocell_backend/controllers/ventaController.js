@@ -222,9 +222,10 @@ exports.createVentaFromQuote = async (req, res) => {
     }
 
     // Obtener cotización
+    const cotizacionTenant = ventaTenantClause(req, 'cotizaciones');
     const [cotizaciones] = await db.query(
-      'SELECT * FROM cotizaciones WHERE id = ?',
-      [cotizacionId]
+      `SELECT * FROM cotizaciones WHERE id = ?${cotizacionTenant.sql}`,
+      [cotizacionId, ...cotizacionTenant.params]
     );
 
     if (cotizaciones.length === 0) {
@@ -309,6 +310,17 @@ exports.createVentaFromQuote = async (req, res) => {
       observaciones || cotizacion.observaciones,
       created_by || null
     ]);
+
+    await db.query(
+      `UPDATE cotizaciones
+       SET estado = 'CONVERTIDA',
+           convertida = 1,
+           convertida_a = 'VENTA',
+           referencia_venta_id = ?,
+           fecha_conversion = NOW()
+       WHERE id = ?${cotizacionTenant.sql}`,
+      [result.insertId, cotizacionId, ...cotizacionTenant.params]
+    );
 
     // Descontar stock del inventario
     await descontarStock(items, empresaId);
@@ -639,14 +651,15 @@ exports.anularVenta = async (req, res) => {
 
     // Revertir cotización si existía
     if (ventaActual.cotizacion_id) {
+      const cotizacionTenant = ventaTenantClause(req, 'cotizaciones');
       await connection.query(
         `UPDATE cotizaciones 
          SET estado = 'ENVIADA',
              convertida_a = NULL,
              referencia_venta_id = NULL,
              fecha_conversion = NULL
-         WHERE id = ?`,
-        [ventaActual.cotizacion_id]
+         WHERE id = ?${cotizacionTenant.sql}`,
+        [ventaActual.cotizacion_id, ...cotizacionTenant.params]
       );
     }
 

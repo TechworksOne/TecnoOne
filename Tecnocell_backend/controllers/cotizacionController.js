@@ -2,16 +2,60 @@ const db = require('../config/database');
 
 /**
  * CONTROLADOR DE COTIZACIONES
- * Maneja todas las operaciones CRUD para cotizaciones de ventas y reparaciones
+ * Maneja operaciones CRUD para cotizaciones de ventas y reparaciones.
  */
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined) {
+    const error = new Error('Empresa no asignada al usuario');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
+}
+
+function cotizacionTenantClause(req, alias = null) {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+  const prefix = alias ? `${alias}.` : '';
+  return { sql: ` AND ${prefix}empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
+}
+
+async function validateClienteForCotizacion(clienteId, empresaId) {
+  if (clienteId === undefined || clienteId === null || clienteId === '') return true;
+
+  const [clientes] = await db.execute(
+    'SELECT id FROM clientes WHERE id = ? AND empresa_id = ? AND activo = true LIMIT 1',
+    [clienteId, empresaId]
+  );
+
+  return clientes.length > 0;
+}
+
+function sendError(res, error, fallbackMessage) {
+  const statusCode = error.statusCode || 500;
+  return res.status(statusCode).json({
+    success: false,
+    message: error.statusCode ? error.message : fallbackMessage,
+    error: error.message
+  });
+}
+
 // ============================================
-// CREAR COTIZACIÓN
+// CREAR COTIZACION
 // ============================================
 const createCotizacion = async (req, res) => {
   try {
-    console.log('📥 Datos recibidos para crear cotización:', JSON.stringify(req.body, null, 2));
-    
+    console.log('Datos recibidos para crear cotizacion:', JSON.stringify(req.body, null, 2));
+
     const {
       cliente_id,
       cliente_nombre,
@@ -22,7 +66,7 @@ const createCotizacion = async (req, res) => {
       tipo,
       fecha_emision,
       vigencia_dias,
-      items, // Array de objetos
+      items,
       subtotal,
       impuestos,
       mano_de_obra,
@@ -33,42 +77,49 @@ const createCotizacion = async (req, res) => {
       notas_internas
     } = req.body;
 
-    // Validaciones
     if (!cliente_id || !cliente_nombre) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Cliente es requerido' 
+      return res.status(400).json({
+        success: false,
+        message: 'Cliente es requerido'
       });
     }
 
     if (!tipo || !['VENTA', 'REPARACION'].includes(tipo)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Tipo de cotización inválido' 
+      return res.status(400).json({
+        success: false,
+        message: 'Tipo de cotizacion invalido'
       });
     }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Debe incluir al menos un item' 
+      return res.status(400).json({
+        success: false,
+        message: 'Debe incluir al menos un item'
       });
     }
 
-    // Convertir items a JSON string
+    const empresaId = requireTenantEmpresaId(req);
+    const clienteValido = await validateClienteForCotizacion(cliente_id, empresaId);
+    if (!clienteValido) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cliente no encontrado'
+      });
+    }
+
     const itemsJson = JSON.stringify(items);
 
-    // Insertar cotización
     const query = `
       INSERT INTO cotizaciones (
-        cliente_id, cliente_nombre, cliente_telefono, cliente_email, 
+        empresa_id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
         cliente_nit, cliente_direccion, tipo, fecha_emision, vigencia_dias,
         items, subtotal, impuestos, mano_de_obra, total, aplicar_impuestos,
         estado, observaciones, notas_internas, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
+      empresaId,
       cliente_id,
       cliente_nombre,
       cliente_telefono || null,
@@ -91,27 +142,21 @@ const createCotizacion = async (req, res) => {
     ];
 
     const [result] = await db.execute(query, values);
-
-    // Obtener cotización creada con el número generado
     const [cotizacion] = await db.execute(
-      'SELECT * FROM cotizaciones WHERE id = ?',
-      [result.insertId]
+      'SELECT * FROM cotizaciones WHERE id = ? AND empresa_id = ?',
+      [result.insertId, empresaId]
     );
 
-    console.log('✅ Cotización creada:', cotizacion[0]);
+    console.log('Cotizacion creada:', cotizacion[0]);
 
     res.status(201).json({
       success: true,
-      message: 'Cotización creada exitosamente',
+      message: 'Cotizacion creada exitosamente',
       data: cotizacion[0]
     });
   } catch (error) {
-    console.error('❌ Error al crear cotización:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al crear cotización',
-      error: error.message
-    });
+    console.error('Error al crear cotizacion:', error);
+    return sendError(res, error, 'Error al crear cotizacion');
   }
 };
 
@@ -121,93 +166,95 @@ const createCotizacion = async (req, res) => {
 const getAllCotizaciones = async (req, res) => {
   try {
     const { tipo, estado, cliente_id, desde, hasta, page = 1, limit = 20 } = req.query;
-    
-    let query = 'SELECT * FROM cotizaciones WHERE 1=1';
-    const values = [];
+    const tenant = cotizacionTenantClause(req);
 
-    // Filtros opcionales
+    let query = 'SELECT * FROM cotizaciones WHERE 1=1';
+    let countQuery = 'SELECT COUNT(*) as total FROM cotizaciones WHERE 1=1';
+    const values = [...tenant.params];
+    const countValues = [...tenant.params];
+
+    query += tenant.sql;
+    countQuery += tenant.sql;
+
     if (tipo) {
       query += ' AND tipo = ?';
+      countQuery += ' AND tipo = ?';
       values.push(tipo);
+      countValues.push(tipo);
     }
 
     if (estado) {
       query += ' AND estado = ?';
+      countQuery += ' AND estado = ?';
       values.push(estado);
+      countValues.push(estado);
     }
 
     if (cliente_id) {
       query += ' AND cliente_id = ?';
+      countQuery += ' AND cliente_id = ?';
       values.push(cliente_id);
+      countValues.push(cliente_id);
     }
 
     if (desde) {
       query += ' AND fecha_emision >= ?';
+      countQuery += ' AND fecha_emision >= ?';
       values.push(desde);
+      countValues.push(desde);
     }
 
     if (hasta) {
       query += ' AND fecha_emision <= ?';
+      countQuery += ' AND fecha_emision <= ?';
       values.push(hasta);
+      countValues.push(hasta);
     }
 
     query += ' ORDER BY created_at DESC';
 
-    // Paginación
-    const offset = (page - 1) * limit;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const offset = (pageNum - 1) * limitNum;
     query += ' LIMIT ? OFFSET ?';
-    values.push(parseInt(limit), parseInt(offset));
+    values.push(limitNum, offset);
 
     const [cotizaciones] = await db.execute(query, values);
-
-    // Contar total para paginación
-    let countQuery = 'SELECT COUNT(*) as total FROM cotizaciones WHERE 1=1';
-    const countValues = values.slice(0, -2); // Remover LIMIT y OFFSET
-
-    if (tipo) countQuery += ' AND tipo = ?';
-    if (estado) countQuery += ' AND estado = ?';
-    if (cliente_id) countQuery += ' AND cliente_id = ?';
-    if (desde) countQuery += ' AND fecha_emision >= ?';
-    if (hasta) countQuery += ' AND fecha_emision <= ?';
-
     const [countResult] = await db.execute(countQuery, countValues);
 
     res.json({
       success: true,
       data: cotizaciones,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: pageNum,
+        limit: limitNum,
         total: countResult[0].total,
-        totalPages: Math.ceil(countResult[0].total / limit)
+        totalPages: Math.ceil(countResult[0].total / limitNum)
       }
     });
   } catch (error) {
-    console.error('❌ Error al obtener cotizaciones:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener cotizaciones',
-      error: error.message
-    });
+    console.error('Error al obtener cotizaciones:', error);
+    return sendError(res, error, 'Error al obtener cotizaciones');
   }
 };
 
 // ============================================
-// OBTENER COTIZACIÓN POR ID
+// OBTENER COTIZACION POR ID
 // ============================================
 const getCotizacionById = async (req, res) => {
   try {
     const { id } = req.params;
+    const tenant = cotizacionTenantClause(req);
 
     const [cotizaciones] = await db.execute(
-      'SELECT * FROM cotizaciones WHERE id = ?',
-      [id]
+      `SELECT * FROM cotizaciones WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
 
     if (cotizaciones.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Cotización no encontrada'
+        message: 'Cotizacion no encontrada'
       });
     }
 
@@ -216,22 +263,19 @@ const getCotizacionById = async (req, res) => {
       data: cotizaciones[0]
     });
   } catch (error) {
-    console.error('❌ Error al obtener cotización:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener cotización',
-      error: error.message
-    });
+    console.error('Error al obtener cotizacion:', error);
+    return sendError(res, error, 'Error al obtener cotizacion');
   }
 };
 
 // ============================================
-// ACTUALIZAR COTIZACIÓN
+// ACTUALIZAR COTIZACION
 // ============================================
 const updateCotizacion = async (req, res) => {
   try {
     const { id } = req.params;
     const {
+      cliente_id,
       cliente_nombre,
       cliente_telefono,
       cliente_email,
@@ -251,33 +295,44 @@ const updateCotizacion = async (req, res) => {
       notas_internas
     } = req.body;
 
-    console.log('📝 Actualizando cotización:', id);
+    console.log('Actualizando cotizacion:', id);
 
-    // Verificar que la cotización existe
+    const tenant = cotizacionTenantClause(req);
     const [existing] = await db.execute(
-      'SELECT * FROM cotizaciones WHERE id = ?',
-      [id]
+      `SELECT * FROM cotizaciones WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
 
     if (existing.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Cotización no encontrada'
+        message: 'Cotizacion no encontrada'
       });
     }
 
-    // Validar que no se pueda editar una cotización convertida
     if (existing[0].estado === 'CONVERTIDA') {
       return res.status(400).json({
         success: false,
-        message: 'No se puede editar una cotización ya convertida'
+        message: 'No se puede editar una cotizacion ya convertida'
+      });
+    }
+
+    const empresaId = existing[0].empresa_id ?? requireTenantEmpresaId(req);
+    const clienteFinal = cliente_id !== undefined ? cliente_id : existing[0].cliente_id;
+    const clienteValido = await validateClienteForCotizacion(clienteFinal, empresaId);
+    if (!clienteValido) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cliente no encontrado'
       });
     }
 
     const itemsJson = items ? JSON.stringify(items) : existing[0].items;
+    const updateTenant = cotizacionTenantClause(req);
 
     const query = `
       UPDATE cotizaciones SET
+        cliente_id = ?,
         cliente_nombre = ?,
         cliente_telefono = ?,
         cliente_email = ?,
@@ -296,10 +351,11 @@ const updateCotizacion = async (req, res) => {
         observaciones = ?,
         notas_internas = ?,
         updated_by = ?
-      WHERE id = ?
+      WHERE id = ?${updateTenant.sql}
     `;
 
     const values = [
+      clienteFinal,
       cliente_nombre || existing[0].cliente_nombre,
       cliente_telefono !== undefined ? cliente_telefono : existing[0].cliente_telefono,
       cliente_email !== undefined ? cliente_email : existing[0].cliente_email,
@@ -318,83 +374,76 @@ const updateCotizacion = async (req, res) => {
       observaciones !== undefined ? observaciones : existing[0].observaciones,
       notas_internas !== undefined ? notas_internas : existing[0].notas_internas,
       req.user ? req.user.id : null,
-      id
+      id,
+      ...updateTenant.params
     ];
 
     await db.execute(query, values);
 
-    // Obtener cotización actualizada
     const [updated] = await db.execute(
-      'SELECT * FROM cotizaciones WHERE id = ?',
-      [id]
+      `SELECT * FROM cotizaciones WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
 
-    console.log('✅ Cotización actualizada');
+    console.log('Cotizacion actualizada');
 
     res.json({
       success: true,
-      message: 'Cotización actualizada exitosamente',
+      message: 'Cotizacion actualizada exitosamente',
       data: updated[0]
     });
   } catch (error) {
-    console.error('❌ Error al actualizar cotización:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al actualizar cotización',
-      error: error.message
-    });
+    console.error('Error al actualizar cotizacion:', error);
+    return sendError(res, error, 'Error al actualizar cotizacion');
   }
 };
 
 // ============================================
-// ELIMINAR COTIZACIÓN (SOFT DELETE)
+// ELIMINAR COTIZACION
 // ============================================
 const deleteCotizacion = async (req, res) => {
   try {
     const { id } = req.params;
+    const tenant = cotizacionTenantClause(req);
 
-    // Verificar que existe
     const [existing] = await db.execute(
-      'SELECT * FROM cotizaciones WHERE id = ?',
-      [id]
+      `SELECT * FROM cotizaciones WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
 
     if (existing.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Cotización no encontrada'
+        message: 'Cotizacion no encontrada'
       });
     }
 
-    // No permitir eliminar cotizaciones convertidas
     if (existing[0].estado === 'CONVERTIDA') {
       return res.status(400).json({
         success: false,
-        message: 'No se puede eliminar una cotización convertida'
+        message: 'No se puede eliminar una cotizacion convertida'
       });
     }
 
-    // Eliminar físicamente (o podrías hacer soft delete agregando campo 'activo')
-    await db.execute('DELETE FROM cotizaciones WHERE id = ?', [id]);
+    await db.execute(
+      `DELETE FROM cotizaciones WHERE id = ?${tenant.sql}`,
+      [id, ...tenant.params]
+    );
 
-    console.log('🗑️ Cotización eliminada:', id);
+    console.log('Cotizacion eliminada:', id);
 
     res.json({
       success: true,
-      message: 'Cotización eliminada exitosamente'
+      message: 'Cotizacion eliminada exitosamente'
     });
   } catch (error) {
-    console.error('❌ Error al eliminar cotización:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al eliminar cotización',
-      error: error.message
-    });
+    console.error('Error al eliminar cotizacion:', error);
+    return sendError(res, error, 'Error al eliminar cotizacion');
   }
 };
 
 // ============================================
-// CAMBIAR ESTADO DE COTIZACIÓN
+// CAMBIAR ESTADO DE COTIZACION
 // ============================================
 const cambiarEstado = async (req, res) => {
   try {
@@ -402,70 +451,86 @@ const cambiarEstado = async (req, res) => {
     const { estado } = req.body;
 
     const estadosValidos = ['BORRADOR', 'ENVIADA', 'APROBADA', 'RECHAZADA', 'VENCIDA', 'CONVERTIDA'];
-    
+
     if (!estado || !estadosValidos.includes(estado)) {
       return res.status(400).json({
         success: false,
-        message: 'Estado inválido'
+        message: 'Estado invalido'
       });
     }
 
-    await db.execute(
-      'UPDATE cotizaciones SET estado = ?, updated_by = ? WHERE id = ?',
-      [estado, req.user ? req.user.id : null, id]
+    const tenant = cotizacionTenantClause(req);
+    const [result] = await db.execute(
+      `UPDATE cotizaciones SET estado = ?, updated_by = ? WHERE id = ?${tenant.sql}`,
+      [estado, req.user ? req.user.id : null, id, ...tenant.params]
     );
 
-    console.log(`🔄 Estado de cotización ${id} cambiado a: ${estado}`);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cotizacion no encontrada'
+      });
+    }
+
+    console.log(`Estado de cotizacion ${id} cambiado a: ${estado}`);
 
     res.json({
       success: true,
       message: 'Estado actualizado exitosamente'
     });
   } catch (error) {
-    console.error('❌ Error al cambiar estado:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al cambiar estado',
-      error: error.message
-    });
+    console.error('Error al cambiar estado:', error);
+    return sendError(res, error, 'Error al cambiar estado');
   }
 };
 
 // ============================================
-// OBTENER COTIZACIONES PRÓXIMAS A VENCER
+// OBTENER COTIZACIONES PROXIMAS A VENCER
 // ============================================
 const getCotizacionesProximasVencer = async (req, res) => {
   try {
     const { dias = 7 } = req.query;
+    const tenant = cotizacionTenantClause(req, 'cot');
 
     const [cotizaciones] = await db.execute(
-      'CALL sp_cotizaciones_proximas_vencer(?)',
-      [parseInt(dias)]
+      `SELECT
+        cot.id,
+        cot.numero_cotizacion,
+        cot.cliente_nombre,
+        cot.cliente_telefono,
+        cot.fecha_emision,
+        cot.fecha_vencimiento,
+        DATEDIFF(cot.fecha_vencimiento, CURDATE()) AS dias_restantes,
+        cot.total,
+        cot.estado
+      FROM cotizaciones cot
+      WHERE cot.estado IN ('ENVIADA', 'BORRADOR')
+        AND cot.fecha_vencimiento BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY)
+        ${tenant.sql}
+      ORDER BY cot.fecha_vencimiento ASC`,
+      [parseInt(dias), ...tenant.params]
     );
 
     res.json({
       success: true,
-      data: cotizaciones[0]
+      data: cotizaciones
     });
   } catch (error) {
-    console.error('❌ Error al obtener cotizaciones próximas a vencer:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener cotizaciones',
-      error: error.message
-    });
+    console.error('Error al obtener cotizaciones proximas a vencer:', error);
+    return sendError(res, error, 'Error al obtener cotizaciones');
   }
 };
 
 // ============================================
-// OBTENER ESTADÍSTICAS DE COTIZACIONES
+// OBTENER ESTADISTICAS DE COTIZACIONES
 // ============================================
 const getEstadisticas = async (req, res) => {
   try {
     const { desde, hasta } = req.query;
+    const tenant = cotizacionTenantClause(req);
 
     let query = `
-      SELECT 
+      SELECT
         COUNT(*) as total,
         SUM(CASE WHEN estado = 'BORRADOR' THEN 1 ELSE 0 END) as borradores,
         SUM(CASE WHEN estado = 'ENVIADA' THEN 1 ELSE 0 END) as enviadas,
@@ -480,7 +545,8 @@ const getEstadisticas = async (req, res) => {
       WHERE 1=1
     `;
 
-    const values = [];
+    const values = [...tenant.params];
+    query += tenant.sql;
 
     if (desde) {
       query += ' AND fecha_emision >= ?';
@@ -499,12 +565,8 @@ const getEstadisticas = async (req, res) => {
       data: stats[0]
     });
   } catch (error) {
-    console.error('❌ Error al obtener estadísticas:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener estadísticas',
-      error: error.message
-    });
+    console.error('Error al obtener estadisticas:', error);
+    return sendError(res, error, 'Error al obtener estadisticas');
   }
 };
 

@@ -39,6 +39,7 @@ exports.getDashboardStats = async (req, res) => {
     const reparacionesTenant = tenantClause(req);
     const reparacionesAliasTenant = tenantClause(req, 'r');
     const clientesTenant = tenantClause(req);
+    const cotizacionesTenant = tenantClause(req);
 
     // ── Ventas hoy ───────────────────────────────────────────────────────────
     const [[ventasHoy]] = await connection.query(`
@@ -161,16 +162,15 @@ exports.getDashboardStats = async (req, res) => {
     `, reparacionesTenant.params);
 
     // ── Cotizaciones ─────────────────────────────────────────────────────────
-    // Cotizaciones aun no tiene empresa_id; queda global hasta sprint especifico de cotizaciones.
     const [[cotizaciones]] = await connection.query(`
       SELECT
         COUNT(*) AS total,
         SUM(CASE WHEN estado = 'PENDIENTE' THEN 1 ELSE 0 END) AS abiertas
       FROM cotizaciones
-    `);
+      WHERE 1=1${cotizacionesTenant.sql}
+    `, cotizacionesTenant.params);
 
     // ── Tasa conversión cotizaciones (mes actual) ────────────────────────────
-    // Cotizaciones aun no tiene empresa_id; queda global hasta sprint especifico de cotizaciones.
     const [[cotizMes]] = await connection.query(`
       SELECT
         COUNT(*) AS total,
@@ -178,7 +178,8 @@ exports.getDashboardStats = async (req, res) => {
       FROM cotizaciones
       WHERE MONTH(created_at) = MONTH(CURDATE())
         AND YEAR(created_at)  = YEAR(CURDATE())
-    `);
+        ${cotizacionesTenant.sql}
+    `, cotizacionesTenant.params);
 
     // ── Clientes nuevos este mes ─────────────────────────────────────────────
     let clientesNuevosMes = 0;
@@ -509,6 +510,7 @@ exports.getVentasDashboard = async (req, res) => {
     const ventasTenant = tenantClause(req);
     const reparacionesTenant = tenantClause(req);
     const productosTenant = tenantClause(req);
+    const cotizacionesTenant = tenantClause(req);
 
     // ── Ventas hoy ───────────────────────────────────────────────────────────
     const [[ventasHoy]] = await connection.query(`
@@ -540,14 +542,14 @@ exports.getVentasDashboard = async (req, res) => {
     `, ventasTenant.params);
 
     // ── Cotizaciones abiertas (BORRADOR + ENVIADA) con valor total ────────────
-    // Cotizaciones aun no tiene empresa_id; queda global hasta sprint especifico de cotizaciones.
     const [[cotizaciones]] = await connection.query(`
       SELECT
         COUNT(*) AS total,
         SUM(CASE WHEN estado IN ('BORRADOR', 'ENVIADA') THEN 1 ELSE 0 END) AS abiertas,
         COALESCE(SUM(CASE WHEN estado IN ('BORRADOR', 'ENVIADA') THEN total ELSE 0 END), 0) AS valor_abierto
       FROM cotizaciones
-    `);
+      WHERE 1=1${cotizacionesTenant.sql}
+    `, cotizacionesTenant.params);
 
     // ── Reparaciones: activas + COMPLETADAS (listas para entregar) ────────────
     const [[reparaciones]] = await connection.query(`
