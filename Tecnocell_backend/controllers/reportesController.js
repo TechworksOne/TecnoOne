@@ -2,6 +2,20 @@ const db = require('../config/database');
 
 // ===== HELPERS =====
 
+function isSuperadminTenant(req) {
+  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
+}
+
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+}
+
+function tenantClause(req, alias = null) {
+  if (isSuperadminTenant(req)) return { sql: '', params: [] };
+  const prefix = alias ? `${alias}.` : '';
+  return { sql: ` AND ${prefix}empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+}
+
 function parseItems(itemsField) {
   if (!itemsField) return [];
   try {
@@ -10,7 +24,7 @@ function parseItems(itemsField) {
   } catch { return []; }
 }
 
-async function getCostMaps(ventas) {
+async function getCostMaps(ventas, empresaId = null) {
   if (!ventas || ventas.length === 0) {
     return { productos: {}, repuestos: {}, missingCosts: false };
   }
@@ -31,9 +45,11 @@ async function getCostMaps(ventas) {
   let missingCosts = false;
 
   if (prodIds.size > 0) {
+    const empresaSql = empresaId ? ' AND empresa_id = ?' : '';
+    const empresaParams = empresaId ? [empresaId] : [];
     const [rows] = await db.query(
-      'SELECT id, sku, nombre, categoria, precio_costo, precio_venta, stock FROM productos WHERE id IN (?)',
-      [[...prodIds]]
+      `SELECT id, sku, nombre, categoria, precio_costo, precio_venta, stock FROM productos WHERE id IN (?)${empresaSql}`,
+      [[...prodIds], ...empresaParams]
     );
     rows.forEach(r => {
       productos[r.id] = r;
@@ -42,9 +58,11 @@ async function getCostMaps(ventas) {
   }
 
   if (repIds.size > 0) {
+    const empresaSql = empresaId ? ' AND empresa_id = ?' : '';
+    const empresaParams = empresaId ? [empresaId] : [];
     const [rows] = await db.query(
-      'SELECT id, sku, nombre, precio_costo, stock FROM repuestos WHERE id IN (?)',
-      [[...repIds]]
+      `SELECT id, sku, nombre, precio_costo, stock FROM repuestos WHERE id IN (?)${empresaSql}`,
+      [[...repIds], ...empresaParams]
     );
     rows.forEach(r => {
       repuestos[r.id] = r;
@@ -78,18 +96,24 @@ function getCostoVenta(venta, costMaps) {
  */
 exports.getResumen = async (req, res) => {
   try {
+    const ventasTenant = tenantClause(req, 'v');
+    const ventasNoAliasTenant = tenantClause(req);
+    const cajaTenant = tenantClause(req);
+    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
     const [ventasDia] = await db.query(`
       SELECT v.* FROM ventas v
       WHERE DATE(COALESCE(v.fecha_venta, v.created_at)) = CURDATE()
       AND v.estado != 'ANULADA'
-    `);
+      ${ventasTenant.sql}
+    `, ventasTenant.params);
 
     const [ventasMes] = await db.query(`
       SELECT v.* FROM ventas v
       WHERE MONTH(COALESCE(v.fecha_venta, v.created_at)) = MONTH(CURDATE())
       AND YEAR(COALESCE(v.fecha_venta, v.created_at)) = YEAR(CURDATE())
       AND v.estado != 'ANULADA'
-    `);
+      ${ventasTenant.sql}
+    `, ventasTenant.params);
 
     const [anuladas] = await db.query(`
       SELECT COUNT(*) as total, COALESCE(SUM(total), 0) as monto
@@ -97,14 +121,16 @@ exports.getResumen = async (req, res) => {
       WHERE MONTH(COALESCE(fecha_venta, created_at)) = MONTH(CURDATE())
       AND YEAR(COALESCE(fecha_venta, created_at)) = YEAR(CURDATE())
       AND estado = 'ANULADA'
-    `);
+      ${ventasNoAliasTenant.sql}
+    `, ventasNoAliasTenant.params);
 
     const [egresosDia] = await db.query(`
       SELECT COALESCE(SUM(monto), 0) as total
       FROM caja_chica
       WHERE tipo_movimiento = 'EGRESO' AND estado = 'CONFIRMADO'
       AND DATE(fecha_movimiento) = CURDATE()
-    `);
+      ${cajaTenant.sql}
+    `, cajaTenant.params);
 
     const [egresosMes] = await db.query(`
       SELECT COALESCE(SUM(monto), 0) as total
@@ -112,11 +138,12 @@ exports.getResumen = async (req, res) => {
       WHERE tipo_movimiento = 'EGRESO' AND estado = 'CONFIRMADO'
       AND MONTH(fecha_movimiento) = MONTH(CURDATE())
       AND YEAR(fecha_movimiento) = YEAR(CURDATE())
-    `);
+      ${cajaTenant.sql}
+    `, cajaTenant.params);
 
     // Unir ventas evitando duplicados (día ya está en mes)
     const ventasUnicas = [...ventasMes];
-    const costMaps = await getCostMaps(ventasUnicas);
+    const costMaps = await getCostMaps(ventasUnicas, empresaId);
 
     let ingresosDia = 0, costosDia = 0, cantProdDia = 0, cantRepDia = 0, descuentosDia = 0;
     for (const v of ventasDia) {
@@ -170,29 +197,36 @@ exports.getDiario = async (req, res) => {
   try {
     const { fecha } = req.query;
     const fechaFiltro = fecha || new Date().toISOString().split('T')[0];
+    const ventasTenant = tenantClause(req, 'v');
+    const ventasNoAliasTenant = tenantClause(req);
+    const cajaTenant = tenantClause(req);
+    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
 
     const [ventas] = await db.query(`
       SELECT v.*, u.name as vendedor_nombre
       FROM ventas v LEFT JOIN users u ON v.created_by = u.id
       WHERE DATE(COALESCE(v.fecha_venta, v.created_at)) = ?
       AND v.estado != 'ANULADA'
-    `, [fechaFiltro]);
+      ${ventasTenant.sql}
+    `, [fechaFiltro, ...ventasTenant.params]);
 
     const [anuladas] = await db.query(`
       SELECT COUNT(*) as count, COALESCE(SUM(total), 0) as monto
       FROM ventas
       WHERE DATE(COALESCE(fecha_venta, created_at)) = ?
       AND estado = 'ANULADA'
-    `, [fechaFiltro]);
+      ${ventasNoAliasTenant.sql}
+    `, [fechaFiltro, ...ventasNoAliasTenant.params]);
 
     const [egresos] = await db.query(`
       SELECT COALESCE(SUM(monto), 0) as total
       FROM caja_chica
       WHERE tipo_movimiento = 'EGRESO' AND estado = 'CONFIRMADO'
       AND DATE(fecha_movimiento) = ?
-    `, [fechaFiltro]);
+      ${cajaTenant.sql}
+    `, [fechaFiltro, ...cajaTenant.params]);
 
-    const costMaps = await getCostMaps(ventas);
+    const costMaps = await getCostMaps(ventas, empresaId);
 
     const metodosPago = {};
     let totalIngresos = 0, costoTotal = 0, descuentosTotal = 0;
@@ -241,6 +275,8 @@ exports.getDiario = async (req, res) => {
 exports.getSemanal = async (req, res) => {
   try {
     let { fechaInicio, fechaFin } = req.query;
+    const ventasTenant = tenantClause(req, 'v');
+    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
 
     if (!fechaInicio || !fechaFin) {
       const today = new Date();
@@ -258,7 +294,8 @@ exports.getSemanal = async (req, res) => {
       SELECT v.* FROM ventas v
       WHERE DATE(COALESCE(v.fecha_venta, v.created_at)) BETWEEN ? AND ?
       AND v.estado != 'ANULADA'
-    `, [fechaInicio, fechaFin]);
+      ${ventasTenant.sql}
+    `, [fechaInicio, fechaFin, ...ventasTenant.params]);
 
     const prevInicio = new Date(fechaInicio);
     prevInicio.setDate(prevInicio.getDate() - 7);
@@ -269,10 +306,11 @@ exports.getSemanal = async (req, res) => {
       SELECT v.* FROM ventas v
       WHERE DATE(COALESCE(v.fecha_venta, v.created_at)) BETWEEN ? AND ?
       AND v.estado != 'ANULADA'
-    `, [prevInicio.toISOString().split('T')[0], prevFin.toISOString().split('T')[0]]);
+      ${ventasTenant.sql}
+    `, [prevInicio.toISOString().split('T')[0], prevFin.toISOString().split('T')[0], ...ventasTenant.params]);
 
     const allVentas = [...ventas, ...ventasPrev];
-    const costMaps = await getCostMaps(allVentas);
+    const costMaps = await getCostMaps(allVentas, empresaId);
 
     // Ventas por día
     const porDia = {};
@@ -360,15 +398,18 @@ exports.getSemanal = async (req, res) => {
 exports.getProductosMasVendidos = async (req, res) => {
   try {
     const { desde, hasta, limit = 20 } = req.query;
+    const ventasTenant = tenantClause(req, 'v');
+    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
 
     let query = `SELECT v.* FROM ventas v WHERE v.estado != 'ANULADA'`;
-    const params = [];
+    const params = [...ventasTenant.params];
+    query += ventasTenant.sql;
 
     if (desde) { query += ' AND DATE(COALESCE(v.fecha_venta, v.created_at)) >= ?'; params.push(desde); }
     if (hasta) { query += ' AND DATE(COALESCE(v.fecha_venta, v.created_at)) <= ?'; params.push(hasta); }
 
     const [ventas] = await db.query(query, params);
-    const costMaps = await getCostMaps(ventas);
+    const costMaps = await getCostMaps(ventas, empresaId);
 
     const productosAgg = {};
     for (const v of ventas) {
@@ -423,6 +464,8 @@ exports.getProductosMasVendidos = async (req, res) => {
 exports.getHistorialVentas = async (req, res) => {
   try {
     const { desde, hasta, estado, metodo_pago, vendedor, cliente, page = 1, limit = 100 } = req.query;
+    const ventasTenant = tenantClause(req, 'v');
+    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
 
     let query = `
       SELECT v.*, u.name as vendedor_nombre
@@ -430,7 +473,8 @@ exports.getHistorialVentas = async (req, res) => {
       LEFT JOIN users u ON v.created_by = u.id
       WHERE 1=1
     `;
-    const params = [];
+    const params = [...ventasTenant.params];
+    query += ventasTenant.sql;
 
     if (desde) { query += ' AND DATE(COALESCE(v.fecha_venta, v.created_at)) >= ?'; params.push(desde); }
     if (hasta) { query += ' AND DATE(COALESCE(v.fecha_venta, v.created_at)) <= ?'; params.push(hasta); }
@@ -446,7 +490,7 @@ exports.getHistorialVentas = async (req, res) => {
     params.push(parseInt(limit), offset);
 
     const [ventas] = await db.query(query, params);
-    const costMaps = await getCostMaps(ventas);
+    const costMaps = await getCostMaps(ventas, empresaId);
 
     const resultado = ventas.map(v => {
       const { costo } = getCostoVenta(v, costMaps);
@@ -487,6 +531,10 @@ exports.getHistorialVentas = async (req, res) => {
 exports.getMetricasFinancieras = async (req, res) => {
   try {
     const { desde, hasta } = req.query;
+    const ventasTenant = tenantClause(req, 'v');
+    const ventasNoAliasTenant = tenantClause(req);
+    const cajaTenant = tenantClause(req);
+    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
     const hoy = new Date();
     const desdeDefault = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`;
     const hastaDefault = hoy.toISOString().split('T')[0];
@@ -498,23 +546,26 @@ exports.getMetricasFinancieras = async (req, res) => {
       SELECT v.* FROM ventas v
       WHERE DATE(COALESCE(v.fecha_venta, v.created_at)) BETWEEN ? AND ?
       AND v.estado != 'ANULADA'
-    `, [desdeStr, hastaStr]);
+      ${ventasTenant.sql}
+    `, [desdeStr, hastaStr, ...ventasTenant.params]);
 
     const [anuladas] = await db.query(`
       SELECT COUNT(*) as count, COALESCE(SUM(total), 0) as monto
       FROM ventas
       WHERE DATE(COALESCE(fecha_venta, created_at)) BETWEEN ? AND ?
       AND estado = 'ANULADA'
-    `, [desdeStr, hastaStr]);
+      ${ventasNoAliasTenant.sql}
+    `, [desdeStr, hastaStr, ...ventasNoAliasTenant.params]);
 
     const [egresos] = await db.query(`
       SELECT COALESCE(SUM(monto), 0) as total
       FROM caja_chica
       WHERE tipo_movimiento = 'EGRESO' AND estado = 'CONFIRMADO'
       AND DATE(fecha_movimiento) BETWEEN ? AND ?
-    `, [desdeStr, hastaStr]);
+      ${cajaTenant.sql}
+    `, [desdeStr, hastaStr, ...cajaTenant.params]);
 
-    const costMaps = await getCostMaps(ventas);
+    const costMaps = await getCostMaps(ventas, empresaId);
 
     let totalIngresos = 0, costoTotal = 0, descuentosTotal = 0;
     const metodosPago = {};
