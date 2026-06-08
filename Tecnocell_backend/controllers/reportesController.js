@@ -7,13 +7,23 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function tenantClause(req, alias = null) {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
   const prefix = alias ? `${alias}.` : '';
-  return { sql: ` AND ${prefix}empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+  return { sql: ` AND ${prefix}empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 function parseItems(itemsField) {
@@ -99,7 +109,7 @@ exports.getResumen = async (req, res) => {
     const ventasTenant = tenantClause(req, 'v');
     const ventasNoAliasTenant = tenantClause(req);
     const cajaTenant = tenantClause(req);
-    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
+    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
     const [ventasDia] = await db.query(`
       SELECT v.* FROM ventas v
       WHERE DATE(COALESCE(v.fecha_venta, v.created_at)) = CURDATE()
@@ -185,7 +195,7 @@ exports.getResumen = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getResumen:', error);
-    res.status(500).json({ error: 'Error al obtener resumen', details: error.message });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener resumen', details: error.message });
   }
 };
 
@@ -200,7 +210,7 @@ exports.getDiario = async (req, res) => {
     const ventasTenant = tenantClause(req, 'v');
     const ventasNoAliasTenant = tenantClause(req);
     const cajaTenant = tenantClause(req);
-    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
+    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
 
     const [ventas] = await db.query(`
       SELECT v.*, u.name as vendedor_nombre
@@ -264,7 +274,7 @@ exports.getDiario = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getDiario:', error);
-    res.status(500).json({ error: 'Error al obtener reporte diario', details: error.message });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener reporte diario', details: error.message });
   }
 };
 
@@ -276,7 +286,7 @@ exports.getSemanal = async (req, res) => {
   try {
     let { fechaInicio, fechaFin } = req.query;
     const ventasTenant = tenantClause(req, 'v');
-    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
+    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
 
     if (!fechaInicio || !fechaFin) {
       const today = new Date();
@@ -387,7 +397,7 @@ exports.getSemanal = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getSemanal:', error);
-    res.status(500).json({ error: 'Error al obtener reporte semanal', details: error.message });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener reporte semanal', details: error.message });
   }
 };
 
@@ -399,7 +409,7 @@ exports.getProductosMasVendidos = async (req, res) => {
   try {
     const { desde, hasta, limit = 20 } = req.query;
     const ventasTenant = tenantClause(req, 'v');
-    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
+    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
 
     let query = `SELECT v.* FROM ventas v WHERE v.estado != 'ANULADA'`;
     const params = [...ventasTenant.params];
@@ -453,7 +463,7 @@ exports.getProductosMasVendidos = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getProductosMasVendidos:', error);
-    res.status(500).json({ error: 'Error al obtener productos más vendidos', details: error.message });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener productos más vendidos', details: error.message });
   }
 };
 
@@ -465,7 +475,7 @@ exports.getHistorialVentas = async (req, res) => {
   try {
     const { desde, hasta, estado, metodo_pago, vendedor, cliente, page = 1, limit = 100 } = req.query;
     const ventasTenant = tenantClause(req, 'v');
-    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
+    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
 
     let query = `
       SELECT v.*, u.name as vendedor_nombre
@@ -520,7 +530,7 @@ exports.getHistorialVentas = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getHistorialVentas:', error);
-    res.status(500).json({ error: 'Error al obtener historial de ventas', details: error.message });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener historial de ventas', details: error.message });
   }
 };
 
@@ -534,7 +544,7 @@ exports.getMetricasFinancieras = async (req, res) => {
     const ventasTenant = tenantClause(req, 'v');
     const ventasNoAliasTenant = tenantClause(req);
     const cajaTenant = tenantClause(req);
-    const empresaId = isSuperadminTenant(req) ? null : getTenantEmpresaId(req);
+    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
     const hoy = new Date();
     const desdeDefault = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`;
     const hastaDefault = hoy.toISOString().split('T')[0];
@@ -624,6 +634,6 @@ exports.getMetricasFinancieras = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getMetricasFinancieras:', error);
-    res.status(500).json({ error: 'Error al obtener métricas financieras', details: error.message });
+    res.status(error.statusCode || 500).json({ error: 'Error al obtener métricas financieras', details: error.message });
   }
 };

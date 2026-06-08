@@ -3,12 +3,22 @@ const db = require('../config/database');
 function addTenantCondition(req, conditions, params, alias = 'c') {
   if (!req.tenant?.isSuperadmin) {
     conditions.push(`${alias}.empresa_id = ?`);
-    params.push(req.tenant.empresa_id);
+    params.push(requireTenantEmpresaId(req));
   }
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 // Obtener todos los clientes
@@ -61,7 +71,7 @@ const getAllCustomers = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener clientes:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false,
       message: 'Error al obtener clientes' 
     });
@@ -104,7 +114,7 @@ const searchCustomers = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al buscar clientes:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false,
       message: 'Error al buscar clientes' 
     });
@@ -141,7 +151,7 @@ const getCustomerById = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener cliente:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false,
       message: 'Error al obtener cliente' 
     });
@@ -166,8 +176,8 @@ const createCustomer = async (req, res) => {
     }
 
     const empresaId = req.tenant?.isSuperadmin
-      ? (empresa_id !== undefined && empresa_id !== '' ? empresa_id : getTenantEmpresaId(req))
-      : getTenantEmpresaId(req);
+      ? (empresa_id !== undefined && empresa_id !== '' ? empresa_id : requireTenantEmpresaId(req))
+      : requireTenantEmpresaId(req);
 
     // Insertar cliente
     const [result] = await db.query(
@@ -197,7 +207,7 @@ const createCustomer = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error al crear cliente:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false,
       message: 'Error al crear cliente',
       error: error.message
@@ -254,7 +264,7 @@ const updateCustomer = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al actualizar cliente:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false,
       message: 'Error al actualizar cliente' 
     });
@@ -287,7 +297,7 @@ const deleteCustomer = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al eliminar cliente:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false,
       message: 'Error al eliminar cliente' 
     });
@@ -302,7 +312,7 @@ const getCustomerPurchases = async (req, res) => {
     const params = [id];
     addTenantCondition(req, conditions, params);
     const ventasTenantSql = req.tenant?.isSuperadmin ? '' : ' AND v.empresa_id = ?';
-    const ventasTenantParams = req.tenant?.isSuperadmin ? [] : [getTenantEmpresaId(req)];
+    const ventasTenantParams = req.tenant?.isSuperadmin ? [] : [requireTenantEmpresaId(req)];
 
     const [customers] = await db.query(`SELECT c.id FROM clientes c WHERE ${conditions.join(' AND ')}`, params);
     if (customers.length === 0) {
@@ -382,7 +392,7 @@ const getCustomerPurchases = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener compras del cliente:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false,
       message: 'Error al obtener compras del cliente',
       error: error.message
