@@ -1,18 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const categoryController = require('../controllers/categoryController');
-const { verifyToken } = require('../middleware/authMiddleware');
+const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
+
+const soloAdmin = [verifyToken, verifyRole('admin')];
 
 // Rutas públicas (sin autenticación) - solo lectura
 router.get('/', categoryController.getAllCategories);
 router.get('/:categoryId/subcategories', categoryController.getSubcategories);
 
 // Rutas protegidas (requieren autenticación) - escritura
-router.post('/', verifyToken, categoryController.createCategory);
-router.post('/subcategories', verifyToken, categoryController.createSubcategory);
-router.put('/:id', verifyToken, categoryController.updateCategory);
-router.put('/subcategories/:id', verifyToken, categoryController.updateSubcategory);
-router.delete('/:id', verifyToken, categoryController.deleteCategory);
-router.delete('/subcategories/:id', verifyToken, categoryController.deleteSubcategory);
+router.post('/', ...soloAdmin, categoryController.createCategory);
+router.post('/subcategories', ...soloAdmin, categoryController.createSubcategory);
+router.put('/:id', ...soloAdmin, categoryController.updateCategory);
+router.put('/subcategories/:id', ...soloAdmin, categoryController.updateSubcategory);
+router.delete('/:id', ...soloAdmin, categoryController.deleteCategory);
+router.delete('/subcategories/:id', ...soloAdmin, categoryController.deleteSubcategory);
 
 module.exports = router;
