@@ -15,13 +15,23 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function tenantClause(req, alias = null) {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
   const prefix = alias ? `${alias}.` : '';
-  return { sql: ` AND ${prefix}empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+  return { sql: ` AND ${prefix}empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 exports.getDashboardStats = async (req, res) => {
@@ -310,7 +320,7 @@ exports.getDashboardStats = async (req, res) => {
     res.json(resultado);
   } catch (error) {
     console.error('Error loading dashboard stats:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al cargar estadísticas del dashboard',
       details: error.message,
     });
@@ -496,7 +506,7 @@ exports.getTecnicoDashboardStats = async (req, res) => {
     });
   } catch (error) {
     console.error('Error loading tecnico dashboard stats:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al cargar estadísticas del técnico',
       details: error.message,
     });
@@ -668,7 +678,7 @@ exports.getVentasDashboard = async (req, res) => {
     });
   } catch (error) {
     console.error('Error loading ventas dashboard stats:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Error al cargar estadísticas de ventas',
       details: error.message,
     });

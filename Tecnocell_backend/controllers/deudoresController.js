@@ -5,17 +5,27 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function deudorTenantClause(req, alias = 'd') {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
-  return { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+  return { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 function pagoTenantClause(req, alias = 'p') {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
-  return { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+  return { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 // ── Listar todos los créditos ──────────────────────────────────────────────
@@ -59,7 +69,7 @@ exports.getDeudores = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error al obtener deudores:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -89,7 +99,7 @@ exports.getDeudorById = async (req, res) => {
     res.json({ success: true, data: deudor });
   } catch (error) {
     console.error('Error al obtener crédito:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -124,7 +134,7 @@ exports.createDeudor = async (req, res) => {
     const total    = parseFloat(monto_total);
     const cuotaBase = parseFloat((total / cuotas).toFixed(2));
     const cuotaUlt  = parseFloat((total - cuotaBase * (cuotas - 1)).toFixed(2));
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     if (cliente_id) {
       const [clientes] = await connection.query(
@@ -219,7 +229,7 @@ exports.createDeudor = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al crear crédito:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   } finally {
     connection.release();
   }
@@ -230,7 +240,7 @@ exports.searchReparaciones = async (req, res) => {
   try {
     const { search = '', limit = 15 } = req.query;
     const like = `%${search}%`;
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
     const [rows] = await db.query(
       `SELECT id, sticker_serie_interna AS numero_reparacion,
               cliente_nombre, cliente_telefono,
@@ -249,7 +259,7 @@ exports.searchReparaciones = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error búsqueda reparaciones:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -289,7 +299,7 @@ exports.registrarPago = async (req, res) => {
       monto, metodo_pago = 'EFECTIVO', referencia, notas,
       realizado_por, porcentaje_recargo = 0, usuario_id,
     } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     if (!monto || Number(monto) <= 0) {
       await connection.rollback();
@@ -444,7 +454,7 @@ exports.registrarPago = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al registrar pago:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   } finally {
     connection.release();
   }
@@ -458,7 +468,7 @@ exports.anularDeudor = async (req, res) => {
 
     const { id } = req.params;
     const { motivo, anulado_por } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
 
     if (!motivo || !String(motivo).trim()) {
       await connection.rollback();
@@ -575,7 +585,7 @@ exports.anularDeudor = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al anular crédito:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   } finally {
     connection.release();
   }
@@ -599,6 +609,6 @@ exports.getResumen = async (req, res) => {
     `, tenant.params);
     res.json({ success: true, data: stats });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };

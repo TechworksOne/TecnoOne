@@ -5,13 +5,23 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function supplierTenantClause(req, alias = 'p') {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
   const prefix = alias ? `${alias}.` : '';
-  return { sql: ` AND ${prefix}empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+  return { sql: ` AND ${prefix}empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 // Obtener todos los proveedores
@@ -55,7 +65,7 @@ exports.getAllSuppliers = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener proveedores:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener proveedores',
       error: error.message
@@ -92,7 +102,7 @@ exports.searchSuppliers = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al buscar proveedores:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al buscar proveedores',
       error: error.message
@@ -132,7 +142,7 @@ exports.getSupplierById = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener proveedor:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener proveedor',
       error: error.message
@@ -191,7 +201,7 @@ exports.getSupplierPurchases = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener compras del proveedor:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener compras del proveedor',
       error: error.message
@@ -221,7 +231,7 @@ exports.createSupplier = async (req, res) => {
       });
     }
 
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
     const [result] = await db.query(
       `INSERT INTO proveedores
         (empresa_id, nombre, contacto, telefono, email, direccion, nit, empresa, sitio_web, notas, activo)
@@ -238,7 +248,7 @@ exports.createSupplier = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al crear proveedor:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al crear proveedor',
       error: error.message
@@ -304,7 +314,7 @@ exports.updateSupplier = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al actualizar proveedor:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al actualizar proveedor',
       error: error.message
@@ -336,7 +346,7 @@ exports.deleteSupplier = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al eliminar proveedor:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al eliminar proveedor',
       error: error.message

@@ -7,13 +7,23 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function productTenantClause(req, alias = 'p') {
   return isSuperadminTenant(req)
     ? { sql: '', params: [] }
-    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 // Guarda una imagen base64 como archivo físico y retorna la URL relativa
@@ -139,7 +149,7 @@ exports.getAllProducts = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener productos:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false, 
       message: 'Error al obtener productos',
       error: error.message 
@@ -199,7 +209,7 @@ exports.getProductById = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener producto:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false, 
       message: 'Error al obtener producto',
       error: error.message 
@@ -231,7 +241,7 @@ exports.createProduct = async (req, res) => {
       aplica_serie = false,
       imagenes = []
     } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+    const empresaId = requireTenantEmpresaId(req);
     
     // Convertir booleanos a 1 o 0 para la BD
     const aplicaSerieValue = aplica_serie ? 1 : 0;
@@ -348,7 +358,7 @@ exports.createProduct = async (req, res) => {
       });
     }
     
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false, 
       message: 'Error al crear producto',
       error: error.message 
@@ -514,7 +524,7 @@ exports.updateProduct = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al actualizar producto:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al actualizar producto',
       error: error.message,
@@ -548,7 +558,7 @@ exports.deleteProduct = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al desactivar producto:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false, 
       message: 'Error al desactivar producto',
       error: error.message 
@@ -629,7 +639,7 @@ exports.adjustStock = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al ajustar stock:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false, 
       message: 'Error al ajustar stock',
       error: error.message 
@@ -692,7 +702,7 @@ exports.getProductKardex = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener kardex:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false, 
       message: 'Error al obtener kardex',
       error: error.message 
@@ -746,7 +756,7 @@ exports.searchProducts = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al buscar productos:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false, 
       message: 'Error al buscar productos',
       error: error.message 
@@ -792,7 +802,7 @@ exports.getCriticalStockProducts = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener productos con stock crítico:', error);
-    res.status(500).json({ 
+    res.status(error.statusCode || 500).json({ 
       success: false, 
       message: 'Error al obtener productos con stock crítico',
       error: error.message 

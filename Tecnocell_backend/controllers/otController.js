@@ -16,19 +16,29 @@ function isSuperadminTenant(req) {
 }
 
 function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? 1;
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+  return empresaId;
 }
 
 function addRepairTenantFilter(req, where, params, alias = 'r') {
   if (isSuperadminTenant(req)) return where;
-  params.push(getTenantEmpresaId(req));
+  params.push(requireTenantEmpresaId(req));
   return `${where} AND ${alias}.empresa_id = ?`;
 }
 
 function repairTenantClause(req, alias = 'r') {
   return isSuperadminTenant(req)
     ? { sql: '', params: [] }
-    : { sql: ` AND ${alias}.empresa_id = ?`, params: [getTenantEmpresaId(req)] };
+    : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
 // ── Columnas SELECT reutilizables ──────────────────────────────────────────
@@ -117,7 +127,7 @@ exports.getOrdenesTrabajo = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('getOrdenesTrabajo error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -175,7 +185,7 @@ exports.getHistorialOT = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('getHistorialOT error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -291,7 +301,7 @@ exports.getResumenOT = async (req, res) => {
     }
   } catch (error) {
     console.error('getResumenOT error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -323,7 +333,7 @@ exports.asignarTecnico = async (req, res) => {
        FROM users u
        LEFT JOIN user_profiles p ON p.user_id = u.id
        WHERE u.id = ? AND u.active = 1${isSuperadminTenant(req) ? '' : ' AND u.empresa_id = ?'}`,
-      isSuperadminTenant(req) ? [parseInt(tecnico_id, 10)] : [parseInt(tecnico_id, 10), getTenantEmpresaId(req)]
+      isSuperadminTenant(req) ? [parseInt(tecnico_id, 10)] : [parseInt(tecnico_id, 10), requireTenantEmpresaId(req)]
     );
     if (!tecnico) {
       return res.status(404).json({ success: false, message: 'Técnico no encontrado o inactivo' });
@@ -365,7 +375,7 @@ exports.asignarTecnico = async (req, res) => {
     });
   } catch (error) {
     console.error('asignarTecnico error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -398,7 +408,7 @@ exports.quitarAsignacion = async (req, res) => {
     res.json({ success: true, message: 'Asignación eliminada correctamente' });
   } catch (error) {
     console.error('quitarAsignacion error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -424,7 +434,7 @@ exports.getTecnicos = async (req, res) => {
            CASE WHEN LOWER(r.nombre) IN ('admin','administrador','tecnico','técnico') THEN 1 ELSE 0 END
          ) > 0
        ORDER BY nombre_completo, u.username`,
-      isSuperadminTenant(req) ? [] : [getTenantEmpresaId(req)]
+      isSuperadminTenant(req) ? [] : [requireTenantEmpresaId(req)]
     );
 
     const result = rows.map(u => ({
@@ -435,6 +445,6 @@ exports.getTecnicos = async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('getTecnicos error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
