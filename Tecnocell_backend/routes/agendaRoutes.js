@@ -3,9 +3,11 @@ const router = express.Router();
 const agendaController = require('../controllers/agendaController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
 router.use(verifyToken);
 router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
 // GET /api/agenda/entregas  — listado de reparaciones con fecha de entrega programada
 router.get('/entregas', agendaController.getEntregas);

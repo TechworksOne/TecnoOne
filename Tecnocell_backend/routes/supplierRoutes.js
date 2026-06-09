@@ -3,9 +3,11 @@ const router = express.Router();
 const supplierController = require('../controllers/supplierController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
 router.use(verifyToken);
 router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
 router.get('/', supplierController.getAllSuppliers);
 router.get('/search', supplierController.searchSuppliers);

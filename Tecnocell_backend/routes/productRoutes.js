@@ -7,6 +7,7 @@ const path = require('path');
 const productController = require('../controllers/productController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -53,6 +54,7 @@ const uploadImagenesProducto = (req, res, next) => {
 
 router.use(verifyToken);
 router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
 router.get('/search', productController.searchProducts);
 router.get('/alerts/critical-stock', productController.getCriticalStockProducts);
