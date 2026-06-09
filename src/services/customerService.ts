@@ -26,7 +26,7 @@ export interface CustomerData {
   nit?: string;
   email?: string;
   direccion?: string;
-  metodo_pago_preferido?: 'efectivo' | 'tarjeta' | 'credito-tecnocell';
+  metodo_pago_preferido?: 'efectivo' | 'tarjeta' | 'transferencia';
   notas?: string;
 }
 
