@@ -4,6 +4,8 @@ const path = require('path');
 const fs = require('fs');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
+const BACKEND_DIR = path.join(__dirname, '..');
+const UPLOADS_DIR = path.join(BACKEND_DIR, 'uploads');
 const CONTRATOS_DIR = path.join(__dirname, '..', 'uploads', 'contratos');
 const PAGE_WIDTH = 612;
 const PAGE_HEIGHT = 792;
@@ -19,10 +21,17 @@ const FONT_MEDIUM = 11;
 const FONT_TITLE = 18;
 const FONT_BUSINESS = 22;
 
-const FIRMA_CLIENTE_X = 186;
+const LOGO_MAX_W = 75;
+const LOGO_MAX_H = 55;
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const FIRMA_CLIENTE_X = 78;
 const FIRMA_CLIENTE_Y = 158;
-const FIRMA_CLIENTE_W = 240;
-const FIRMA_CLIENTE_H = 78;
+const FIRMA_CLIENTE_W = 190;
+const FIRMA_CLIENTE_H = 62;
+const FIRMA_RECEPTOR_X = 344;
+const FIRMA_RECEPTOR_Y = 158;
+const FIRMA_RECEPTOR_W = 190;
+const FIRMA_RECEPTOR_H = 62;
 
 const EMPTY_VALUES = new Set(['', 'ninguno', 'n/a', 'none', 'null', 'undefined', '-', '—']);
 
@@ -42,6 +51,20 @@ function isEmpty(val) {
   return EMPTY_VALUES.has(String(val).trim().toLowerCase());
 }
 
+function sanitizePdfText(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/\uFFFD/g, '')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, '-')
+    .replace(/[•]/g, '-')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7E\u00A0-\u00FF]/g, '');
+}
+
 function hexToRgb(hex) {
   if (isEmpty(hex)) return COLOR_ACCENT_FALLBACK;
 
@@ -56,8 +79,10 @@ function hexToRgb(hex) {
 
 function drawSafeText(page, value, x, y, opts = {}) {
   if (isEmpty(value)) return;
+  const safeValue = sanitizePdfText(value).trim();
+  if (isEmpty(safeValue)) return;
 
-  page.drawText(String(value).trim(), {
+  page.drawText(safeValue, {
     x,
     y,
     size: opts.size || FONT_NORMAL,
@@ -70,7 +95,10 @@ function drawSafeText(page, value, x, y, opts = {}) {
 function drawWrappedText(page, value, x, y, maxWidth, lineHeight, fontSize, fontObj, colorObj) {
   if (isEmpty(value)) return y;
 
-  const words = String(value).trim().split(/\s+/);
+  const safeValue = sanitizePdfText(value).trim();
+  if (isEmpty(safeValue)) return y;
+
+  const words = safeValue.split(/\s+/);
   const lines = [];
   let line = '';
 
@@ -106,7 +134,7 @@ function drawWrappedText(page, value, x, y, maxWidth, lineHeight, fontSize, font
 }
 
 function drawSectionTitle(page, title, x, y, fonts, accentColor) {
-  page.drawText(title, {
+  page.drawText(sanitizePdfText(title), {
     x,
     y,
     size: FONT_MEDIUM,
@@ -128,7 +156,7 @@ function drawLine(page, x1, y1, x2, y2, color = COLOR_LINE) {
 function drawLabelValue(page, label, value, x, y, fonts, opts = {}) {
   if (isEmpty(value)) return y;
 
-  const labelText = `${label}:`;
+  const labelText = `${sanitizePdfText(label)}:`;
   const labelWidth = fonts.bold.widthOfTextAtSize(labelText, FONT_NORMAL);
 
   page.drawText(labelText, {
@@ -165,19 +193,172 @@ function drawLabelValue(page, label, value, x, y, fonts, opts = {}) {
 
 function drawFooter(page, pageNumber, fonts) {
   drawLine(page, MARGIN_X, 42, PAGE_WIDTH - MARGIN_X, 42, COLOR_LINE);
-  page.drawText('Documento generado mediante TecnoOne', {
+  page.drawText(sanitizePdfText('Documento generado mediante TecnoOne'), {
     x: MARGIN_X,
     y: 26,
     size: FONT_SMALL,
     font: fonts.normal,
     color: COLOR_MUTED,
   });
-  page.drawText(`Pagina ${pageNumber} de 2`, {
+  page.drawText(sanitizePdfText(`Pagina ${pageNumber} de 2`), {
     x: PAGE_WIDTH - MARGIN_X - 60,
     y: 26,
     size: FONT_SMALL,
     font: fonts.normal,
     color: COLOR_MUTED,
+  });
+}
+
+function isPathInside(parentPath, childPath) {
+  const relativePath = path.relative(path.resolve(parentPath), path.resolve(childPath));
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+function resolveLocalLogoPath(logoUrl) {
+  const raw = String(logoUrl || '').trim();
+  const normalized = raw.replace(/\\/g, '/');
+
+  if (normalized.startsWith('/uploads/')) {
+    const logoPath = path.resolve(UPLOADS_DIR, normalized.slice('/uploads/'.length));
+    return isPathInside(UPLOADS_DIR, logoPath) ? logoPath : null;
+  }
+
+  if (normalized.startsWith('uploads/')) {
+    const logoPath = path.resolve(UPLOADS_DIR, normalized.slice('uploads/'.length));
+    return isPathInside(UPLOADS_DIR, logoPath) ? logoPath : null;
+  }
+
+  if (path.isAbsolute(raw)) {
+    const logoPath = path.resolve(raw);
+    return isPathInside(BACKEND_DIR, logoPath) ? logoPath : null;
+  }
+
+  return null;
+}
+
+async function tryLoadLogo(pdfDoc, logoUrl) {
+  let logoPath = null;
+
+  try {
+    console.log('[ContratoPDF] logo_url:', logoUrl || null);
+
+    if (isEmpty(logoUrl)) {
+      console.log('[ContratoPDF] logoPath:', null);
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    const raw = String(logoUrl).trim();
+    if (/^https?:\/\//i.test(raw)) {
+      console.log('[ContratoPDF] logoPath:', null);
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    logoPath = resolveLocalLogoPath(raw);
+    console.log('[ContratoPDF] logoPath:', logoPath || null);
+
+    if (!logoPath || !fs.existsSync(logoPath)) {
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    const stats = fs.statSync(logoPath);
+    if (!stats.isFile() || stats.size > LOGO_MAX_BYTES) {
+      console.warn(`[ContratoPDF] Logo rechazado por tamano o tipo de archivo: ${logoPath}`);
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    const ext = path.extname(logoPath).toLowerCase();
+    if (ext === '.png') {
+      console.warn('[ContratoPDF] logo PNG ignorado temporalmente para evitar bloqueo en pdf-lib:', logoPath);
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    if (!['.jpg', '.jpeg'].includes(ext)) {
+      console.warn('[ContratoPDF] formato de logo no soportado:', ext);
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    const logoBytes = fs.readFileSync(logoPath);
+    const logoImage = await pdfDoc.embedJpg(logoBytes);
+
+    console.log('[ContratoPDF] logo cargado:', Boolean(logoImage));
+    return logoImage || null;
+  } catch (err) {
+    console.warn('[ContratoPDF] No se pudo cargar el logo del negocio:', err.message);
+    console.log('[ContratoPDF] logoPath:', logoPath || null);
+    console.log('[ContratoPDF] logo cargado:', false);
+    return null;
+  }
+}
+
+async function drawHeader(pdfDoc, page, negocio, fonts, accentColor) {
+  const logoImage = await tryLoadLogo(pdfDoc, negocio.logoUrl);
+  const hasLogo = Boolean(logoImage);
+  const logoX = MARGIN_X;
+  const logoTopY = 767;
+  let textX = MARGIN_X;
+  let textMaxWidth = 360;
+
+  page.drawRectangle({
+    x: 0,
+    y: PAGE_HEIGHT - 104,
+    width: PAGE_WIDTH,
+    height: 104,
+    color: rgb(0.97, 0.98, 1),
+  });
+  page.drawRectangle({
+    x: 0,
+    y: PAGE_HEIGHT - 108,
+    width: PAGE_WIDTH,
+    height: 4,
+    color: accentColor,
+  });
+
+  if (hasLogo) {
+    const scale = Math.min(LOGO_MAX_W / logoImage.width, LOGO_MAX_H / logoImage.height, 1);
+    const logoWidth = logoImage.width * scale;
+    const logoHeight = logoImage.height * scale;
+
+    page.drawImage(logoImage, {
+      x: logoX,
+      y: logoTopY - logoHeight,
+      width: logoWidth,
+      height: logoHeight,
+    });
+
+    textX = logoX + LOGO_MAX_W + 15;
+    textMaxWidth = PAGE_WIDTH - MARGIN_X - textX;
+  }
+
+  drawSafeText(page, negocio.nombre, textX, 740, {
+    _font: fonts.normal,
+    _fontBold: fonts.bold,
+    bold: true,
+    size: hasLogo ? FONT_TITLE : FONT_BUSINESS,
+    color: accentColor,
+    maxWidth: textMaxWidth,
+  });
+  drawSafeText(page, negocio.razonSocial, textX, 722, {
+    _font: fonts.normal,
+    _fontBold: fonts.bold,
+    size: FONT_NORMAL,
+    color: COLOR_MUTED,
+    maxWidth: textMaxWidth,
+  });
+
+  const negocioInfo = buildCompactInfo(negocio);
+  drawWrappedText(page, negocioInfo, textX, 705, textMaxWidth, 11, FONT_SMALL, fonts.normal, COLOR_MUTED);
+  drawSafeText(page, 'Documento generado mediante TecnoOne', textX, 690, {
+    _font: fonts.normal,
+    _fontBold: fonts.bold,
+    size: FONT_SMALL,
+    color: COLOR_MUTED,
+    maxWidth: textMaxWidth,
   });
 }
 
@@ -194,33 +375,64 @@ function resolveFirmaPath(firmaClienteUrl) {
   return path.join('/app/uploads', raw);
 }
 
-async function insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl, font, colorObj) {
-  console.log('[ContratoPDF] firma_cliente_url:', firmaClienteUrl);
+async function insertarFirmaImagen(pdfDoc, page, firmaUrl, x, y, width, height, label) {
+  console.log(`[ContratoPDF] ${label}:`, firmaUrl);
 
-  const firmaPath = resolveFirmaPath(firmaClienteUrl);
-  console.log('[ContratoPDF] firmaPath:', firmaPath);
-  console.log('[ContratoPDF] existe firma:', firmaPath ? fs.existsSync(firmaPath) : false);
+  const firmaPath = resolveFirmaPath(firmaUrl);
+  console.log(`[ContratoPDF] ${label} path:`, firmaPath);
+  console.log(`[ContratoPDF] existe ${label}:`, firmaPath ? fs.existsSync(firmaPath) : false);
 
   if (!firmaPath || !fs.existsSync(firmaPath)) {
-    console.warn('[ContratoPDF] Firma no encontrada. PDF generado sin firma.');
-    return;
+    console.warn(`[ContratoPDF] ${label} no encontrada. PDF generado con linea manual.`);
+    return false;
   }
 
   try {
     const firmaBytes = fs.readFileSync(firmaPath);
-    const firmaImage = await pdfDoc.embedPng(firmaBytes);
+    const lowerPath = firmaPath.toLowerCase();
+    const firmaImage = lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')
+      ? await pdfDoc.embedJpg(firmaBytes)
+      : await pdfDoc.embedPng(firmaBytes);
 
-    page2.drawImage(firmaImage, {
-      x: FIRMA_CLIENTE_X,
-      y: FIRMA_CLIENTE_Y,
-      width: FIRMA_CLIENTE_W,
-      height: FIRMA_CLIENTE_H,
+    page.drawImage(firmaImage, {
+      x,
+      y,
+      width,
+      height,
     });
 
-    console.log('[ContratoPDF] firma insertada correctamente');
+    console.log(`[ContratoPDF] ${label} insertada correctamente`);
+    return true;
   } catch (err) {
-    console.error('[ContratoPDF] Error insertando firma:', err.message);
+    console.error(`[ContratoPDF] Error insertando ${label}:`, err.message);
+    return false;
   }
+}
+
+async function insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl) {
+  return insertarFirmaImagen(
+    pdfDoc,
+    page2,
+    firmaClienteUrl,
+    FIRMA_CLIENTE_X,
+    FIRMA_CLIENTE_Y,
+    FIRMA_CLIENTE_W,
+    FIRMA_CLIENTE_H,
+    'firma_cliente_url'
+  );
+}
+
+async function insertarFirmaReceptor(pdfDoc, page2, firmaReceptorUrl) {
+  return insertarFirmaImagen(
+    pdfDoc,
+    page2,
+    firmaReceptorUrl,
+    FIRMA_RECEPTOR_X,
+    FIRMA_RECEPTOR_Y,
+    FIRMA_RECEPTOR_W,
+    FIRMA_RECEPTOR_H,
+    'firma_receptor_url'
+  );
 }
 
 function normalizeNegocio(negocio = {}) {
@@ -321,6 +533,9 @@ async function generarContrato(datos) {
     anticipo = 0,
     anticipoRecibido = null,
     firmaClienteUrl = null,
+    receptorNombre = '',
+    receptorUsuario = '',
+    firmaReceptorUrl = null,
   } = datos;
 
   const negocio = normalizeNegocio(datos.negocio);
@@ -346,39 +561,7 @@ async function generarContrato(datos) {
 
   console.log('[ContratoPDF] generando contrato desde codigo:', reparacionId);
 
-  page1.drawRectangle({
-    x: 0,
-    y: PAGE_HEIGHT - 104,
-    width: PAGE_WIDTH,
-    height: 104,
-    color: rgb(0.97, 0.98, 1),
-  });
-  page1.drawRectangle({
-    x: 0,
-    y: PAGE_HEIGHT - 108,
-    width: PAGE_WIDTH,
-    height: 4,
-    color: accentColor,
-  });
-
-  dt(page1, negocio.nombre, MARGIN_X, 734, {
-    bold: true,
-    size: FONT_BUSINESS,
-    color: accentColor,
-    maxWidth: 360,
-  });
-  dt(page1, negocio.razonSocial, MARGIN_X, 716, {
-    size: FONT_NORMAL,
-    color: COLOR_MUTED,
-    maxWidth: 360,
-  });
-
-  const negocioInfo = buildCompactInfo(negocio);
-  drawWrappedText(page1, negocioInfo, MARGIN_X, 699, 440, 11, FONT_SMALL, fonts.normal, COLOR_MUTED);
-  dt(page1, 'Documento generado mediante TecnoOne', 398, 740, {
-    size: FONT_SMALL,
-    color: COLOR_MUTED,
-  });
+  await drawHeader(pdfDoc, page1, negocio, fonts, accentColor);
 
   dt(page1, 'Contrato de recepcion de equipo', MARGIN_X, 646, {
     bold: true,
@@ -466,7 +649,17 @@ async function generarContrato(datos) {
     ) - 9;
   });
 
-  drawSectionTitle(page2, 'Firma del cliente', MARGIN_X, 286, fonts, accentColor);
+  drawSectionTitle(page2, 'Firmas de recepcion', MARGIN_X, 286, fonts, accentColor);
+  dt(page2, 'Firma del cliente', 104, 260, {
+    bold: true,
+    size: FONT_NORMAL,
+    color: COLOR_TEXT,
+  });
+  dt(page2, 'Firma de quien recibe', 366, 260, {
+    bold: true,
+    size: FONT_NORMAL,
+    color: COLOR_TEXT,
+  });
   page2.drawRectangle({
     x: FIRMA_CLIENTE_X - 12,
     y: FIRMA_CLIENTE_Y - 8,
@@ -475,16 +668,36 @@ async function generarContrato(datos) {
     borderColor: COLOR_LINE,
     borderWidth: 1,
   });
-  await insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl, fonts.normal, COLOR_TEXT);
-  drawLine(page2, 172, 134, 440, 134, COLOR_TEXT);
-  dt(page2, clienteNombre || 'Cliente', 198, 116, {
+  page2.drawRectangle({
+    x: FIRMA_RECEPTOR_X - 12,
+    y: FIRMA_RECEPTOR_Y - 8,
+    width: FIRMA_RECEPTOR_W + 24,
+    height: FIRMA_RECEPTOR_H + 24,
+    borderColor: COLOR_LINE,
+    borderWidth: 1,
+  });
+  await insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl);
+  await insertarFirmaReceptor(pdfDoc, page2, firmaReceptorUrl);
+  drawLine(page2, 70, 134, 282, 134, COLOR_TEXT);
+  drawLine(page2, 336, 134, 548, 134, COLOR_TEXT);
+  dt(page2, clienteNombre || 'Cliente', 86, 116, {
     size: FONT_NORMAL,
     color: COLOR_TEXT,
-    maxWidth: 220,
+    maxWidth: 180,
   });
-  dt(page2, 'Nombre y firma del cliente', 222, 101, {
+  dt(page2, 'Nombre y firma del cliente', 108, 101, {
     size: FONT_SMALL,
     color: COLOR_MUTED,
+  });
+  dt(page2, `Recibido por: ${receptorNombre || 'Usuario receptor'}`, 336, 116, {
+    size: FONT_NORMAL,
+    color: COLOR_TEXT,
+    maxWidth: 210,
+  });
+  dt(page2, `Usuario: ${receptorUsuario || 'no especificado'}`, 336, 101, {
+    size: FONT_SMALL,
+    color: COLOR_MUTED,
+    maxWidth: 210,
   });
   drawFooter(page2, 2, fonts);
 

@@ -137,6 +137,37 @@ const getAuthUserName = async (req, connection) => {
   return 'Sistema';
 };
 
+function normalizeFirmaUsuarioUrl(firma) {
+  if (!firma || typeof firma !== 'string') return null;
+
+  const raw = firma.trim();
+  if (raw.startsWith('/uploads/') || raw.startsWith('uploads/') || raw.startsWith('/app/uploads/')) {
+    return raw;
+  }
+
+  return null;
+}
+
+const getAuthUserFirmaUrl = async (req, connection) => {
+  const userId = req.user?.id || req.user?.userId || req.user?.usuario_id;
+  if (!userId) return null;
+
+  try {
+    const conn = connection || db;
+    const [rows] = await conn.query(
+      `SELECT p.firma
+       FROM user_profiles p
+       WHERE p.user_id = ?
+       LIMIT 1`,
+      [userId]
+    );
+
+    return normalizeFirmaUsuarioUrl(rows[0]?.firma);
+  } catch (_) {
+    return null;
+  }
+};
+
 // ========== CREAR REPARACIÓN ==========
 exports.createReparacion = async (req, res) => {
   const connection = await db.getConnection();
@@ -380,6 +411,9 @@ exports.createReparacion = async (req, res) => {
         console.warn('No se pudo cargar empresa para contrato PDF:', empresaErr.message);
       }
 
+      const firmaReceptorUrl = await getAuthUserFirmaUrl(req, db);
+      const receptorUsuario = req.user?.username || req.user?.email || null;
+
       await contratoService.generarContrato({
         reparacionId:  repairId,
         fecha:         fechaFormateada,
@@ -401,6 +435,9 @@ exports.createReparacion = async (req, res) => {
         anticipo:      centavosAQuetzales(anticipoCentavos),
         saldo:         centavosAQuetzales(totalCentavos - anticipoCentavos),
         firmaClienteUrl,                              // URL relativa (/uploads/firmas/...)
+        receptorNombre: authUserName,
+        receptorUsuario,
+        firmaReceptorUrl,
       });
     } catch (pdfErr) {
       console.error('⚠️ Error generando contrato PDF:', pdfErr.message);
@@ -1709,9 +1746,10 @@ exports.descargarContrato = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const tenant = repairTenantClause(req);
+    const tenant = repairTenantClause(req, 'r');
     const [[rep]] = await db.query(
-      `SELECT id, firma_estado FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
+      `SELECT r.id FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
+      [id, ...tenant.params]
     );
     if (!rep) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
