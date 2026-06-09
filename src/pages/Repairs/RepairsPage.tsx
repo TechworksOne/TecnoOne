@@ -12,9 +12,9 @@ import Modal from '../../components/ui/Modal';
 import ModalHistorialReparacion from '../../components/repairs/ModalHistorialReparacion';
 import NuevaReparacionModal from '../../components/repairs/NuevaReparacionModal';
 import PatternPreview from '../../components/repairs/PatternPreview';
-import { generarPDFRecepcion } from '../../lib/pdfGenerator';
 import {
   getAllReparaciones,
+  abrirContratoReparacion,
   updatePrioridad,
   registrarPagoSaldo,
   cancelarReparacion,
@@ -713,7 +713,7 @@ function RepairCard({
             </button>
           )}
           <button onClick={() => onPrintPDF(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
-            <Printer size={12} /> PDF
+            <Printer size={12} /> Contrato
           </button>
           <button onClick={() => onPrintTicket(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800" title="Imprimir ticket térmico">
             <Printer size={12} /> Ticket
@@ -857,23 +857,14 @@ export default function RepairsPage() {
   });
 
   // ── PDF helpers ───────────────────────────────────────────────────────
-  const buildPayload = (r: Repair) => ({
-    cliente: { nombre: r.clienteNombre, telefono: r.clienteTelefono ?? '', email: r.clienteEmail },
-    equipo: {
-      tipo: r.recepcion.tipoEquipo,
-      marca: r.recepcion.marca ?? '',
-      modelo: r.recepcion.modelo ?? '',
-      color: r.recepcion.color ?? '',
-      imei: r.recepcion.imei ?? r.recepcion.imeiSerie,
-      accesoTipo: (r.recepcion.accesoTipo ?? 'ninguno') as 'ninguno' | 'pin' | 'patron',
-      accesoValor: r.recepcion.accesoValor ?? r.recepcion.patronContraseña ?? undefined,
-      diagnostico: r.recepcion.diagnosticoInicial ?? '',
-    },
-    numeroReparacion: r.id,
-    fecha: r.recepcion.fechaRecepcion || new Date().toISOString(),
-  });
-  const handleGeneratePDF = (r: Repair) => generarPDFRecepcion(buildPayload(r), false);
-  const handlePreviewPDF  = (r: Repair) => generarPDFRecepcion(buildPayload(r), true);
+  // Contrato de recepción se genera desde backend para respetar tenant, logo, firmas y formato oficial.
+  const handleOpenContrato = async (r: Repair) => {
+    try {
+      await abrirContratoReparacion(r.id);
+    } catch (error: any) {
+      showToast(error?.message || 'Error al obtener contrato', 'error');
+    }
+  };
 
   const handleImprimirTicket = (r: Repair) => {
     const printWindow = window.open('', '_blank', 'width=220,height=130');
@@ -1104,7 +1095,7 @@ export default function RepairsPage() {
             onViewDetail={rep => { setSelectedRepair(rep); setShowDetailModal(true); setShowDetailPin(false); }}
             onHistory={id => setShowHistoryModal(id)}
             onFlowManage={() => navigate('/flujo-reparaciones')}
-            onPrintPDF={handleGeneratePDF}
+            onPrintPDF={handleOpenContrato}
             onPrintTicket={handleImprimirTicket}
             onEditPriority={rep => setShowPriorityModal(rep)}
             onPayBalance={rep => setShowPayModal(rep)}
@@ -1330,11 +1321,11 @@ export default function RepairsPage() {
 
               {/* Actions */}
               <div className="flex flex-wrap gap-2 pt-1">
-                <button onClick={() => handlePreviewPDF(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors">
-                  <FileSearch size={13} /> Vista previa
+                <button onClick={() => handleOpenContrato(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors">
+                  <FileSearch size={13} /> Ver contrato
                 </button>
-                <button onClick={() => handleGeneratePDF(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors">
-                  <Printer size={13} /> Imprimir PDF
+                <button onClick={() => handleOpenContrato(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors">
+                  <Printer size={13} /> Descargar contrato
                 </button>
                 <button onClick={() => handleImprimirTicket(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-amber-700 dark:text-amber-300 transition-colors">
                   <Printer size={13} /> Imprimir Ticket

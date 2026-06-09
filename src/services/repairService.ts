@@ -241,6 +241,36 @@ export const getReparacionById = async (id: string): Promise<Repair> => {
 };
 
 // ========== CAMBIAR ESTADO CON IMÁGENES ==========
+// Contrato de recepción se genera desde backend para respetar tenant, logo, firmas y formato oficial.
+export const abrirContratoReparacion = async (reparacionId: string): Promise<void> => {
+  try {
+    const response = await api.get(`/reparaciones/${reparacionId}/contrato`, {
+      responseType: 'blob',
+    });
+
+    const blob = new Blob([response.data], { type: 'application/pdf' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.click();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response?.status === 404) {
+        throw new Error('Contrato no generado aún');
+      }
+      if (error.response?.status === 500) {
+        throw new Error('Error al obtener contrato');
+      }
+    }
+
+    console.error('Error al obtener contrato:', error);
+    throw new Error('Error al obtener contrato');
+  }
+};
+
 export const changeRepairState = async (
   id: string,
   stateChange: StateChangeRequest,
@@ -373,6 +403,7 @@ const repairService = {
   changeRepairState,
   uploadImages,
   getImageUrl,
+  abrirContratoReparacion,
   updatePrioridad,
   registrarPagoSaldo,
   cancelarReparacion,

@@ -20,8 +20,7 @@ import {
   type RepuestoMarca,
   type RepuestoModelo,
 } from '../../services/marcaLineaService';
-import { generarPDFRecepcion } from '../../lib/pdfGenerator';
-import { createReparacion } from '../../services/repairService';
+import { abrirContratoReparacion, createReparacion } from '../../services/repairService';
 import { useAuth } from '../../store/useAuth';
 import { useToast } from '../../components/ui/Toast';
 
@@ -208,31 +207,9 @@ export default function RepairFormSimple() {
     return true;
   };
 
+  // Contrato de recepción se genera desde backend para respetar tenant, logo, firmas y formato oficial.
   const handleGenerarPDF = () => {
-    if (!selectedCustomer) { toast.error('Debe seleccionar un cliente primero'); return; }
-    const numeroReparacion = `REP${String(Date.now()).slice(-6)}`;
-    const [anio, mes, dia] = fechaRecepcion.split('-');
-    generarPDFRecepcion({
-      numeroReparacion,
-      fecha: `${dia}/${mes}/${anio}`,
-      cliente: {
-        nombre: selectedCustomer.nombre
-          ? `${selectedCustomer.nombre}${selectedCustomer.apellido ? ' ' + selectedCustomer.apellido : ''}`.trim()
-          : `${selectedCustomer.firstName || ''} ${selectedCustomer.lastName || ''}`.trim(),
-        telefono: selectedCustomer.telefono || selectedCustomer.phone || '',
-        email: selectedCustomer.correo || selectedCustomer.email,
-      },
-      equipo: {
-        tipo: equipmentData.tipo,
-        marca: equipmentData.marca,
-        modelo: equipmentData.modelo,
-        color: equipmentData.color,
-        imei: equipmentData.imei,
-        accesoTipo: 'ninguno',
-        contraseña: equipmentData.contrasena || undefined,
-        diagnostico: equipmentData.diagnostico,
-      },
-    }, false);
+    toast.info('Reparación creada. El contrato se puede abrir desde el listado de reparaciones.');
   };
 
   const createRepair = async () => {
@@ -291,6 +268,13 @@ export default function RepairFormSimple() {
 
       const response = await createReparacion(repairData);
       toast.success(`Reparacion ${response.id} creada exitosamente`);
+      if (response?.id) {
+        try {
+          await abrirContratoReparacion(response.id);
+        } catch (contractError: any) {
+          toast.warning(contractError?.message || 'Reparación creada. El contrato se puede abrir desde el listado de reparaciones.');
+        }
+      }
       navigate('/reparaciones');
     } catch (error) {
       console.error('Error creating repair:', error);

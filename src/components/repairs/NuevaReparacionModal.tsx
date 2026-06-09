@@ -11,8 +11,7 @@ import Input from '../ui/Input';
 import Select from '../ui/Select';
 import equipoService from '../../services/equipoService';
 import type { EquipoMarca, EquipoModelo, TipoEquipo } from '../../types/equipo';
-import { generarPDFRecepcion } from '../../lib/pdfGenerator';
-import { createReparacion } from '../../services/repairService';
+import { abrirContratoReparacion, createReparacion } from '../../services/repairService';
 import { useAuth } from '../../store/useAuth';
 import PatternLock from './PatternLock';
 import FirmaCanvas from './FirmaCanvas';
@@ -226,35 +225,9 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
   };
 
   // ── PDF ────────────────────────────────────────────────────────────────────
+  // Contrato de recepción se genera desde backend para respetar tenant, logo, firmas y formato oficial.
   const handleGenerarPDF = () => {
-    if (!selectedCustomer) return;
-    const numeroReparacion = `REP${String(Date.now()).slice(-6)}`;
-    const [y, m, d] = fechaRecepcion.split('-');
-    generarPDFRecepcion({
-      numeroReparacion,
-      fecha: `${d}/${m}/${y}`,
-      cliente: {
-        nombre: selectedCustomer.nombre
-          ? `${selectedCustomer.nombre}${selectedCustomer.apellido ? ' ' + selectedCustomer.apellido : ''}`.trim()
-          : `${selectedCustomer.firstName || ''} ${selectedCustomer.lastName || ''}`.trim(),
-        telefono: selectedCustomer.telefono || selectedCustomer.phone || '',
-        email: selectedCustomer.correo || selectedCustomer.email,
-      },
-      equipo: {
-        tipo: equipmentData.tipo,
-        marca: equipmentData.marca,
-        modelo: equipmentData.modelo,
-        color: equipmentData.color,
-        imei: equipmentData.imei,
-        accesoTipo: equipmentData.accesoTipo,
-        accesoValor: equipmentData.accesoTipo === 'patron'
-          ? patternArr.join('-')
-          : equipmentData.accesoTipo === 'pin'
-          ? equipmentData.accesoValor
-          : undefined,
-        diagnostico: equipmentData.diagnostico,
-      },
-    }, false);
+    setErrorMsg('Reparación creada. El contrato se puede abrir desde el listado de reparaciones.');
   };
 
   // ── Submit ─────────────────────────────────────────────────────────────────
@@ -311,7 +284,14 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
         }],
       };
 
-      await createReparacion({ ...repairData, firma_cliente_base64: firmaBase64 } as any);
+      const created = await createReparacion({ ...repairData, firma_cliente_base64: firmaBase64 } as any);
+      if (created?.id) {
+        try {
+          await abrirContratoReparacion(created.id);
+        } catch (contractError) {
+          console.warn('No se pudo abrir contrato backend:', contractError);
+        }
+      }
       onCreated();
       onClose();
     } catch (err: any) {
