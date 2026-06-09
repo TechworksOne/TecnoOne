@@ -199,9 +199,10 @@ exports.getDashboardStats = async (req, res) => {
         SELECT COUNT(*) AS total FROM clientes
         WHERE MONTH(created_at) = MONTH(CURDATE())
           AND YEAR(created_at)  = YEAR(CURDATE())
+          AND activo = 1
           ${clientesTenant.sql}
       `, clientesTenant.params);
-      const [[cliTotal]] = await connection.query(`SELECT COUNT(*) AS total FROM clientes WHERE 1=1${clientesTenant.sql}`, clientesTenant.params);
+      const [[cliTotal]] = await connection.query(`SELECT COUNT(*) AS total FROM clientes WHERE activo = 1${clientesTenant.sql}`, clientesTenant.params);
       clientesNuevosMes = Number(cliNuevos.total) || 0;
       clientesTotal     = Number(cliTotal.total)  || 0;
     } catch (_) { /* tabla puede no tener created_at */ }
