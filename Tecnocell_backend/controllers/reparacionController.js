@@ -429,6 +429,7 @@ exports.createReparacion = async (req, res) => {
         acceso:        acceso_tipo !== 'ninguno' ? `${acceso_tipo} registrado` : 'ninguno',
         accesoTipo:    acceso_tipo,
         accesoValor:   acceso_valor || patronContrasena || patron_contrasena || pin || password || contrasena || patron || null,
+        patronContrasena: patronContrasena || patron_contrasena || null,
         mostrarValorAcceso: true,
         descripcion:   diagnosticoInicial,
         costoTotal:    centavosAQuetzales(totalCentavos),
@@ -1244,11 +1245,11 @@ exports.cancelarReparacion = async (req, res) => {
     const motivoRetLimpio = motivoRetencion;
 
     // ── Cargar reparación ────────────────────────────────────────────────
-    const tenant = repairTenantClause(req);
+    const tenant = repairTenantClause(req, 'r');
     const [[rep]] = await connection.query(
-      `SELECT id, estado, cliente_nombre, monto_anticipo, metodo_anticipo,
-              cuenta_bancaria_anticipo_id
-         FROM reparaciones WHERE id = ?${tenant.sql}`,
+      `SELECT r.id, r.estado, r.cliente_nombre, r.monto_anticipo, r.metodo_anticipo,
+              r.cuenta_bancaria_anticipo_id
+         FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
       [id, ...tenant.params]
     );
     if (!rep) {
@@ -1373,7 +1374,7 @@ exports.cancelarReparacion = async (req, res) => {
 
     // ── UPDATE reparaciones con trazabilidad completa ────────────────────
     await connection.query(
-      `UPDATE reparaciones
+      `UPDATE reparaciones r
          SET estado                  = 'CANCELADA',
              fecha_cancelacion       = ?,
              motivo_cancelacion      = ?,
@@ -1383,7 +1384,7 @@ exports.cancelarReparacion = async (req, res) => {
              anticipo_movimiento_id  = ?,
              devolucion_movimiento_id = ?,
              updated_by              = ?
-       WHERE id = ?${tenant.sql}`,
+       WHERE r.id = ?${tenant.sql}`,
       [
         fechaHoy,
         motivoLimpio,
@@ -1748,7 +1749,7 @@ exports.descargarContrato = async (req, res) => {
 
     const tenant = repairTenantClause(req, 'r');
     const [[rep]] = await db.query(
-      `SELECT r.id FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
+      `SELECT r.* FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
       [id, ...tenant.params]
     );
     if (!rep) {
@@ -1760,7 +1761,81 @@ exports.descargarContrato = async (req, res) => {
     );
 
     if (!fs.existsSync(contratoPath)) {
-      return res.status(404).json({ success: false, message: 'Contrato no generado aún' });
+      console.warn('[ContratoPDF] contrato faltante, regenerando:', contratoPath);
+      const [[empresa]] = await db.query(
+        `SELECT id, nombre, razon_social, nit, telefono, email, direccion, logo_url, color_primario
+         FROM empresas
+         WHERE id = ?
+         LIMIT 1`,
+        [rep.empresa_id]
+      );
+
+      if (!empresa) {
+        return res.status(500).json({ success: false, message: 'No se pudo cargar la empresa para generar el contrato' });
+      }
+
+      const formatFechaContrato = (value) => {
+        if (!value) return new Date().toLocaleDateString('es-GT');
+        const raw = String(value);
+        const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime())
+          ? raw
+          : parsed.toLocaleDateString('es-GT');
+      };
+
+      const firmaReceptorUrl = await getAuthUserFirmaUrl(req, db);
+      const receptorUsuario = req.user?.username || req.user?.email || rep.created_by || null;
+
+      try {
+        await contratoService.generarContrato({
+          reparacionId: rep.id,
+          fecha: formatFechaContrato(rep.fecha_ingreso || rep.created_at),
+          negocio: {
+            nombre: empresa.nombre || 'Negocio',
+            razonSocial: empresa.razon_social || null,
+            nit: empresa.nit || null,
+            telefono: empresa.telefono || null,
+            email: empresa.email || null,
+            direccion: empresa.direccion || null,
+            logoUrl: empresa.logo_url || null,
+            colorPrimario: empresa.color_primario || null,
+          },
+          clienteNombre: rep.cliente_nombre || '',
+          clienteTel: rep.cliente_telefono || '',
+          clienteEmail: rep.cliente_email || '',
+          tipoEquipo: rep.tipo_equipo || '',
+          marca: rep.marca || '',
+          modelo: rep.modelo || '',
+          color: rep.color || '',
+          imei: rep.imei_serie || '',
+          acceso: rep.acceso_tipo && rep.acceso_tipo !== 'ninguno' ? `${rep.acceso_tipo} registrado` : 'ninguno',
+          accesoTipo: rep.acceso_tipo || 'ninguno',
+          accesoValor: rep.acceso_valor || null,
+          patronContrasena: rep.patron_contrasena || null,
+          mostrarValorAcceso: true,
+          descripcion: rep.diagnostico_inicial || rep.observaciones || '',
+          costoTotal: centavosAQuetzales(rep.total || 0),
+          anticipo: centavosAQuetzales(rep.monto_anticipo || 0),
+          anticipoRecibido: centavosAQuetzales(rep.monto_anticipo || 0),
+          firmaClienteUrl: rep.firma_cliente_url || null,
+          receptorNombre: rep.created_by || 'Usuario receptor',
+          receptorUsuario,
+          firmaReceptorUrl,
+        });
+      } catch (generateErr) {
+        console.error('Error regenerando contrato PDF:', generateErr);
+        return res.status(500).json({ success: false, message: 'No se pudo generar el contrato' });
+      }
+
+      if (fs.existsSync(contratoPath)) {
+        console.log(`[ContratoPDF] contrato regenerado para descarga: ${contratoPath}`);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="contrato_${id}.pdf"`);
+        return res.sendFile(contratoPath);
+      }
+      return res.status(500).json({ success: false, message: 'No se pudo generar el contrato' });
     }
 
     res.setHeader('Content-Type', 'application/pdf');

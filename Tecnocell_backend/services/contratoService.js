@@ -481,8 +481,13 @@ function getAccesoLabel(accesoTipo) {
 function drawAccesoEquipo(page, datos, x, y, fonts) {
   const accesoTipo = normalizeAccesoTipo(datos.accesoTipo);
   const tieneAccesoTipo = !isEmpty(datos.accesoTipo);
+  const fallbackPatron = !isEmpty(datos.patronContrasena) ? datos.patronContrasena : null;
 
   if (tieneAccesoTipo && accesoTipo === 'ninguno') {
+    if (fallbackPatron) {
+      return drawLabelValue(page, 'Patrón', fallbackPatron, x, y, fonts);
+    }
+
     drawSafeText(page, 'No registrado / no aplica', x, y, {
       _font: fonts.normal,
       _fontBold: fonts.bold,
@@ -500,6 +505,10 @@ function drawAccesoEquipo(page, datos, x, y, fonts) {
 
   if (!isEmpty(datos.acceso)) {
     return drawLabelValue(page, 'Acceso', datos.acceso, x, y, fonts);
+  }
+
+  if (fallbackPatron) {
+    return drawLabelValue(page, 'Patrón', fallbackPatron, x, y, fonts);
   }
 
   drawSafeText(page, 'No registrado / no aplica', x, y, {
@@ -525,6 +534,7 @@ async function generarContrato(datos) {
     acceso = '',
     accesoTipo = '',
     accesoValor = '',
+    patronContrasena = '',
     mostrarValorAcceso = false,
     descripcion = '',
     precioRevision = null,
@@ -595,7 +605,7 @@ async function generarContrato(datos) {
   y -= 8;
   drawSectionTitle(page1, 'Acceso al equipo', MARGIN_X, y, fonts, accentColor);
   y -= 26;
-  y = drawAccesoEquipo(page1, { acceso, accesoTipo, accesoValor, mostrarValorAcceso }, MARGIN_X, y, fonts);
+  y = drawAccesoEquipo(page1, { acceso, accesoTipo, accesoValor, patronContrasena, mostrarValorAcceso }, MARGIN_X, y, fonts);
 
   y -= 8;
   drawSectionTitle(page1, 'Diagnostico inicial / descripcion', MARGIN_X, y, fonts, accentColor);
