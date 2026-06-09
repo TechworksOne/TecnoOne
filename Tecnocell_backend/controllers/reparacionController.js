@@ -48,7 +48,7 @@ function repairTenantClause(req, alias = 'r') {
 }
 
 // Ruta base de uploads — siempre absoluta para ser compatible con Docker bind mount
-// Dentro del contenedor es /app/uploads (mapeado a /var/www/Tecnocell_storage/uploads en el host)
+// Dentro del contenedor es /app/uploads (mapeado al storage persistente del host)
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 
 // Configuración de Multer para almacenamiento de imágenes
@@ -159,6 +159,11 @@ exports.createReparacion = async (req, res) => {
       color,
       imeiSerie,
       patronContrasena,
+      patron_contrasena,
+      pin,
+      password,
+      contrasena,
+      patron,
       acceso_tipo = 'ninguno',
       acceso_valor = null,
       estadoFisico,
@@ -345,9 +350,40 @@ exports.createReparacion = async (req, res) => {
       const fechaFormateada = (fechaIngreso || new Date().toISOString().split('T')[0])
         .split('-').reverse().join('/');                   // YYYY-MM-DD → DD/MM/YYYY
 
+      let negocioContrato = {
+        nombre: 'Negocio',
+      };
+
+      try {
+        const [empresas] = await db.query(
+          `SELECT id, nombre, razon_social, nit, telefono, email, direccion, logo_url, color_primario
+           FROM empresas
+           WHERE id = ?
+           LIMIT 1`,
+          [empresaId]
+        );
+
+        if (empresas.length > 0) {
+          const empresa = empresas[0];
+          negocioContrato = {
+            nombre: empresa.nombre || 'Negocio',
+            razonSocial: empresa.razon_social || null,
+            nit: empresa.nit || null,
+            telefono: empresa.telefono || null,
+            email: empresa.email || null,
+            direccion: empresa.direccion || null,
+            logoUrl: empresa.logo_url || null,
+            colorPrimario: empresa.color_primario || null,
+          };
+        }
+      } catch (empresaErr) {
+        console.warn('No se pudo cargar empresa para contrato PDF:', empresaErr.message);
+      }
+
       await contratoService.generarContrato({
         reparacionId:  repairId,
         fecha:         fechaFormateada,
+        negocio:       negocioContrato,
         clienteNombre,
         clienteTel:    clienteTelefono,
         clienteEmail,
@@ -357,6 +393,9 @@ exports.createReparacion = async (req, res) => {
         color,
         imei:          imeiSerie,
         acceso:        acceso_tipo !== 'ninguno' ? `${acceso_tipo} registrado` : 'ninguno',
+        accesoTipo:    acceso_tipo,
+        accesoValor:   acceso_valor || patronContrasena || patron_contrasena || pin || password || contrasena || patron || null,
+        mostrarValorAcceso: true,
         descripcion:   diagnosticoInicial,
         costoTotal:    centavosAQuetzales(totalCentavos),
         anticipo:      centavosAQuetzales(anticipoCentavos),

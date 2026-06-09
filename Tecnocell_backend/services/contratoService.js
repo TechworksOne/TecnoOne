@@ -1,169 +1,199 @@
-/**
- * contratoService.js
- * ──────────────────────────────────────────────────────────────────────────
- * Rellena la plantilla `contrato_tecnocell_oficial_v2.pdf` con los datos
- * dinámicos de la reparación y la firma del cliente.
- *
- * REGLA: NO se genera diseño desde cero. Solo se escriben textos e imagen
- * de firma encima de la plantilla existente.
- *
- * Dependencia:  pdf-lib  (ya instalado)
- * ──────────────────────────────────────────────────────────────────────────
- */
-
 'use strict';
 
 const path = require('path');
-const fs   = require('fs');
+const fs = require('fs');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
-// ── Rutas ────────────────────────────────────────────────────────────────────
-const TEMPLATE_PATH = path.join(
-  __dirname, '..', 'templates', 'contrato_tecnocell_oficial_v2.pdf'
-);
 const CONTRATOS_DIR = path.join(__dirname, '..', 'uploads', 'contratos');
+const PAGE_WIDTH = 612;
+const PAGE_HEIGHT = 792;
+const MARGIN_X = 54;
+const COLOR_TEXT = rgb(0.08, 0.09, 0.11);
+const COLOR_MUTED = rgb(0.35, 0.38, 0.42);
+const COLOR_LINE = rgb(0.82, 0.84, 0.87);
+const COLOR_ACCENT_FALLBACK = rgb(0.15, 0.39, 0.92);
 
-// ══════════════════════════════════════════════════════════════════════════════
-// TAMAÑOS DE FUENTE
-// ══════════════════════════════════════════════════════════════════════════════
-const FONT_SMALL  = 8;
-const FONT_NORMAL = 9;
-const FONT_MEDIUM = 10;
-const FONT_BOLD   = 11;
+const FONT_SMALL = 8;
+const FONT_NORMAL = 10;
+const FONT_MEDIUM = 11;
+const FONT_TITLE = 18;
+const FONT_BUSINESS = 22;
 
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 1 — CABECERA (superior derecha)
-// ══════════════════════════════════════════════════════════════════════════════
-const TOP_DATE_X = 505;
-const TOP_DATE_Y = 712;
+const FIRMA_CLIENTE_X = 186;
+const FIRMA_CLIENTE_Y = 158;
+const FIRMA_CLIENTE_W = 240;
+const FIRMA_CLIENTE_H = 78;
 
-const REP_ID_X = 478;
-const REP_ID_Y = 699;
-
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 1 — DATOS CLIENTE
-// ══════════════════════════════════════════════════════════════════════════════
-const NOMBRE_X = 118;
-const NOMBRE_Y = 667;
-
-const TELEFONO_X = 123;
-const TELEFONO_Y = 647;
-
-const FECHA_X = 455;
-const FECHA_Y = 647;
-
-const MARCA_MODELO_X = 140;
-const MARCA_MODELO_Y = 628;
-
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 1 — RECUADRO DESCRIPCIÓN
-// ══════════════════════════════════════════════════════════════════════════════
-const DESCRIPCION_X           = 145;
-const DESCRIPCION_Y           = 530;
-const DESCRIPCION_MAX_WIDTH   = 285;
-const DESCRIPCION_FONT_SIZE   = 9;
-const DESCRIPCION_LINE_HEIGHT = 11;
-
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 2 — CUADROS DE COSTOS (inferior)
-// ══════════════════════════════════════════════════════════════════════════════
-const COSTO_X      = 150;
-const COSTO_Y      = 58;
-
-const ANTICIPO_X   = 315;
-const ANTICIPO_Y   = 58;
-
-const DIFERENCIA_X = 480;
-const DIFERENCIA_Y = 58;
-
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 2 — FIRMA DEL CLIENTE (inferior derecha, línea "Cliente:")
-// ══════════════════════════════════════════════════════════════════════════════
-const FIRMA_CLIENTE_X = 440;
-const FIRMA_CLIENTE_Y = 8;
-const FIRMA_CLIENTE_W = 130;
-const FIRMA_CLIENTE_H = 38;
-
-const NOMBRE_FIRMA_X = 452;
-const NOMBRE_FIRMA_Y = 2;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// VALORES VACÍOS — no se dibujan
-// ─────────────────────────────────────────────────────────────────────────────
 const EMPTY_VALUES = new Set(['', 'ninguno', 'n/a', 'none', 'null', 'undefined', '-', '—']);
+
+const CONDICIONES_SERVICIO = [
+  'El cliente declara que la información proporcionada sobre el equipo, accesorios entregados y datos de contacto es correcta.',
+  'El equipo se recibe para revisión técnica inicial. El costo final de reparación será informado posteriormente, según diagnóstico, repuestos requeridos y autorización del cliente.',
+  'El precio de revisión o diagnóstico, si aplica, no representa el costo final de reparación.',
+  'Cualquier reparación, repuesto o costo adicional deberá ser autorizado por el cliente antes de continuar con el servicio.',
+  'El negocio no se responsabiliza por información, accesorios, tarjetas SIM, memorias, cuentas, bloqueos, contraseñas o componentes no declarados al momento de la recepción.',
+  'El cliente es responsable de respaldar su información antes de entregar el equipo. El negocio no garantiza la conservación de datos si el daño, bloqueo o procedimiento técnico impide su recuperación.',
+  'Los tiempos de entrega son estimados y pueden variar según disponibilidad de repuestos, pruebas técnicas, autorización del cliente o complejidad del diagnóstico.',
+  'El retiro del equipo requiere identificación, comprobante o autorización del titular registrado.',
+];
 
 function isEmpty(val) {
   if (val == null) return true;
   return EMPTY_VALUES.has(String(val).trim().toLowerCase());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Dibuja texto solo si el valor no está vacío / es "ninguno" / null.
- */
+function hexToRgb(hex) {
+  if (isEmpty(hex)) return COLOR_ACCENT_FALLBACK;
+
+  const clean = String(hex).trim().replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return COLOR_ACCENT_FALLBACK;
+
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+  return rgb(r, g, b);
+}
+
 function drawSafeText(page, value, x, y, opts = {}) {
   if (isEmpty(value)) return;
+
   page.drawText(String(value).trim(), {
     x,
     y,
-    size:     opts.size  || FONT_NORMAL,
-    font:     opts.bold  ? opts._fontBold : opts._font,
-    color:    opts.color || rgb(0.05, 0.05, 0.05),
+    size: opts.size || FONT_NORMAL,
+    font: opts.bold ? opts._fontBold : opts._font,
+    color: opts.color || COLOR_TEXT,
     maxWidth: opts.maxWidth,
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Dibuja texto con wrap manual (divide en líneas por espacios).
- * Cada línea ocupa `lineHeight` puntos hacia abajo (Y decrece).
- */
 function drawWrappedText(page, value, x, y, maxWidth, lineHeight, fontSize, fontObj, colorObj) {
-  if (isEmpty(value)) return;
-  const words   = String(value).trim().split(/\s+/);
-  const avgChar = fontSize * 0.55; // estimación ancho carácter Helvetica
-  const maxChars = Math.floor(maxWidth / avgChar);
+  if (isEmpty(value)) return y;
 
+  const words = String(value).trim().split(/\s+/);
+  const lines = [];
   let line = '';
-  let curY = y;
 
   for (const word of words) {
     const test = line ? `${line} ${word}` : word;
-    if (test.length > maxChars && line) {
-      page.drawText(line, { x, y: curY, size: fontSize, font: fontObj, color: colorObj });
-      curY -= lineHeight;
-      line  = word;
+    const width = fontObj.widthOfTextAtSize(test, fontSize);
+
+    if (width > maxWidth && line) {
+      lines.push(line);
+      line = word;
     } else {
       line = test;
     }
   }
+
   if (line) {
-    page.drawText(line, { x, y: curY, size: fontSize, font: fontObj, color: colorObj });
+    lines.push(line);
   }
+
+  let curY = y;
+  for (const currentLine of lines) {
+    page.drawText(currentLine, {
+      x,
+      y: curY,
+      size: fontSize,
+      font: fontObj,
+      color: colorObj,
+    });
+    curY -= lineHeight;
+  }
+
+  return curY;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Convierte la URL relativa guardada en BD a ruta física absoluta.
- */
+function drawSectionTitle(page, title, x, y, fonts, accentColor) {
+  page.drawText(title, {
+    x,
+    y,
+    size: FONT_MEDIUM,
+    font: fonts.bold,
+    color: accentColor,
+  });
+  drawLine(page, x, y - 7, PAGE_WIDTH - MARGIN_X, y - 7, COLOR_LINE);
+}
+
+function drawLine(page, x1, y1, x2, y2, color = COLOR_LINE) {
+  page.drawLine({
+    start: { x: x1, y: y1 },
+    end: { x: x2, y: y2 },
+    thickness: 0.8,
+    color,
+  });
+}
+
+function drawLabelValue(page, label, value, x, y, fonts, opts = {}) {
+  if (isEmpty(value)) return y;
+
+  const labelText = `${label}:`;
+  const labelWidth = fonts.bold.widthOfTextAtSize(labelText, FONT_NORMAL);
+
+  page.drawText(labelText, {
+    x,
+    y,
+    size: FONT_NORMAL,
+    font: fonts.bold,
+    color: COLOR_TEXT,
+  });
+
+  if (opts.wrap) {
+    return drawWrappedText(
+      page,
+      value,
+      x + labelWidth + 6,
+      y,
+      opts.maxWidth || 360,
+      opts.lineHeight || 13,
+      FONT_NORMAL,
+      fonts.normal,
+      COLOR_TEXT
+    );
+  }
+
+  drawSafeText(page, value, x + labelWidth + 6, y, {
+    _font: fonts.normal,
+    _fontBold: fonts.bold,
+    size: FONT_NORMAL,
+    maxWidth: opts.maxWidth || 360,
+  });
+
+  return y - (opts.lineHeight || 17);
+}
+
+function drawFooter(page, pageNumber, fonts) {
+  drawLine(page, MARGIN_X, 42, PAGE_WIDTH - MARGIN_X, 42, COLOR_LINE);
+  page.drawText('Documento generado mediante TecnoOne', {
+    x: MARGIN_X,
+    y: 26,
+    size: FONT_SMALL,
+    font: fonts.normal,
+    color: COLOR_MUTED,
+  });
+  page.drawText(`Pagina ${pageNumber} de 2`, {
+    x: PAGE_WIDTH - MARGIN_X - 60,
+    y: 26,
+    size: FONT_SMALL,
+    font: fonts.normal,
+    color: COLOR_MUTED,
+  });
+}
+
 function resolveFirmaPath(firmaClienteUrl) {
   if (!firmaClienteUrl) return null;
 
   const raw = String(firmaClienteUrl).trim();
 
-  if (raw.startsWith('/uploads/'))     return path.join('/app', raw);
-  if (raw.startsWith('uploads/'))      return path.join('/app', raw);
+  if (raw.startsWith('/uploads/')) return path.join('/app', raw);
+  if (raw.startsWith('uploads/')) return path.join('/app', raw);
   if (raw.startsWith('/app/uploads/')) return raw;
-  if (path.isAbsolute(raw))            return raw;
+  if (path.isAbsolute(raw)) return raw;
 
   return path.join('/app/uploads', raw);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Embebe la imagen de firma en la página 2.
- * No lanza excepción si la firma no existe — el PDF se genera igual.
- */
 async function insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl, font, colorObj) {
   console.log('[ContratoPDF] firma_cliente_url:', firmaClienteUrl);
 
@@ -172,7 +202,7 @@ async function insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl, font, colorO
   console.log('[ContratoPDF] existe firma:', firmaPath ? fs.existsSync(firmaPath) : false);
 
   if (!firmaPath || !fs.existsSync(firmaPath)) {
-    console.warn('[ContratoPDF] ⚠️  Firma no encontrada — PDF generado sin firma.');
+    console.warn('[ContratoPDF] Firma no encontrada. PDF generado sin firma.');
     return;
   }
 
@@ -181,123 +211,284 @@ async function insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl, font, colorO
     const firmaImage = await pdfDoc.embedPng(firmaBytes);
 
     page2.drawImage(firmaImage, {
-      x:      FIRMA_CLIENTE_X,
-      y:      FIRMA_CLIENTE_Y,
-      width:  FIRMA_CLIENTE_W,
+      x: FIRMA_CLIENTE_X,
+      y: FIRMA_CLIENTE_Y,
+      width: FIRMA_CLIENTE_W,
       height: FIRMA_CLIENTE_H,
     });
 
     console.log('[ContratoPDF] firma insertada correctamente');
   } catch (err) {
-    console.error('[ContratoPDF] ❌ Error insertando firma:', err.message);
+    console.error('[ContratoPDF] Error insertando firma:', err.message);
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Genera el contrato PDF rellenando la plantilla con los datos de la reparación.
- *
- * @param {object}      datos
- * @param {string}      datos.reparacionId
- * @param {string}      datos.fecha             DD/MM/YYYY
- * @param {string}      datos.clienteNombre
- * @param {string}      datos.clienteTel
- * @param {string}      datos.tipoEquipo
- * @param {string}      datos.marca
- * @param {string}      datos.modelo
- * @param {string}      datos.acceso            contraseña/patrón (omitido si "ninguno")
- * @param {string}      datos.descripcion
- * @param {number}      datos.costoTotal        En quetzales
- * @param {number}      datos.anticipo          En quetzales
- * @param {number}      datos.saldo             En quetzales
- * @param {string|null} datos.firmaClienteUrl   URL relativa guardada en BD
- *
- * @returns {Promise<{absolutePath: string, relativePath: string}>}
- */
+function normalizeNegocio(negocio = {}) {
+  return {
+    nombre: negocio.nombre || 'Negocio',
+    razonSocial: negocio.razonSocial || null,
+    nit: negocio.nit || null,
+    telefono: negocio.telefono || null,
+    email: negocio.email || null,
+    direccion: negocio.direccion || null,
+    logoUrl: negocio.logoUrl || null,
+    colorPrimario: negocio.colorPrimario || null,
+  };
+}
+
+function buildCompactInfo(negocio) {
+  return [
+    negocio.nit ? `NIT: ${negocio.nit}` : null,
+    negocio.telefono ? `Tel: ${negocio.telefono}` : null,
+    negocio.email ? `Email: ${negocio.email}` : null,
+    negocio.direccion,
+  ].filter((item) => !isEmpty(item)).join('  |  ');
+}
+
+function normalizeAccesoTipo(accesoTipo) {
+  if (isEmpty(accesoTipo)) return 'ninguno';
+  return String(accesoTipo).trim().toLowerCase();
+}
+
+function getAccesoLabel(accesoTipo) {
+  const normalized = normalizeAccesoTipo(accesoTipo);
+  const labels = {
+    pin: 'PIN',
+    patron: 'Patrón',
+    patrón: 'Patrón',
+    pattern: 'Patrón',
+    password: 'Contraseña',
+    contrasena: 'Contraseña',
+    contraseña: 'Contraseña',
+    clave: 'Contraseña',
+  };
+
+  return labels[normalized] || String(accesoTipo).trim();
+}
+
+function drawAccesoEquipo(page, datos, x, y, fonts) {
+  const accesoTipo = normalizeAccesoTipo(datos.accesoTipo);
+  const tieneAccesoTipo = !isEmpty(datos.accesoTipo);
+
+  if (tieneAccesoTipo && accesoTipo === 'ninguno') {
+    drawSafeText(page, 'No registrado / no aplica', x, y, {
+      _font: fonts.normal,
+      _fontBold: fonts.bold,
+      size: FONT_NORMAL,
+    });
+    return y - 17;
+  }
+
+  if (tieneAccesoTipo) {
+    const valor = datos.mostrarValorAcceso !== false && !isEmpty(datos.accesoValor)
+      ? datos.accesoValor
+      : 'no especificado';
+    return drawLabelValue(page, getAccesoLabel(datos.accesoTipo), valor, x, y, fonts);
+  }
+
+  if (!isEmpty(datos.acceso)) {
+    return drawLabelValue(page, 'Acceso', datos.acceso, x, y, fonts);
+  }
+
+  drawSafeText(page, 'No registrado / no aplica', x, y, {
+    _font: fonts.normal,
+    _fontBold: fonts.bold,
+    size: FONT_NORMAL,
+  });
+  return y - 17;
+}
+
 async function generarContrato(datos) {
   const {
     reparacionId,
-    fecha           = new Date().toLocaleDateString('es-GT'),
-    clienteNombre   = '',
-    clienteTel      = '',
-    marca           = '',
-    modelo          = '',
-    acceso          = '',
-    descripcion     = '',
-    costoTotal      = 0,
-    anticipo        = 0,
-    saldo           = 0,
+    fecha = new Date().toLocaleDateString('es-GT'),
+    clienteNombre = '',
+    clienteTel = '',
+    clienteEmail = '',
+    tipoEquipo = '',
+    marca = '',
+    modelo = '',
+    color = '',
+    imei = '',
+    acceso = '',
+    accesoTipo = '',
+    accesoValor = '',
+    mostrarValorAcceso = false,
+    descripcion = '',
+    precioRevision = null,
+    montoEstimadoInicial = null,
+    costoTotal = 0,
+    anticipo = 0,
+    anticipoRecibido = null,
     firmaClienteUrl = null,
   } = datos;
 
-  // ── 1. Cargar plantilla ───────────────────────────────────────────────────
-  console.log('[ContratoPDF] templatePath:', TEMPLATE_PATH);
+  const negocio = normalizeNegocio(datos.negocio);
+  const accentColor = hexToRgb(negocio.colorPrimario);
+  const pdfDoc = await PDFDocument.create();
+  const page1 = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  const page2 = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  const fonts = {
+    normal: await pdfDoc.embedFont(StandardFonts.Helvetica),
+    bold: await pdfDoc.embedFont(StandardFonts.HelveticaBold),
+  };
 
-  if (!fs.existsSync(TEMPLATE_PATH)) {
-    throw new Error(`[ContratoPDF] Plantilla oficial no encontrada: ${TEMPLATE_PATH}`);
-  }
-
-  const existingPdfBytes = fs.readFileSync(TEMPLATE_PATH);
-  const pdfDoc = await PDFDocument.load(existingPdfBytes);
-
-  console.log('[ContratoPDF] páginas:', pdfDoc.getPageCount());
-
-  // ── 2. Asegurar exactamente 2 páginas ────────────────────────────────────
-  while (pdfDoc.getPageCount() > 2) {
-    pdfDoc.removePage(2);
-  }
-
-  const pages = pdfDoc.getPages();
-  const page1 = pages[0];
-  const page2 = pages[1];
-
-  // ── 3. Fuentes ────────────────────────────────────────────────────────────
-  const fontNormal = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold   = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const COLOR      = rgb(0.05, 0.05, 0.05);
-
-  // Closure que inyecta fuentes en drawSafeText
   const dt = (page, value, x, y, opts = {}) =>
     drawSafeText(page, value, x, y, {
       ...opts,
-      _font:     fontNormal,
-      _fontBold: fontBold,
-      color:     COLOR,
+      _font: fonts.normal,
+      _fontBold: fonts.bold,
     });
 
-  const fmtQ = (n) => `Q ${Number(n).toFixed(2)}`;
+  const fmtQ = (n) => `Q ${Number(n || 0).toFixed(2)}`;
+  const montoRevision = precioRevision ?? montoEstimadoInicial ?? costoTotal;
+  const montoAnticipoRecibido = anticipoRecibido ?? anticipo;
 
-  // ── 4. Página 1 — cabecera ────────────────────────────────────────────────
-  dt(page1, fecha,        TOP_DATE_X, TOP_DATE_Y, { bold: true, size: FONT_NORMAL });
-  dt(page1, reparacionId, REP_ID_X,   REP_ID_Y,   { bold: true, size: FONT_SMALL  });
+  console.log('[ContratoPDF] generando contrato desde codigo:', reparacionId);
 
-  // ── 5. Página 1 — datos del cliente ──────────────────────────────────────
-  dt(page1, clienteNombre, NOMBRE_X,   NOMBRE_Y,   { size: FONT_NORMAL });
-  dt(page1, clienteTel,    TELEFONO_X, TELEFONO_Y, { size: FONT_NORMAL });
-  dt(page1, fecha,         FECHA_X,    FECHA_Y,    { size: FONT_NORMAL });
+  page1.drawRectangle({
+    x: 0,
+    y: PAGE_HEIGHT - 104,
+    width: PAGE_WIDTH,
+    height: 104,
+    color: rgb(0.97, 0.98, 1),
+  });
+  page1.drawRectangle({
+    x: 0,
+    y: PAGE_HEIGHT - 108,
+    width: PAGE_WIDTH,
+    height: 4,
+    color: accentColor,
+  });
 
-  // Marca + Modelo en una sola línea
-  const marcaModelo = [marca, modelo].filter(v => !isEmpty(v)).join(' / ');
-  dt(page1, marcaModelo, MARCA_MODELO_X, MARCA_MODELO_Y, { size: FONT_NORMAL });
+  dt(page1, negocio.nombre, MARGIN_X, 734, {
+    bold: true,
+    size: FONT_BUSINESS,
+    color: accentColor,
+    maxWidth: 360,
+  });
+  dt(page1, negocio.razonSocial, MARGIN_X, 716, {
+    size: FONT_NORMAL,
+    color: COLOR_MUTED,
+    maxWidth: 360,
+  });
 
-  // ── 6. Página 1 — descripción del equipo (con wrap) ──────────────────────
+  const negocioInfo = buildCompactInfo(negocio);
+  drawWrappedText(page1, negocioInfo, MARGIN_X, 699, 440, 11, FONT_SMALL, fonts.normal, COLOR_MUTED);
+  dt(page1, 'Documento generado mediante TecnoOne', 398, 740, {
+    size: FONT_SMALL,
+    color: COLOR_MUTED,
+  });
+
+  dt(page1, 'Contrato de recepcion de equipo', MARGIN_X, 646, {
+    bold: true,
+    size: FONT_TITLE,
+    color: COLOR_TEXT,
+  });
+  drawLine(page1, MARGIN_X, 633, PAGE_WIDTH - MARGIN_X, 633, COLOR_LINE);
+
+  let y = 604;
+  drawSectionTitle(page1, 'Datos de la reparacion', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawLabelValue(page1, 'Numero de reparacion', reparacionId, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Fecha', fecha, MARGIN_X, y, fonts);
+
+  y -= 8;
+  drawSectionTitle(page1, 'Cliente', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawLabelValue(page1, 'Nombre', clienteNombre, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Telefono', clienteTel, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Email', clienteEmail, MARGIN_X, y, fonts);
+
+  y -= 8;
+  drawSectionTitle(page1, 'Equipo', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawLabelValue(page1, 'Tipo', tipoEquipo, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Marca', marca, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Modelo', modelo, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Color', color, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'IMEI/serie', imei, MARGIN_X, y, fonts);
+
+  y -= 8;
+  drawSectionTitle(page1, 'Acceso al equipo', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawAccesoEquipo(page1, { acceso, accesoTipo, accesoValor, mostrarValorAcceso }, MARGIN_X, y, fonts);
+
+  y -= 8;
+  drawSectionTitle(page1, 'Diagnostico inicial / descripcion', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawWrappedText(page1, descripcion, MARGIN_X, y, PAGE_WIDTH - (MARGIN_X * 2), 13, FONT_NORMAL, fonts.normal, COLOR_TEXT);
+
+  y = Math.min(y - 18, 155);
+  drawSectionTitle(page1, 'Recepcion y revision', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawLabelValue(page1, 'Precio de revision / diagnostico', fmtQ(montoRevision), MARGIN_X, y, fonts);
+  if (Number(montoAnticipoRecibido || 0) > 0) {
+    y = drawLabelValue(page1, 'Anticipo recibido', fmtQ(montoAnticipoRecibido), MARGIN_X, y, fonts);
+  }
   drawWrappedText(
-    page1, descripcion,
-    DESCRIPCION_X, DESCRIPCION_Y,
-    DESCRIPCION_MAX_WIDTH, DESCRIPCION_LINE_HEIGHT, DESCRIPCION_FONT_SIZE,
-    fontNormal, COLOR
+    page1,
+    'Nota: El costo final de reparación será informado después del diagnóstico técnico y requerirá autorización del cliente.',
+    MARGIN_X,
+    y,
+    PAGE_WIDTH - (MARGIN_X * 2),
+    12,
+    FONT_SMALL,
+    fonts.normal,
+    COLOR_MUTED
   );
+  drawFooter(page1, 1, fonts);
 
-  // ── 7. Página 2 — costos en cuadros inferiores ───────────────────────────
-  dt(page2, fmtQ(costoTotal), COSTO_X,      COSTO_Y,      { bold: true, size: FONT_NORMAL });
-  dt(page2, fmtQ(anticipo),   ANTICIPO_X,   ANTICIPO_Y,   { size: FONT_NORMAL });
-  dt(page2, fmtQ(saldo),      DIFERENCIA_X, DIFERENCIA_Y, { size: FONT_NORMAL });
+  dt(page2, 'Condiciones del servicio', MARGIN_X, 724, {
+    bold: true,
+    size: FONT_TITLE,
+    color: COLOR_TEXT,
+  });
+  drawLine(page2, MARGIN_X, 711, PAGE_WIDTH - MARGIN_X, 711, COLOR_LINE);
 
-  // ── 8. Página 2 — firma del cliente ──────────────────────────────────────
-  await insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl, fontNormal, COLOR);
+  let conditionY = 674;
+  CONDICIONES_SERVICIO.forEach((condicion, index) => {
+    dt(page2, `${index + 1}.`, MARGIN_X, conditionY, {
+      bold: true,
+      size: FONT_NORMAL,
+      color: accentColor,
+    });
+    conditionY = drawWrappedText(
+      page2,
+      condicion,
+      MARGIN_X + 24,
+      conditionY,
+      PAGE_WIDTH - (MARGIN_X * 2) - 24,
+      15,
+      FONT_NORMAL,
+      fonts.normal,
+      COLOR_TEXT
+    ) - 9;
+  });
 
-  // ── 9. Guardar PDF ────────────────────────────────────────────────────────
-  const outputDir  = path.join(CONTRATOS_DIR, reparacionId);
+  drawSectionTitle(page2, 'Firma del cliente', MARGIN_X, 286, fonts, accentColor);
+  page2.drawRectangle({
+    x: FIRMA_CLIENTE_X - 12,
+    y: FIRMA_CLIENTE_Y - 8,
+    width: FIRMA_CLIENTE_W + 24,
+    height: FIRMA_CLIENTE_H + 24,
+    borderColor: COLOR_LINE,
+    borderWidth: 1,
+  });
+  await insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl, fonts.normal, COLOR_TEXT);
+  drawLine(page2, 172, 134, 440, 134, COLOR_TEXT);
+  dt(page2, clienteNombre || 'Cliente', 198, 116, {
+    size: FONT_NORMAL,
+    color: COLOR_TEXT,
+    maxWidth: 220,
+  });
+  dt(page2, 'Nombre y firma del cliente', 222, 101, {
+    size: FONT_SMALL,
+    color: COLOR_MUTED,
+  });
+  drawFooter(page2, 2, fonts);
+
+  const outputDir = path.join(CONTRATOS_DIR, reparacionId);
   const outputFile = path.join(outputDir, `contrato_reparacion_${reparacionId}.pdf`);
   fs.mkdirSync(outputDir, { recursive: true });
 
@@ -305,7 +496,7 @@ async function generarContrato(datos) {
   fs.writeFileSync(outputFile, pdfBytes);
 
   const relativePath = `/uploads/contratos/${reparacionId}/contrato_reparacion_${reparacionId}.pdf`;
-  console.log(`[ContratoPDF] ✅ PDF guardado: ${outputFile}`);
+  console.log(`[ContratoPDF] PDF guardado: ${outputFile}`);
   return { absolutePath: outputFile, relativePath };
 }
 
