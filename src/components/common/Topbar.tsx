@@ -52,12 +52,11 @@ export default function Topbar() {
         >
           <Menu size={18} />
         </button>
-        <span
-          className="hidden sm:block text-[11px] font-semibold uppercase"
-          style={{ color: "var(--color-text-sec)", letterSpacing: "0.08em" }}
-        >
-          TecnoOne SaaS
-        </span>
+        <img
+          src={theme === "dark" ? "/branding/tecnoone-logo-dark.png" : "/branding/tecnoone-logo-light.png"}
+          alt="TecnoOne"
+          className="h-8 sm:h-9 w-auto object-contain shrink-0"
+        />
 
         {/* Hora actual */}
         <span className="hidden sm:block text-xs font-mono" style={{ color: "var(--color-text-sec)" }}>
