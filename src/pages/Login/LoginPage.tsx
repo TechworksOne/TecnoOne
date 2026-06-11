@@ -11,7 +11,6 @@ import {
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { SESSION_EXPIRED_KEY } from "../../hooks/useIdleLogout";
-import BrandMark from "../../components/common/BrandMark";
 import { useAuth } from "../../store/useAuth";
 import { useBusiness } from "../../store/useBusiness";
 
@@ -83,19 +82,16 @@ export default function LoginPage() {
           style={{ background: "radial-gradient(ellipse 70% 60% at 50% 50%, rgba(72,185,230,0.05) 0%, transparent 70%)" }}
         />
 
-        {/* ── Logo + nombre ──────────────────────────────── */}
-        <div className="relative z-10">
-          <div className="flex items-center gap-3">
-            <BrandMark size="sm" />
-            <span className="font-bold text-sm tracking-widest uppercase" style={{ color: "#C4CDD9" }}>
-              TecnoOne
-            </span>
-          </div>
-        </div>
-
         {/* ── Copia principal ───────────────────────────── */}
         <div className="relative z-10 space-y-9">
-          <div className="space-y-4">
+          <div className="space-y-6">
+            {/* Logo TecnoOne */}
+            <img
+              src="/branding/tecnoone-logo-dark.png"
+              alt="TecnoOne"
+              className="w-40 sm:w-48 lg:w-56 h-auto object-contain"
+            />
+
             {/* Badge */}
             <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5"
               style={{ background: "rgba(72,185,230,0.08)", border: "1px solid rgba(72,185,230,0.22)" }}>
@@ -151,9 +147,12 @@ export default function LoginPage() {
         <div className="w-full max-w-[420px] space-y-7 sm:space-y-8">
 
           {/* Cabecera de marca — solo en móvil */}
-          <div className="lg:hidden text-center space-y-3">
-            <BrandMark size="lg" />
-            <p className="text-xs font-bold tracking-widest uppercase" style={{ color: "#A8B3C7" }}>TecnoOne</p>
+          <div className="lg:hidden flex justify-center">
+            <img
+              src="/branding/tecnoone-logo-dark.png"
+              alt="TecnoOne"
+              className="w-36 sm:w-44 h-auto object-contain"
+            />
           </div>
 
           {/* Tarjeta del formulario */}
