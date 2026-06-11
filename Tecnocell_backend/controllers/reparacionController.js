@@ -557,7 +557,7 @@ exports.getReparacionById = async (req, res) => {
     // Obtener reparación principal
     const tenant = repairTenantClause(req);
     const [reparaciones] = await db.query(
-      `SELECT * FROM reparaciones WHERE id = ?${tenant.sql}`,
+      `SELECT r.* FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
       [id, ...tenant.params]
     );
     
@@ -673,7 +673,7 @@ exports.changeRepairState = async (req, res) => {
     
     // Obtener reparación actual
     const [reparaciones] = await connection.query(
-      `SELECT * FROM reparaciones WHERE id = ?${tenant.sql}`,
+      `SELECT r.* FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
       [id, ...tenant.params]
     );
     
@@ -698,13 +698,13 @@ exports.changeRepairState = async (req, res) => {
         tipo_evento, estado_anterior, descripcion
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        id, estado, subEtapa || null, nota,
+        id, safeEstadoHistorial(estado), subEtapa || null, nota,
         piezaNecesaria || null, proveedor || null,
         costoRepuesto ? quetzalesACentavos(parseFloat(costoRepuesto)) : null,
         stickerNumero || null, stickerUbicacion || null,
         diferenciaReparacion ? quetzalesACentavos(parseFloat(diferenciaReparacion)) : null,
         'Usuario',
-        'CAMBIO_ESTADO', estadoAnterior, nota || null
+        'CAMBIO_ESTADO', estadoAnterior ? safeEstadoHistorial(estadoAnterior) : null, nota || null
       ]
     );
     
@@ -776,7 +776,7 @@ exports.changeRepairState = async (req, res) => {
     const updateValues = Object.values(updates);
     
     await connection.query(
-      `UPDATE reparaciones SET ${updateFields} WHERE id = ?${tenant.sql}`,
+      `UPDATE reparaciones r SET ${updateFields} WHERE r.id = ?${tenant.sql}`,
       [...updateValues, id, ...tenant.params]
     );
     
@@ -820,7 +820,7 @@ exports.updateEstadoReparacion = async (req, res) => {
     // Obtener estado anterior antes de actualizar
     const tenant = repairTenantClause(req);
     const [[repActual]] = await db.query(
-      `SELECT estado FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
+      `SELECT r.estado FROM reparaciones r WHERE r.id = ?${tenant.sql}`, [id, ...tenant.params]
     );
     if (!repActual) {
       return res.status(404).json({ success: false, message: 'ReparaciÃ³n no encontrada' });
@@ -829,7 +829,7 @@ exports.updateEstadoReparacion = async (req, res) => {
 
     // Actualizar estado en la reparación
     await db.query(
-      `UPDATE reparaciones SET estado = ? WHERE id = ?${tenant.sql}`,
+      `UPDATE reparaciones r SET estado = ? WHERE r.id = ?${tenant.sql}`,
       [estado, id, ...tenant.params]
     );
 
@@ -841,10 +841,10 @@ exports.updateEstadoReparacion = async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
-        estado,
+        safeEstadoHistorial(estado),
         `Estado actualizado a ${estado}`,
         'Usuario',
-        'CAMBIO_ESTADO', estadoAnteriorSimple,
+        'CAMBIO_ESTADO', estadoAnteriorSimple ? safeEstadoHistorial(estadoAnteriorSimple) : null,
         `Estado actualizado a ${estado}`
       ]
     );
@@ -872,7 +872,7 @@ exports.getHistorialCompleto = async (req, res) => {
     // Verificar que la reparación exista
     const tenant = repairTenantClause(req);
     const [[reparacion]] = await db.query(
-      `SELECT * FROM reparaciones WHERE id = ?${tenant.sql}`,
+      `SELECT r.* FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
       [id, ...tenant.params]
     );
 
@@ -1055,6 +1055,12 @@ const HISTORIAL_ESTADOS_VALIDOS = new Set([
   'ENTREGADA','CANCELADA','STAND_BY','ANTICIPO_REGISTRADO'
 ]);
 function safeEstadoHistorial(estado) {
+  if (!estado) return null;
+
+  // reparaciones.estado acepta EN_PROCESO,
+  // pero reparaciones_historial.estado usa EN_REPARACION.
+  if (estado === 'EN_PROCESO') return 'EN_REPARACION';
+
   return HISTORIAL_ESTADOS_VALIDOS.has(estado) ? estado : 'EN_REPARACION';
 }
 
@@ -1075,7 +1081,7 @@ exports.updatePrioridad = async (req, res) => {
 
     const tenant = repairTenantClause(req);
     const [[rep]] = await connection.query(
-      `SELECT id, estado, prioridad FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
+      `SELECT r.id, r.estado, r.prioridad FROM reparaciones r WHERE r.id = ?${tenant.sql}`, [id, ...tenant.params]
     );
     if (!rep) {
       await connection.rollback();
@@ -1138,7 +1144,7 @@ exports.registrarPagoSaldo = async (req, res) => {
 
     const tenant = repairTenantClause(req);
     const [[rep]] = await connection.query(
-      `SELECT id, estado, total, monto_anticipo, monto_pagado_adicional FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
+      `SELECT r.id, r.estado, r.total, r.monto_anticipo, r.monto_pagado_adicional FROM reparaciones r WHERE r.id = ?${tenant.sql}`, [id, ...tenant.params]
     );
     if (!rep) {
       await connection.rollback();
@@ -1469,7 +1475,7 @@ exports.completarReparacion = async (req, res) => {
     // ── 1. Obtener reparación ─────────────────────────────────────────────
     const tenant = repairTenantClause(req);
     const [[reparacion]] = await connection.query(
-      `SELECT * FROM reparaciones WHERE id = ?${tenant.sql}`, [id, ...tenant.params]
+      `SELECT r.* FROM reparaciones r WHERE r.id = ?${tenant.sql}`, [id, ...tenant.params]
     );
     if (!reparacion) {
       await connection.rollback();
