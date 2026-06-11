@@ -2,8 +2,9 @@ import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import API_URL from "../../services/config";
-import { formatMoney } from "../../lib/format";
+import { formatMoney as formatMoneyBase } from "../../lib/format";
 import { useAuth } from "../../store/useAuth";
+import { useEmpresa } from "../../store/useEmpresa";
 import {
   ShoppingCart, Package, AlertTriangle, FileText, Wrench,
   DollarSign, TrendingUp, TrendingDown, Users, ClipboardCheck, ClipboardX,
@@ -751,6 +752,12 @@ function TecnicoDashboard({ data, time }: { data: TecnicoData; time: Date }) {
 
 function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: Date; userName?: string }) {
   const navigate = useNavigate();
+  const { empresa } = useEmpresa();
+  const formatMoney = (amount: number) => formatMoneyBase(amount, {
+    currency: empresa?.moneda_codigo,
+    symbol: empresa?.moneda_simbolo,
+  });
+  const tenantColor = "var(--tenant-primary-color)";
 
   const mesLabel   = time.toLocaleDateString('es-GT', { month: 'long', year: 'numeric' });
   const todayKey   = new Date().toISOString().split('T')[0];
@@ -806,7 +813,7 @@ function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: 
           sub={`${stats.ventasMes.cantidad} ventas`}
           change={stats.cambioMes}
           icon={<TrendingUp size={16} />}
-          accent="#3B82F6"
+          accent={tenantColor}
         />
         <FinancialKpiCard
           label="Ticket Promedio Hoy"
@@ -842,7 +849,7 @@ function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: 
             ? `${formatMoney(stats.cotizaciones.valor_abierto!)} valor total`
             : 'pendientes de respuesta'}
           icon={<FileText size={16} />}
-          accent="#3B82F6"
+          accent={tenantColor}
           alert={false}
           onClick={() => navigate('/cotizaciones')}
         />
@@ -986,6 +993,12 @@ function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: 
 
 function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) {
   const navigate = useNavigate();
+  const { empresa } = useEmpresa();
+  const formatMoney = (amount: number) => formatMoneyBase(amount, {
+    currency: empresa?.moneda_codigo,
+    symbol: empresa?.moneda_simbolo,
+  });
+  const tenantColor = "var(--tenant-primary-color)";
   const fin  = stats.financiero;
   const trend = stats.tendencia ?? [];
   const cli  = stats.clientes;
@@ -1009,7 +1022,7 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
       {/* ── HEADER ── */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
-          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-1">
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: tenantColor }}>
             <BarChart3 size={11} /> Panel de Control · Administrador
           </span>
           <h1 className="text-xl font-bold leading-tight" style={{ color: 'var(--color-text)' }}>
@@ -1039,7 +1052,7 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
             change={fin.cambio_ganancia_pct}
             sub={`Margen ${fin.margen_bruto.toFixed(1)}% · COGS ${formatMoney(fin.costo_ventas_mes)}`}
             icon={<BarChart3 size={16} />}
-            accent="#3B82F6"
+            accent={tenantColor}
           />
           <FinancialKpiCard
             label="Ganancia Neta"
@@ -1075,7 +1088,7 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
           onClick={() => navigate('/flujo-reparaciones')}
         />
         <OpKpiCard
-          label="Complet. este mes"
+          label="Completadas este mes"
           value={stats.reparaciones.completadas_mes ?? 0}
           sub="reparaciones cerradas"
           icon={<CheckCircle2 size={15} />}
@@ -1083,17 +1096,19 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
           onClick={() => navigate('/ordenes-trabajo')}
         />
         <OpKpiCard
-          label="Clientes Nuevos"
+          label="Clientes nuevos este mes"
           value={cli?.nuevos_mes ?? 0}
           sub={`${(cli?.total ?? 0).toLocaleString()} clientes totales`}
           icon={<UserPlus size={15} />}
-          accent="#48B9E6"
+          accent={tenantColor}
           onClick={() => navigate('/clientes')}
         />
         <OpKpiCard
-          label="Conversión Cotiz."
+          label="Conversión de cotizaciones"
           value={`${stats.cotizaciones.conversion_rate ?? 0}%`}
-          sub={`${stats.cotizaciones.abiertas} pendientes de ${stats.cotizaciones.total} total`}
+          sub={stats.cotizaciones.total > 0
+            ? `${stats.cotizaciones.abiertas} pendientes de ${stats.cotizaciones.total} total`
+            : "Sin cotizaciones registradas"}
           icon={<Percent size={15} />}
           accent="#F59E0B"
           alert={stats.cotizaciones.abiertas > 5}
@@ -1111,15 +1126,15 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
         >
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg" style={{ background: '#3B82F618' }}>
-                <PieChart size={13} style={{ color: '#3B82F6' }} />
+              <div className="p-1.5 rounded-lg" style={{ background: 'rgba(var(--tenant-primary-rgb),0.10)' }}>
+                <PieChart size={13} style={{ color: tenantColor }} />
               </div>
               <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
                 Tendencia 7 días
               </h3>
             </div>
             <div className="flex items-center gap-3 text-[10px]" style={{ color: 'var(--color-text-sec)' }}>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-500 inline-block" /> Ingresos</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm inline-block" style={{ background: tenantColor }} /> Ingresos</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" /> Ganancia</span>
             </div>
           </div>
@@ -1180,7 +1195,7 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
               {[
                 { label: 'Ingresos brutos',    value: fin.ingresos_mes,       color: '#22C55E', symbol: '+' },
                 { label: 'Costo de ventas',     value: fin.costo_ventas_mes,   color: '#EF4444', symbol: '−' },
-                { label: 'Ganancia bruta',      value: fin.ganancia_bruta_mes, color: '#3B82F6', symbol: '=', bold: true },
+                { label: 'Ganancia bruta',      value: fin.ganancia_bruta_mes, color: tenantColor, symbol: '=', bold: true },
                 { label: 'Egresos operativos',  value: fin.egresos_caja_mes,   color: '#F59E0B', symbol: '−' },
                 { label: 'Ganancia neta',       value: fin.ganancia_neta_mes,  color: fin.ganancia_neta_mes >= 0 ? '#6366F1' : '#EF4444', symbol: '=', bold: true, divider: true },
               ].map((row, i) => (
@@ -1210,10 +1225,10 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
             {/* Margen badge */}
             <div
               className="mt-4 rounded-xl px-3 py-2 flex items-center justify-between"
-              style={{ background: '#3B82F610', border: '1px solid #3B82F620' }}
+              style={{ background: 'rgba(var(--tenant-primary-rgb),0.08)', border: '1px solid rgba(var(--tenant-primary-rgb),0.16)' }}
             >
-              <span className="text-[11px] font-semibold" style={{ color: '#3B82F6' }}>Margen bruto</span>
-              <span className="text-sm font-bold" style={{ color: '#3B82F6' }}>{fin.margen_bruto.toFixed(1)}%</span>
+              <span className="text-[11px] font-semibold" style={{ color: tenantColor }}>Margen bruto</span>
+              <span className="text-sm font-bold" style={{ color: tenantColor }}>{fin.margen_bruto.toFixed(1)}%</span>
             </div>
             <div
               className="mt-2 rounded-xl px-3 py-2 flex items-center justify-between"
@@ -1440,6 +1455,7 @@ function getStoredAuthToken(): string | null {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { loadEmpresa } = useEmpresa();
 
   // Detectar rol usando array RBAC (user.roles) y campo legado (user.role)
   const userRoles: string[] = user?.roles ?? [];
@@ -1459,6 +1475,10 @@ export default function DashboardPage() {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (user) loadEmpresa();
+  }, [user, loadEmpresa]);
 
   useEffect(() => {
     let mounted = true;

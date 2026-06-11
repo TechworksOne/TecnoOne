@@ -1,7 +1,23 @@
-export function formatMoney(amount: number): string {
-  return new Intl.NumberFormat("es-GT", {
+interface MoneyOptions {
+  currency?: string | null;
+  symbol?: string | null;
+  locale?: string;
+}
+
+export function formatMoney(amount: number, options: MoneyOptions = {}): string {
+  const currency = (options.currency || "GTQ").toUpperCase();
+  const locale = options.locale || "es-GT";
+
+  if (options.symbol) {
+    return `${options.symbol}${new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount)}`;
+  }
+
+  return new Intl.NumberFormat(locale, {
     style: "currency",
-    currency: "GTQ",
+    currency,
   }).format(amount);
 }
 

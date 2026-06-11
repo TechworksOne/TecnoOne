@@ -12,5 +12,7 @@ router.use(checkEmpresaActiva);
 
 router.get('/me', empresaController.getEmpresaMe);
 router.put('/me', verifyRole('admin', 'ADMINISTRADOR'), empresaController.updateEmpresaMe);
+router.post('/logo', verifyRole('admin', 'ADMINISTRADOR'), empresaController.uploadLogo.single('logo'), empresaController.updateEmpresaLogo);
+router.put('/logo', verifyRole('admin', 'ADMINISTRADOR'), empresaController.uploadLogo.single('logo'), empresaController.updateEmpresaLogo);
 
 module.exports = router;

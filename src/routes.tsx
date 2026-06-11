@@ -29,6 +29,7 @@ import AdminUsuariosPage from "./pages/AdminUsuarios/AdminUsuariosPage";
 import CajaBancosPage from "./pages/CajaBancos/CajaBancosPage";
 import DeudoresPage from "./pages/Deudores/DeudoresPage";
 import OrdenesTrabajoPage from "./pages/OrdenesTrabajo/OrdenesTrabajoPage";
+import EmpresaPage from "./pages/Configuracion/EmpresaPage";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import { ROLES } from "./lib/permissions";
 
@@ -77,6 +78,7 @@ const routes = [
   { path: "/proveedores",    element: PR(ADMIN,        <SuppliersPage />) },
   { path: "/stickers-garantia", element: PR(ADMIN,     <StickersGarantiaPage />) },
   { path: "/admin-usuarios", element: PR(ADMIN,        <AdminUsuariosPage />) },
+  { path: "/configuracion/empresa", element: PR(ADMIN, <EmpresaPage />) },
   { path: "/reportes",       element: PR(ADMIN,        <ReportesPage />) },
   { path: "/usuarios",       element: PR(ADMIN,        <UsersPage />) },
 

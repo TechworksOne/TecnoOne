@@ -12,6 +12,7 @@ import {
   type CreateUsuarioPayload,
   type UpdateUsuarioPayload,
 } from '../../services/adminUsuarioService';
+import { getInitialsFromName } from '../../lib/avatar';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -55,14 +56,16 @@ function Avatar({
   apellidos?: string | null;
   size?: 'sm' | 'md' | 'lg';
 }) {
-  const initials = ((nombres?.[0] ?? '') + (apellidos?.[0] ?? '')).toUpperCase() || '?';
+  const [imgError, setImgError] = useState(false);
+  const initials = getInitialsFromName(`${nombres || ''} ${apellidos || ''}`, 'U');
   const sizeClass = { sm: 'w-8 h-8 text-xs', md: 'w-10 h-10 text-sm', lg: 'w-16 h-16 text-xl' }[size];
-  if (foto)
+  if (foto && !imgError)
     return (
       <img
         src={foto}
         alt={nombres}
         className={`${sizeClass} rounded-full object-cover ring-2 ring-[var(--color-border)] shadow`}
+        onError={() => setImgError(true)}
       />
     );
   return (

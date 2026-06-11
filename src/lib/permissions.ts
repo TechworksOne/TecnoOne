@@ -14,6 +14,7 @@ export const ADMIN_ONLY_ROUTES = [
   '/reportes',
   '/caja-bancos',
   '/deudores',
+  '/configuracion/empresa',
 ];
 
 /** Verifica si el usuario tiene el rol indicado */

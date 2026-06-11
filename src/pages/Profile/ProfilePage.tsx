@@ -7,8 +7,8 @@ import {
 import { useAuth } from '../../store/useAuth';
 import { useToast } from '../../components/ui/Toast';
 import { canViewCosts, isAdmin } from '../../lib/permissions';
+import { getInitialsFromName, getSafeImageUrl } from '../../lib/avatar';
 import API_URL from '../../services/config';
-import { getImageUrl } from '../../utils/getImageUrl';
 import axios from 'axios';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -46,14 +46,11 @@ function formatDate(dt: string | null): string {
 }
 
 function buildAvatarUrl(foto: string | null | undefined): string | null {
-  if (!foto) return null;
-  return getImageUrl(foto) || null;
+  return getSafeImageUrl(foto);
 }
 
 function getInitials(name: string): string {
-  const parts = name.trim().split(' ');
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.substring(0, 2).toUpperCase() || 'TC';
+  return getInitialsFromName(name, 'U');
 }
 
 // ─── Role badge config ────────────────────────────────────────────────────────

@@ -142,12 +142,12 @@ exports.getDashboardStats = async (req, res) => {
     // ── Reparaciones activas ─────────────────────────────────────────────────
     const [[reparaciones]] = await connection.query(`
       SELECT
-        COUNT(*) AS total,
-        SUM(CASE WHEN r.id IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS con_checklist,
-        SUM(CASE WHEN r.id NOT IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS sin_checklist,
+        SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') THEN 1 ELSE 0 END) AS total,
+        SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') AND r.id IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS con_checklist,
+        SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') AND r.id NOT IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS sin_checklist,
         SUM(CASE WHEN estado = 'COMPLETADA' THEN 1 ELSE 0 END) AS completadas
       FROM reparaciones r
-      WHERE estado NOT IN ('ENTREGADA', 'CANCELADA')
+      WHERE 1=1
         ${reparacionesAliasTenant.sql}
     `, reparacionesAliasTenant.params);
 

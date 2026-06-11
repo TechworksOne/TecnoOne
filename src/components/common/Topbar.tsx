@@ -1,6 +1,6 @@
 import { LogOut, Menu, Moon, Sun, User } from "lucide-react";
-import BrandMark from "./BrandMark";
-import { getImageUrl } from "../../utils/getImageUrl";
+import { getSafeImageUrl, getUserInitials } from "../../lib/avatar";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAuth } from "../../store/useAuth";
@@ -11,6 +11,13 @@ export default function Topbar() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { toggle } = useSidebar();
+  const [avatarError, setAvatarError] = useState(false);
+  const avatarUrl = getSafeImageUrl(user?.perfil?.foto_perfil);
+  const userInitials = getUserInitials(user);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.id, user?.perfil?.foto_perfil]);
 
   const handleLogout = () => {
     logout();
@@ -45,28 +52,12 @@ export default function Topbar() {
         >
           <Menu size={18} />
         </button>
-        <BrandMark size="sm" />
-
-        <div className="flex flex-col leading-tight">
-          <span
-            className="text-sm font-extrabold tracking-widest"
-            style={{ color: "var(--color-text)", letterSpacing: "0.1em" }}
-          >
-            TecnoOne
-          </span>
-          <span
-            className="text-[9px] font-medium uppercase tracking-widest hidden sm:block"
-            style={{ color: "var(--color-text-sec)" }}
-          >
-            Sistema comercial
-          </span>
-        </div>
-
-        {/* Separador vertical */}
-        <div
-          className="hidden sm:block self-stretch w-px mx-1"
-          style={{ background: "var(--color-border)" }}
-        />
+        <span
+          className="hidden sm:block text-[11px] font-semibold uppercase"
+          style={{ color: "var(--color-text-sec)", letterSpacing: "0.08em" }}
+        >
+          TecnoOne SaaS
+        </span>
 
         {/* Hora actual */}
         <span className="hidden sm:block text-xs font-mono" style={{ color: "var(--color-text-sec)" }}>
@@ -108,13 +99,13 @@ export default function Topbar() {
           }}
         >
           {/* Avatar: foto de perfil o inicial como fallback */}
-          {user?.perfil?.foto_perfil ? (
+          {avatarUrl && !avatarError ? (
             <img
-              src={getImageUrl(user.perfil.foto_perfil)}
-              alt={user.name}
+              src={avatarUrl}
+              alt={user?.name || user?.username || "Usuario"}
               className="rounded-lg shrink-0 object-cover"
               style={{ width: 26, height: 26 }}
-              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              onError={() => setAvatarError(true)}
             />
           ) : (
             <div
@@ -122,10 +113,10 @@ export default function Topbar() {
               style={{
                 width: 26,
                 height: 26,
-                background: "linear-gradient(135deg, #48B9E6 0%, #2563EB 100%)",
+                background: "linear-gradient(135deg, var(--tenant-primary-color) 0%, var(--tenant-primary-dark) 100%)",
               }}
             >
-              {user?.name?.[0]?.toUpperCase() ?? <User size={13} />}
+              {userInitials || <User size={13} />}
             </div>
           )}
           <div className="text-sm hidden sm:block">
