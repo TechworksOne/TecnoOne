@@ -1,7 +1,7 @@
 export default function Select({ onValueChange, className, ...props }: any) {
   return (
     <select
-      className={`border rounded-lg p-2 bg-white dark:bg-[#060B14] text-[#14324A] dark:text-[#F8FAFC] border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] outline-none focus:border-[#48B9E6] transition-colors${className ? ' ' + className : ''}`}
+      className={`w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] px-3 py-2 text-sm text-[var(--color-text)] shadow-sm outline-none transition disabled:cursor-not-allowed disabled:opacity-60 focus:border-[var(--tenant-primary-color)] focus:ring-4 focus:ring-[rgba(var(--tenant-primary-rgb),0.14)]${className ? ' ' + className : ''}`}
       onChange={(e) => onValueChange?.(e.target.value)}
       {...props} 
     />

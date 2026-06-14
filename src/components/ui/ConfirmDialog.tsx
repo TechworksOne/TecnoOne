@@ -34,22 +34,22 @@ export default function ConfirmDialog({
       case 'warning':
         return 'bg-yellow-600 hover:bg-yellow-700 text-white';
       case 'info':
-        return 'bg-blue-600 hover:bg-blue-700 text-white';
+        return 'bg-[var(--tenant-primary-color)] hover:bg-[var(--tenant-primary-dark)] text-white';
       default:
         return 'bg-red-600 hover:bg-red-700 text-white';
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow p-6 w-full max-w-md">
-        {title && <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm dark:bg-black/65">
+      <div className="w-full max-w-md rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-xl">
+        {title && <h3 className="text-lg font-semibold text-[var(--color-text)]">{title}</h3>}
         <div className="mt-4">
-          {message && <p className="text-gray-700 dark:text-slate-300">{message}</p>}
+          {message && <p className="text-[var(--color-text-sec)]">{message}</p>}
           {children}
         </div>
         <div className="mt-6 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg border dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+          <button onClick={onClose} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-4 py-2 text-[var(--color-text-sec)] transition-colors hover:bg-[var(--color-row-hover)]">
             Cancelar
           </button>
           <button

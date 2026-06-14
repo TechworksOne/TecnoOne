@@ -30,7 +30,7 @@ export default function Topbar() {
       style={{
         background:   "var(--color-surface)",
         borderBottom: "1px solid var(--color-border)",
-        boxShadow:    "0 1px 8px rgba(0,0,0,0.07)",
+        boxShadow:    "none",
         transition:   "background 250ms ease, border-color 250ms ease",
         minHeight:    52,
       }}
@@ -41,7 +41,7 @@ export default function Topbar() {
         <button
           onClick={toggle}
           aria-label="Abrir menú"
-          className="md:hidden flex items-center justify-center rounded-xl shrink-0"
+          className="md:hidden flex items-center justify-center rounded-lg shrink-0"
           style={{
             width: 34,
             height: 34,
@@ -69,7 +69,7 @@ export default function Topbar() {
         <button
           onClick={toggleTheme}
           title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-          className="rounded-xl transition-all flex items-center justify-center shrink-0"
+          className="rounded-lg transition-all flex items-center justify-center shrink-0"
           style={{
             width: 34,
             height: 34,
@@ -78,7 +78,7 @@ export default function Topbar() {
             color: "var(--color-text-sec)",
           }}
           onMouseEnter={e => {
-            (e.currentTarget as HTMLElement).style.background = "rgba(72,185,230,0.12)";
+            (e.currentTarget as HTMLElement).style.background = "rgba(var(--tenant-primary-rgb),0.10)";
             (e.currentTarget as HTMLElement).style.color      = "var(--color-primary)";
           }}
           onMouseLeave={e => {
@@ -91,7 +91,7 @@ export default function Topbar() {
 
         {/* Información del usuario */}
         <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-xl"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
           style={{
             background: "var(--color-surface-soft)",
             border:     "1px solid var(--color-border)",
@@ -138,7 +138,7 @@ export default function Topbar() {
         <button
           onClick={handleLogout}
           title="Cerrar sesión"
-          className="rounded-xl transition-all flex items-center gap-1.5 px-3 shrink-0"
+          className="rounded-lg transition-all flex items-center gap-1.5 px-3 shrink-0"
           style={{
             height: 34,
             background: "var(--color-surface-soft)",

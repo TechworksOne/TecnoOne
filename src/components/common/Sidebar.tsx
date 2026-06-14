@@ -117,6 +117,7 @@ export default function Sidebar() {
         style={{
           width: sidebarWidth,
           borderRight: "1px solid var(--color-border)",
+          boxShadow: "none",
           transition: "width 280ms cubic-bezier(.4,0,.2,1), transform 280ms cubic-bezier(.4,0,.2,1)",
           transform: sidebarTransform,
         }}
@@ -225,14 +226,12 @@ export default function Sidebar() {
                           borderRadius: 10,
                           position: "relative",
                           cursor: "pointer",
-                          background: isActive
-                            ? "linear-gradient(90deg, rgba(var(--tenant-primary-rgb),0.18) 0%, rgba(var(--tenant-primary-rgb),0.07) 100%)"
-                            : "transparent",
-                          boxShadow: isActive ? "inset 0 0 0 1px rgba(var(--tenant-primary-rgb),0.22)" : "none",
+                          background: isActive ? "rgba(37,99,235,0.16)" : "transparent",
+                          boxShadow: isActive ? "inset 0 0 0 1px rgba(37,99,235,0.28)" : "none",
                           color: isActive ? "var(--color-text)" : "var(--color-text-sec)",
                         }}
                         onMouseEnter={(e) => {
-                          if (!isActive) e.currentTarget.style.background = "rgba(var(--tenant-primary-rgb),0.08)";
+                          if (!isActive) e.currentTarget.style.background = "var(--color-row-hover)";
                         }}
                         onMouseLeave={(e) => {
                           if (!isActive) e.currentTarget.style.background = "transparent";
@@ -247,13 +246,13 @@ export default function Sidebar() {
                             height: "60%",
                             width: 3,
                             borderRadius: "0 3px 3px 0",
-                            background: "linear-gradient(180deg, var(--tenant-primary-color), var(--tenant-primary-dark))",
+                            background: "#2563EB",
                           }} />
                         )}
 
                         {/* Icon */}
                         <span style={{
-                          color: isActive ? "var(--tenant-primary-color)" : "var(--color-text-muted)",
+                          color: isActive ? "#2563EB" : "var(--color-text-muted)",
                           flexShrink: 0,
                           display: "flex",
                           alignItems: "center",

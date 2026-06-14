@@ -51,27 +51,27 @@ export default function Modal({
   };
   
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 dark:bg-black/70 backdrop-blur-md backdrop-saturate-150 p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 dark:bg-black/65 backdrop-blur-sm p-4">
       <div
-        className={`relative z-[110] bg-white dark:bg-[#0D1526] rounded-3xl border border-[#D6EEF8] dark:border-[rgba(72,185,230,0.18)] w-full ${sizeClasses[size]} max-h-[92vh] overflow-hidden flex flex-col`}
-        style={{ boxShadow: "0 24px 80px rgba(14,30,50,0.38), 0 0 0 1px rgba(72,185,230,0.06)" }}
+        className={`relative z-[110] flex max-h-[92vh] w-full ${sizeClasses[size]} flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]`}
+        style={{ boxShadow: "0 24px 60px rgba(15,23,42,0.24)" }}
       >
         {/* Header del modal */}
         {title && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] shrink-0 bg-white dark:bg-[#0D1526] rounded-t-3xl">
-            <h3 className="text-base font-bold text-[#14324A] dark:text-[#F8FAFC]">{title}</h3>
+          <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-4">
+            <h3 className="text-base font-semibold text-[var(--color-text)]">{title}</h3>
             {onClose && (
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-xl transition-colors"
+                className="rounded-lg p-1.5 transition-colors"
                 style={{
                   color: "var(--color-text-sec)",
                   background: "transparent",
                   border: "1px solid var(--color-border)",
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = "rgba(72,185,230,0.10)";
-                  (e.currentTarget as HTMLElement).style.color = "#48B9E6";
+                  (e.currentTarget as HTMLElement).style.background = "rgba(var(--tenant-primary-rgb),0.10)";
+                  (e.currentTarget as HTMLElement).style.color = "var(--tenant-primary-color)";
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLElement).style.background = "transparent";
@@ -85,7 +85,7 @@ export default function Modal({
         )}
 
         {/* Contenido del modal */}
-        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
+        <div className="custom-scrollbar flex-1 overflow-y-auto p-6">
           {children}
         </div>
       </div>

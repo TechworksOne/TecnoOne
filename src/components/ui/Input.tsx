@@ -2,7 +2,7 @@ import React from 'react';
 
 const Input = React.forwardRef<HTMLInputElement, { placeholder?: string; value?: string; onChange?: any; type?: string; className?: string } & any>(
   ({ className, ...props }, ref) => {
-    return <input ref={ref} className={`border rounded-lg p-2 bg-white dark:bg-[#060B14] text-[#14324A] dark:text-[#F8FAFC] border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] placeholder:text-[#7F8A99] outline-none focus:border-[#48B9E6] transition-colors${className ? ' ' + className : ''}`} {...props} />;
+    return <input ref={ref} className={`w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] px-3 py-2 text-sm text-[var(--color-text)] shadow-sm outline-none transition placeholder:text-[var(--color-text-muted)] disabled:cursor-not-allowed disabled:opacity-60 focus:border-[var(--tenant-primary-color)] focus:ring-4 focus:ring-[rgba(var(--tenant-primary-rgb),0.14)]${className ? ' ' + className : ''}`} {...props} />;
   }
 );
 

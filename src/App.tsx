@@ -81,7 +81,7 @@ export default function App() {
             className={`flex flex-col transition-[margin-left] duration-[280ms] ease-[cubic-bezier(.4,0,.2,1)] ${isOpen ? 'md:ml-[264px]' : 'md:ml-[72px]'}`}
           >
           <Topbar />
-          <main className="p-3 sm:p-6">
+          <main className="min-h-[calc(100vh-52px)] p-4 sm:p-6">
             <Routes>
               {routes.filter(r => r.path !== "/login").map((r) => (
                 <Route key={r.path} path={r.path} element={r.element} />
