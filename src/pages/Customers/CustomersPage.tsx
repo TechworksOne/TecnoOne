@@ -200,6 +200,13 @@ export default function CustomersPage() {
     { label: "Total gastado", value: fmtQ(totalGastado), icon: Wallet, color: "from-amber-500 to-orange-600" },
   ];
 
+  const getKpiAccent = (color: string) => {
+    if (color.includes("emerald")) return "dark:text-emerald-300";
+    if (color.includes("amber") || color.includes("orange")) return "dark:text-amber-300";
+    if (color.includes("violet") || color.includes("purple")) return "dark:text-[#9AA0A6]";
+    return "dark:text-blue-300";
+  };
+
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <div className="space-y-5 max-w-screen-2xl">
@@ -228,14 +235,14 @@ export default function CustomersPage() {
       {/* â”€â”€ KPI Cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {KPI_CARDS.map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className={`rounded-2xl p-4 bg-gradient-to-br ${color}`}>
+          <div key={label} className={`rounded-2xl p-4 bg-gradient-to-br ${color} dark:bg-none dark:bg-[#1B1C1F] dark:border dark:border-[#303134]`}>
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-[11px] font-medium text-white/70 uppercase tracking-widest">{label}</p>
-                <p className="text-2xl font-bold text-white mt-1">{value}</p>
+                <p className="text-[11px] font-medium text-white/70 dark:text-[#9AA0A6] uppercase tracking-widest">{label}</p>
+                <p className="text-2xl font-bold text-white dark:text-[#E8EAED] mt-1">{value}</p>
               </div>
-              <div className="bg-white/20 rounded-xl p-2 shrink-0">
-                <Icon size={18} className="text-white" />
+              <div className="bg-white/20 dark:bg-[#202124] rounded-xl p-2 shrink-0">
+                <Icon size={18} className={`text-white ${getKpiAccent(color)}`} />
               </div>
             </div>
           </div>
@@ -473,7 +480,7 @@ export default function CustomersPage() {
                 [&::-webkit-scrollbar]:w-1.5
                 [&::-webkit-scrollbar-track]:bg-transparent
                 [&::-webkit-scrollbar-thumb]:bg-slate-200
-                dark:[&::-webkit-scrollbar-thumb]:bg-[rgba(72,185,230,0.20)]
+                dark:[&::-webkit-scrollbar-thumb]:bg-[#3A3A3A]
                 [&::-webkit-scrollbar-thumb]:rounded-full">
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -637,7 +644,7 @@ export default function CustomersPage() {
               [&::-webkit-scrollbar]:w-1.5
               [&::-webkit-scrollbar-track]:bg-transparent
               [&::-webkit-scrollbar-thumb]:bg-slate-200
-              dark:[&::-webkit-scrollbar-thumb]:bg-[rgba(72,185,230,0.20)]
+              dark:[&::-webkit-scrollbar-thumb]:bg-[#3A3A3A]
               [&::-webkit-scrollbar-thumb]:rounded-full">
 
               {/* Contact info */}

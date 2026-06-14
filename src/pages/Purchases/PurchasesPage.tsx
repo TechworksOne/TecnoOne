@@ -35,14 +35,22 @@ function KpiCard({
 }: {
   label: string; value: string | number; sub: string; icon: React.ReactNode; gradient: string;
 }) {
+  const accent = gradient.includes("emerald") || gradient.includes("green")
+    ? "dark:text-emerald-300"
+    : gradient.includes("orange") || gradient.includes("amber") || gradient.includes("rose")
+      ? "dark:text-amber-300"
+      : gradient.includes("violet") || gradient.includes("purple")
+        ? "dark:text-[#9AA0A6]"
+        : "dark:text-blue-300";
+
   return (
-    <div className={`${gradient} rounded-2xl p-4 text-white flex items-center justify-between`}>
+    <div className={`${gradient} rounded-2xl p-4 text-white flex items-center justify-between dark:bg-none dark:bg-[#1B1C1F] dark:border dark:border-[#303134]`}>
       <div>
-        <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest">{label}</p>
-        <p className="text-2xl font-bold mt-0.5 leading-none">{value}</p>
-        <p className="text-white/60 text-[11px] mt-1">{sub}</p>
+        <p className="text-white/70 dark:text-[#9AA0A6] text-[10px] font-bold uppercase tracking-widest">{label}</p>
+        <p className="text-2xl font-bold mt-0.5 leading-none dark:text-[#E8EAED]">{value}</p>
+        <p className="text-white/60 dark:text-[#9AA0A6] text-[11px] mt-1">{sub}</p>
       </div>
-      <div className="bg-white/20 rounded-xl p-2.5 shrink-0">{icon}</div>
+      <div className={`bg-white/20 dark:bg-[#202124] rounded-xl p-2.5 shrink-0 ${accent}`}>{icon}</div>
     </div>
   );
 }

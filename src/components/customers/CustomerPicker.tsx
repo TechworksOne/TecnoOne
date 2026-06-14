@@ -283,7 +283,7 @@ export default function CustomerPicker({
           </div>
 
           {/* Lista de resultados */}
-          <div className="max-h-[280px] overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 dark:[&::-webkit-scrollbar-thumb]:bg-[rgba(72,185,230,0.20)] [&::-webkit-scrollbar-thumb]:rounded-full">
+          <div className="max-h-[280px] overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 dark:[&::-webkit-scrollbar-thumb]:bg-[#3A3A3A] [&::-webkit-scrollbar-thumb]:rounded-full">
             {filteredCustomers.length > 0 ? (
               <div className="p-2">
                 {!searchQuery && (

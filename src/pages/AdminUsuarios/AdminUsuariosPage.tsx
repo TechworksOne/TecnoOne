@@ -942,21 +942,23 @@ export default function AdminUsuariosPage() {
       {/* ── KPI cards ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: 'Total',           value: total,    icon: <Users size={20} />,        color: 'from-blue-500 to-blue-600' },
-          { label: 'Activos',         value: activos,  icon: <UserCheck size={20} />,    color: 'from-emerald-500 to-emerald-600' },
-          { label: 'Tecnicos',        value: tecnicos, icon: <Wrench size={20} />,       color: 'from-cyan-500 to-cyan-600' },
-          { label: 'Administradores', value: admins,   icon: <Shield size={20} />,       color: 'from-purple-500 to-purple-600' },
-          { label: 'Ventas',          value: ventas,   icon: <ShoppingCart size={20} />, color: 'from-amber-500 to-amber-600' },
+          { label: 'Total',           value: total,    icon: <Users size={20} />,        color: 'from-blue-500 to-blue-600',       accent: 'dark:text-[#2563EB]' },
+          { label: 'Activos',         value: activos,  icon: <UserCheck size={20} />,    color: 'from-emerald-500 to-emerald-600', accent: 'dark:text-[#10B981]' },
+          { label: 'Tecnicos',        value: tecnicos, icon: <Wrench size={20} />,       color: 'from-cyan-500 to-cyan-600',       accent: 'dark:text-teal-300' },
+          { label: 'Administradores', value: admins,   icon: <Shield size={20} />,       color: 'from-purple-500 to-purple-600',   accent: 'dark:text-[#9AA0A6]' },
+          { label: 'Ventas',          value: ventas,   icon: <ShoppingCart size={20} />, color: 'from-amber-500 to-amber-600',     accent: 'dark:text-[#F59E0B]' },
         ].map(s => (
           <div
             key={s.label}
-            className={`bg-gradient-to-br ${s.color} text-white rounded-2xl p-4 flex items-center justify-between shadow-sm`}
+            className={`bg-gradient-to-br ${s.color} text-white rounded-2xl p-4 flex items-center justify-between shadow-sm dark:bg-none dark:bg-[#1B1C1F] dark:border dark:border-[#303134] dark:shadow-none`}
           >
             <div>
-              <p className="text-white/75 text-xs font-medium">{s.label}</p>
-              <p className="text-2xl font-extrabold mt-0.5">{s.value}</p>
+              <p className="text-white/75 dark:text-[#9AA0A6] text-xs font-medium">{s.label}</p>
+              <p className={`text-2xl font-extrabold mt-0.5 dark:text-[#E8EAED] ${s.accent}`}>{s.value}</p>
             </div>
-            <div className="opacity-50">{s.icon}</div>
+            <div className={`opacity-50 dark:opacity-100 dark:bg-[#202124] dark:border dark:border-[#303134] dark:rounded-xl dark:p-2 ${s.accent}`}>
+              {s.icon}
+            </div>
           </div>
         ))}
       </div>

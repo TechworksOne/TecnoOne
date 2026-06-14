@@ -138,7 +138,7 @@ table td {
 /* ─── Category list scrollbar discreto ─────────────────────────────────── */
 .category-list-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(72, 185, 230, 0.22) transparent;
+  scrollbar-color: #3A3A3A transparent;
 }
 
 .category-list-scroll::-webkit-scrollbar {
@@ -150,12 +150,12 @@ table td {
 }
 
 .category-list-scroll::-webkit-scrollbar-thumb {
-  background: rgba(72, 185, 230, 0.20);
+  background: #3A3A3A;
   border-radius: 999px;
 }
 
 .category-list-scroll:hover::-webkit-scrollbar-thumb {
-  background: rgba(72, 185, 230, 0.45);
+  background: #4A4A4A;
 }
 
 /* ─── Scrollbar global (webkit) ───────────────────────────────────────── */
@@ -165,17 +165,17 @@ table td {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.10);
+  background: transparent;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(56, 189, 248, 0.28);
+  background: #3A3A3A;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(56, 189, 248, 0.55);
+  background: #4A4A4A;
 }
 
 ::-webkit-scrollbar-corner {
@@ -185,7 +185,7 @@ table td {
 /* ─── Clase reutilizable .custom-scrollbar ────────────────────────────── */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(56, 189, 248, 0.45) rgba(15, 23, 42, 0.35);
+  scrollbar-color: #3A3A3A transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -194,18 +194,20 @@ table td {
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.20);
+  background: transparent;
   border-radius: 999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(var(--tenant-primary-rgb),0.45);
+  background: #3A3A3A;
   border-radius: 999px;
-  border: 2px solid rgba(15, 23, 42, 0.55);
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(var(--tenant-primary-rgb),0.65);
+  background: #4A4A4A;
+  background-clip: content-box;
 }
 
 .custom-scrollbar::-webkit-scrollbar-corner {
@@ -215,6 +217,8 @@ table td {
 /* Dark mode normalization for legacy saturated module classes */
 .dark [class*="dark:bg-blue-950"],
 .dark [class*="dark:bg-blue-900"],
+.dark [class*="dark:bg-indigo-950"],
+.dark [class*="dark:bg-indigo-900"],
 .dark [class*="dark:bg-cyan-950"],
 .dark [class*="dark:bg-cyan-900"],
 .dark [class*="dark:bg-purple-950"],
@@ -228,12 +232,29 @@ table td {
 .dark [class*="dark:bg-green-950"],
 .dark [class*="dark:bg-green-900"],
 .dark [class*="dark:bg-violet-950"],
-.dark [class*="dark:bg-violet-900"] {
+.dark [class*="dark:bg-violet-900"],
+.dark [class*="dark:bg-[#0D1526]"] {
+  background-color: #1B1C1F !important;
+}
+
+.dark [class*="dark:bg-slate-900"],
+.dark [class*="dark:bg-slate-950"] {
+  background-color: #1B1C1F !important;
+}
+
+.dark [class*="dark:bg-slate-800"] {
+  background-color: #202124 !important;
+}
+
+.dark [class*="dark:bg-[#0A1220]"],
+.dark [class*="dark:bg-[#060B14]"] {
   background-color: #202124 !important;
 }
 
 .dark [class*="dark:hover:bg-blue-950"]:hover,
 .dark [class*="dark:hover:bg-blue-900"]:hover,
+.dark [class*="dark:hover:bg-indigo-950"]:hover,
+.dark [class*="dark:hover:bg-indigo-900"]:hover,
 .dark [class*="dark:hover:bg-cyan-950"]:hover,
 .dark [class*="dark:hover:bg-cyan-900"]:hover,
 .dark [class*="dark:hover:bg-purple-950"]:hover,
@@ -247,18 +268,26 @@ table td {
 .dark [class*="dark:hover:bg-green-950"]:hover,
 .dark [class*="dark:hover:bg-green-900"]:hover,
 .dark [class*="dark:hover:bg-violet-950"]:hover,
-.dark [class*="dark:hover:bg-violet-900"]:hover {
+.dark [class*="dark:hover:bg-violet-900"]:hover,
+.dark [class*="dark:hover:bg-slate-900"]:hover,
+.dark [class*="dark:hover:bg-slate-950"]:hover,
+.dark [class*="dark:hover:bg-slate-800"]:hover,
+.dark [class*="dark:hover:bg-[#0A1220]"]:hover,
+.dark [class*="dark:hover:bg-[#060B14]"]:hover {
   background-color: #2A2B2F !important;
 }
 
 .dark [class*="dark:border-blue-"],
+.dark [class*="dark:border-indigo-"],
 .dark [class*="dark:border-cyan-"],
 .dark [class*="dark:border-purple-"],
 .dark [class*="dark:border-orange-"],
 .dark [class*="dark:border-red-"],
 .dark [class*="dark:border-emerald-"],
 .dark [class*="dark:border-green-"],
-.dark [class*="dark:border-violet-"] {
+.dark [class*="dark:border-violet-"],
+.dark [class*="dark:border-slate-"],
+.dark [class*="dark:border-[rgba(72,185,230"] {
   border-color: #303134 !important;
 }
 
