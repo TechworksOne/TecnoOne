@@ -12,6 +12,8 @@ import Modal from '../../components/ui/Modal';
 import ModalHistorialReparacion from '../../components/repairs/ModalHistorialReparacion';
 import NuevaReparacionModal from '../../components/repairs/NuevaReparacionModal';
 import PatternPreview from '../../components/repairs/PatternPreview';
+import { useEmpresa } from '../../store/useEmpresa';
+import { getImageUrl } from '../../utils/getImageUrl';
 import {
   getAllReparaciones,
   abrirContratoReparacion,
@@ -750,6 +752,7 @@ export default function RepairsPage() {
   const { repairs, deleteRepair, changeRepairState, updateRepair, searchRepairs, isLoading, validateStickerUniqueness } = useRepairs();
   const { user } = useAuth();
   const userIsAdmin = isAdmin(user?.roles);
+  const { empresa, loadEmpresa } = useEmpresa();
 
   const [searchQuery,    setSearchQuery]    = useState('');
   const [statusFilter,   setStatusFilter]   = useState('');
@@ -769,7 +772,7 @@ export default function RepairsPage() {
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [grupoFiltro, setGrupoFiltro]       = useState<GrupoFiltro>('proceso');
 
-  useEffect(() => { loadRepairs(); }, []);
+  useEffect(() => { loadRepairs(); loadEmpresa(); }, [loadEmpresa]);
 
   useEffect(() => {
     if (userIsAdmin) {
@@ -897,15 +900,50 @@ export default function RepairsPage() {
     const estadoLabel = STATUS_LABEL[r.estado] || r.estado.replace(/_/g, ' ');
     const creadoPor = r.recepcion.userRecepcion || 'N/A';
     const garantia = r.garantiaDias ? `${r.garantiaDias} días` : 'N/A';
-    const accesoTipo = r.recepcion.accesoTipo;
+    const recepcion = r.recepcion as any;
+    const accesoTipo = recepcion?.accesoTipo;
+    const accesoValor =
+      recepcion?.accesoValor ||
+      recepcion?.contrasena ||
+      recepcion?.contraseña ||
+      recepcion?.patronContrasena ||
+      recepcion?.patronContraseña ||
+      '';
     const accesoLabel = !accesoTipo || accesoTipo === 'ninguno'
-      ? null
+      ? (accesoValor ? `Contraseña/PIN: ${accesoValor}` : null)
       : accesoTipo === 'patron'
         ? 'Patrón'
-        : `PIN: ${r.recepcion.contraseña || r.recepcion.patronContraseña || ''}`;
+        : `PIN: ${accesoValor}`;
 
-    const esc = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const esc = (s: unknown) =>
+      String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const parsePattern = (value?: string | null): number[] => {
+      if (!value) return [];
+      const parsed = String(value).match(/[1-9]/g)?.map(Number) || [];
+      return Array.from(new Set(parsed)).filter(n => n >= 1 && n <= 9);
+    };
+
+    const patternNodes = parsePattern(accesoTipo === 'patron' ? accesoValor : '');
+    const patternSvg = patternNodes.length > 0 ? (() => {
+      const points = Array.from({ length: 9 }, (_, i) => ({
+        n: i + 1,
+        x: 8 + (i % 3) * 14,
+        y: 8 + Math.floor(i / 3) * 14,
+      }));
+      const linePoints = patternNodes
+        .map(n => points.find(p => p.n === n))
+        .filter(Boolean)
+        .map(p => `${p!.x},${p!.y}`)
+        .join(' ');
+      return `<svg class="pattern" viewBox="0 0 44 44" aria-label="Patr?n">${linePoints ? `<polyline points="${linePoints}" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />` : ''}${points.map(p => `<circle cx="${p.x}" cy="${p.y}" r="${patternNodes.includes(p.n) ? 2.5 : 1.8}" fill="${patternNodes.includes(p.n) ? '#000' : '#fff'}" stroke="#000" stroke-width="1" />`).join('')}</svg>`;
+    })() : '';
+
+    const logoUrl = empresa?.logo_url ? getImageUrl(empresa.logo_url) : '';
+    const empresaNombre = empresa?.nombre_comercial || empresa?.nombre || 'TecnoOne';
+    const logoHtml = logoUrl
+      ? `<img class="brand-logo" src="${esc(logoUrl)}" alt="${esc(empresaNombre)}" />`
+      : '<div class="brand-mark">TO</div>';
 
     const html = `<!DOCTYPE html>
 <html lang="es">
@@ -925,7 +963,8 @@ export default function RepairsPage() {
     }
     .ticket { width: 100%; }
     .header { text-align: center; border-bottom: 1px solid #000; padding-bottom: 0.5mm; margin-bottom: 0.5mm; display: flex; align-items: center; gap: 1mm; }
-    .brand-mark { height: 7mm; width: 7mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 5px; font-weight: bold; color: #fff; background: #48B9E6; border-radius: 1mm; }
+    .brand-mark { height: 7mm; width: 7mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 5px; font-weight: bold; color: #000; background: #fff; border: 1px solid #000; border-radius: 1mm; }
+    .brand-logo { max-height: 7mm; max-width: 14mm; object-fit: contain; filter: grayscale(1) contrast(1.25); -webkit-filter: grayscale(1) contrast(1.25); }
     .header-text { font-size: 8px; font-weight: bold; line-height: 1.2; }
     .header-text span { font-size: 6px; font-weight: normal; display: block; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1mm; }
@@ -933,6 +972,8 @@ export default function RepairsPage() {
     .row.full { grid-column: span 2; white-space: normal; word-break: break-word; }
     .b { font-weight: bold; }
     .nota { font-size: 5.5px; line-height: 1.3; max-height: 10mm; overflow: hidden; }
+    .access { display: flex; align-items: center; gap: 1mm; }
+    .pattern { width: 10mm; height: 10mm; flex-shrink: 0; }
     @media print {
       body { background: #fff !important; color: #000 !important; }
     }
@@ -940,7 +981,7 @@ export default function RepairsPage() {
 </head>
 <body>
 <div class="ticket">
-  <div class="header"><div class="brand-mark">TO</div><div class="header-text">TecnoOne<span>Ticket de reparaci\u00f3n</span></div></div>
+  <div class="header">${logoHtml}<div class="header-text">${esc(empresaNombre)}<span>Ticket de reparaci\u00f3n</span></div></div>
   <div class="grid">
     <div class="row full"><span class="b"># </span>${esc(r.id)}</div>
     <div class="row"><span class="b">Cliente: </span>${esc(r.clienteNombre || 'N/A')}</div>
@@ -950,7 +991,7 @@ export default function RepairsPage() {
     <div class="row"><span class="b">T\u00e9cnico: </span>${esc(tecnico)}</div>
     <div class="row"><span class="b">Prioridad: </span>${esc(r.prioridad)}</div>
     <div class="row"><span class="b">Recibido por: </span>${esc(creadoPor)}</div>
-    ${accesoLabel ? `<div class="row"><span class="b">Acceso: </span>${esc(accesoLabel)}</div>` : ''}
+    ${accesoLabel ? `<div class="row ${patternSvg ? 'full access' : ''}"><span class="b">Acceso: </span>${esc(accesoLabel)} ${patternSvg}</div>` : ''}
     <div class="row full nota"><span class="b">Nota: </span>${esc(problema)}</div>
   </div>
 </div>

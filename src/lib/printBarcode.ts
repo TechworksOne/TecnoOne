@@ -57,6 +57,7 @@ export function printBarcode(sku: string, name: string, type?: string): void {
     svg {
       max-width: 100%;
       height: auto;
+      shape-rendering: crispEdges;
     }
     .sku-text {
       font-size: 6px;
@@ -81,10 +82,11 @@ export function printBarcode(sku: string, name: string, type?: string): void {
     try {
       JsBarcode('#barcode', ${JSON.stringify(sku)}, {
         format: 'CODE128',
-        width: 1.5,
-        height: 28,
+        width: 2.4,
+        height: 34,
         displayValue: false,
-        margin: 0,
+        margin: 2,
+        fontSize: 10,
       });
     } catch (e) {
       console.error('Barcode error:', e);

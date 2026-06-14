@@ -271,20 +271,16 @@ async function tryLoadLogo(pdfDoc, logoUrl) {
     }
 
     const ext = path.extname(logoPath).toLowerCase();
-    if (ext === '.png') {
-      console.warn('[ContratoPDF] logo PNG ignorado temporalmente para evitar bloqueo en pdf-lib:', logoPath);
-      console.log('[ContratoPDF] logo cargado:', false);
-      return null;
-    }
-
-    if (!['.jpg', '.jpeg'].includes(ext)) {
+    if (!['.png', '.jpg', '.jpeg'].includes(ext)) {
       console.warn('[ContratoPDF] formato de logo no soportado:', ext);
       console.log('[ContratoPDF] logo cargado:', false);
       return null;
     }
 
     const logoBytes = fs.readFileSync(logoPath);
-    const logoImage = await pdfDoc.embedJpg(logoBytes);
+    const logoImage = ext === '.png'
+      ? await pdfDoc.embedPng(logoBytes)
+      : await pdfDoc.embedJpg(logoBytes);
 
     console.log('[ContratoPDF] logo cargado:', Boolean(logoImage));
     return logoImage || null;
@@ -478,14 +474,67 @@ function getAccesoLabel(accesoTipo) {
   return labels[normalized] || String(accesoTipo).trim();
 }
 
+function parsePatternNodes(value) {
+  if (isEmpty(value)) return [];
+  const matches = String(value).match(/[1-9]/g) || [];
+  return [...new Set(matches.map(Number))].filter((n) => n >= 1 && n <= 9);
+}
+
+function drawPatternGrid(page, value, x, y, size = 58) {
+  const nodes = parsePatternNodes(value);
+  if (nodes.length === 0) return false;
+
+  const gap = size / 2;
+  const radius = 3.2;
+  const points = Array.from({ length: 9 }, (_, i) => ({
+    n: i + 1,
+    x: x + (i % 3) * gap,
+    y: y - Math.floor(i / 3) * gap,
+  }));
+
+  for (let i = 0; i < nodes.length - 1; i += 1) {
+    const a = points.find((p) => p.n === nodes[i]);
+    const b = points.find((p) => p.n === nodes[i + 1]);
+    if (a && b) {
+      page.drawLine({
+        start: { x: a.x, y: a.y },
+        end: { x: b.x, y: b.y },
+        thickness: 1.8,
+        color: COLOR_TEXT,
+      });
+    }
+  }
+
+  for (const point of points) {
+    const selected = nodes.includes(point.n);
+    page.drawCircle({
+      x: point.x,
+      y: point.y,
+      size: selected ? radius + 0.8 : radius,
+      color: selected ? COLOR_TEXT : rgb(1, 1, 1),
+      borderColor: COLOR_TEXT,
+      borderWidth: 0.8,
+    });
+  }
+
+  return true;
+}
+
 function drawAccesoEquipo(page, datos, x, y, fonts) {
   const accesoTipo = normalizeAccesoTipo(datos.accesoTipo);
   const tieneAccesoTipo = !isEmpty(datos.accesoTipo);
   const fallbackPatron = !isEmpty(datos.patronContrasena) ? datos.patronContrasena : null;
+  const drawPatternValue = (label, value) => {
+    let nextY = drawLabelValue(page, label, value || 'registrado', x, y, fonts);
+    if (drawPatternGrid(page, value, x + 18, nextY - 8, 52)) {
+      nextY -= 68;
+    }
+    return nextY;
+  };
 
   if (tieneAccesoTipo && accesoTipo === 'ninguno') {
     if (fallbackPatron) {
-      return drawLabelValue(page, 'Patrón', fallbackPatron, x, y, fonts);
+      return drawPatternValue('Patron', fallbackPatron);
     }
 
     drawSafeText(page, 'No registrado / no aplica', x, y, {
@@ -494,6 +543,13 @@ function drawAccesoEquipo(page, datos, x, y, fonts) {
       size: FONT_NORMAL,
     });
     return y - 17;
+  }
+
+  if (tieneAccesoTipo && ['patron', 'patr?n', 'pattern'].includes(accesoTipo)) {
+    const valor = datos.mostrarValorAcceso !== false && !isEmpty(datos.accesoValor)
+      ? datos.accesoValor
+      : fallbackPatron;
+    return drawPatternValue(getAccesoLabel(datos.accesoTipo), valor);
   }
 
   if (tieneAccesoTipo) {
@@ -508,7 +564,7 @@ function drawAccesoEquipo(page, datos, x, y, fonts) {
   }
 
   if (fallbackPatron) {
-    return drawLabelValue(page, 'Patrón', fallbackPatron, x, y, fonts);
+    return drawPatternValue('Patron', fallbackPatron);
   }
 
   drawSafeText(page, 'No registrado / no aplica', x, y, {
@@ -518,7 +574,6 @@ function drawAccesoEquipo(page, datos, x, y, fonts) {
   });
   return y - 17;
 }
-
 async function generarContrato(datos) {
   const {
     reparacionId,
@@ -526,6 +581,7 @@ async function generarContrato(datos) {
     clienteNombre = '',
     clienteTel = '',
     clienteEmail = '',
+    clienteNit = '',
     tipoEquipo = '',
     marca = '',
     modelo = '',
@@ -592,6 +648,7 @@ async function generarContrato(datos) {
   y = drawLabelValue(page1, 'Nombre', clienteNombre, MARGIN_X, y, fonts);
   y = drawLabelValue(page1, 'Telefono', clienteTel, MARGIN_X, y, fonts);
   y = drawLabelValue(page1, 'Email', clienteEmail, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'NIT', clienteNit, MARGIN_X, y, fonts);
 
   y -= 8;
   drawSectionTitle(page1, 'Equipo', MARGIN_X, y, fonts, accentColor);

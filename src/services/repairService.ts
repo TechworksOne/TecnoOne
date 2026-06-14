@@ -250,12 +250,40 @@ export const abrirContratoReparacion = async (reparacionId: string): Promise<voi
 
     const blob = new Blob([response.data], { type: 'application/pdf' });
     const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.click();
-    window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+    const width = Math.floor(window.screen.availWidth * 0.9);
+    const height = Math.floor(window.screen.availHeight * 0.85);
+    const left = Math.max(0, Math.floor((window.screen.availWidth - width) / 2));
+    const top = Math.max(0, Math.floor((window.screen.availHeight - height) / 2));
+    const preview = window.open('', '_blank', `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+
+    if (!preview) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+      return;
+    }
+
+    preview.document.open();
+    preview.document.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Contrato ${reparacionId}</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; background: #111; }
+    iframe { width: 90vw; height: 85vh; border: 0; display: block; margin: 4vh auto; background: #fff; }
+  </style>
+</head>
+<body>
+  <iframe src="${url}" title="Contrato ${reparacionId}"></iframe>
+  <script>
+    window.addEventListener('beforeunload', function () {
+      URL.revokeObjectURL(${JSON.stringify(url)});
+    });
+  <\/script>
+</body>
+</html>`);
+    preview.document.close();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 120_000);
   } catch (error) {
     if (axios.isAxiosError(error)) {
       if (error.response?.status === 404) {

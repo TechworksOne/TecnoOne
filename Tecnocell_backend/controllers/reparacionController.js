@@ -387,7 +387,9 @@ exports.createReparacion = async (req, res) => {
 
       try {
         const [empresas] = await db.query(
-          `SELECT id, nombre, razon_social, nit, telefono, email, direccion, logo_url, color_primario
+          `SELECT id, nombre, razon_social, nit, telefono,
+                  COALESCE(NULLIF(correo, ''), email) AS email,
+                  direccion, logo_url, color_primario
            FROM empresas
            WHERE id = ?
            LIMIT 1`,
@@ -413,6 +415,20 @@ exports.createReparacion = async (req, res) => {
 
       const firmaReceptorUrl = await getAuthUserFirmaUrl(req, db);
       const receptorUsuario = req.user?.username || req.user?.email || null;
+      let clienteContratoEmail = clienteEmail || '';
+      let clienteContratoNit = null;
+
+      if (clienteId) {
+        const [[clienteContrato]] = await db.query(
+          `SELECT email, nit
+           FROM clientes
+           WHERE id = ? AND empresa_id = ?
+           LIMIT 1`,
+          [clienteId, empresaId]
+        );
+        clienteContratoEmail = clienteContrato?.email || clienteContratoEmail;
+        clienteContratoNit = clienteContrato?.nit || null;
+      }
 
       await contratoService.generarContrato({
         reparacionId:  repairId,
@@ -420,7 +436,8 @@ exports.createReparacion = async (req, res) => {
         negocio:       negocioContrato,
         clienteNombre,
         clienteTel:    clienteTelefono,
-        clienteEmail,
+        clienteEmail: clienteContratoEmail,
+        clienteNit:   clienteContratoNit,
         tipoEquipo,
         marca,
         modelo,
