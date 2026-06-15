@@ -2,14 +2,20 @@ const express = require('express');
 const router = express.Router();
 const categoryController = require('../controllers/categoryController');
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
-const soloAdmin = [verifyToken, verifyRole('admin')];
+router.use(verifyToken);
+router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
-// Rutas públicas (sin autenticación) - solo lectura
+const soloAdmin = [verifyRole('admin', 'ADMINISTRADOR')];
+
+// Rutas privadas de lectura para catálogos por empresa
 router.get('/', categoryController.getAllCategories);
 router.get('/:categoryId/subcategories', categoryController.getSubcategories);
 
-// Rutas protegidas (requieren autenticación) - escritura
+// Rutas protegidas de escritura por empresa
 router.post('/', ...soloAdmin, categoryController.createCategory);
 router.post('/subcategories', ...soloAdmin, categoryController.createSubcategory);
 router.put('/:id', ...soloAdmin, categoryController.updateCategory);

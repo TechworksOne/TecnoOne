@@ -3,16 +3,22 @@ const express = require('express');
 const router = express.Router();
 const equipoController = require('../controllers/equipoController');
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
-const soloAdmin = [verifyToken, verifyRole('admin')];
+router.use(verifyToken);
+router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
-// Rutas para MARCAS
+const soloAdmin = [verifyRole('admin', 'ADMINISTRADOR')];
+
+// Rutas para MARCAS por empresa
 router.get('/marcas', equipoController.getAllMarcas);
 router.post('/marcas', ...soloAdmin, equipoController.createMarca);
 router.put('/marcas/:id', ...soloAdmin, equipoController.updateMarca);
 router.delete('/marcas/:id', ...soloAdmin, equipoController.deleteMarca);
 
-// Rutas para MODELOS
+// Rutas para MODELOS por empresa
 router.get('/modelos', equipoController.getAllModelos);
 router.get('/marcas/:marca_id/modelos', equipoController.getModelosByMarca);
 router.post('/modelos', ...soloAdmin, equipoController.createModelo);
