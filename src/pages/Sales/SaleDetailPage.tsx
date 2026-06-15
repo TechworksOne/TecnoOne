@@ -7,13 +7,20 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import { useToast } from '../../components/ui/Toast';
 import { useSales } from '../../store/useSales';
+import { useEmpresa } from '../../store/useEmpresa';
 import { formatMoney, formatDate } from '../../lib/format';
+import { printSaleReceipt } from '../../lib/printSaleReceipt';
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const toast = useToast();
   const { getSaleById } = useSales();
+  const { empresa, loadEmpresa } = useEmpresa();
+
+  useEffect(() => {
+    loadEmpresa();
+  }, [loadEmpresa]);
 
   const sale = id ? getSaleById(id) : null;
 
@@ -27,7 +34,7 @@ export default function SaleDetailPage() {
   if (!sale) return null;
 
   const handlePrint = () => {
-    window.print();
+    printSaleReceipt(sale, empresa);
   };
 
   const getMetodoIcon = (metodo: string) => {

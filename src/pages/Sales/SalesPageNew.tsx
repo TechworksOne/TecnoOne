@@ -15,9 +15,11 @@ import QuotePicker from '../../components/sales/QuotePicker';
 import SaleFormModal from '../../components/sales/SaleFormModal';
 import { useToast } from '../../components/ui/Toast';
 import { useAuth } from '../../store/useAuth';
+import { useEmpresa } from '../../store/useEmpresa';
 import * as ventaService from '../../services/ventaService';
 import type { VentaData, VentaEstadisticas } from '../../services/ventaService';
 import { formatDate } from '../../lib/format';
+import { printSaleReceipt } from '../../lib/printSaleReceipt';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -63,6 +65,11 @@ export default function SalesPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
+  const { empresa, loadEmpresa } = useEmpresa();
+
+  useEffect(() => {
+    loadEmpresa();
+  }, [loadEmpresa]);
 
   // ── data ──
   const [ventas, setVentas] = useState<VentaData[]>([]);
@@ -196,8 +203,7 @@ export default function SalesPage() {
   };
 
   const handlePrint = (v: VentaData) => {
-    navigate(`/ventas/${v.id}`);
-    setTimeout(() => window.print(), 600);
+    printSaleReceipt(v, empresa);
   };
 
   const clearFilters = () => {
