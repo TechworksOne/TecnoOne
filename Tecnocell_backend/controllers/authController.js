@@ -159,6 +159,7 @@ const getMe = async (req, res) => {
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 
@@ -170,15 +171,12 @@ const uploadMe = multer({
       cb(null, dir);
     },
     filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase();
+      const ext = getSafeImageExtension(file);
       cb(null, `perfil${ext}`);
     },
   }),
   limits: { fileSize: 5 * 1024 * 1024, fieldSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (/^image\//.test(file.mimetype)) cb(null, true);
-    else cb(new Error('Solo se permiten imágenes'));
-  },
+  fileFilter: imageFileFilter,
 });
 
 const updateMePerfil = async (req, res) => {

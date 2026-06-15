@@ -3,6 +3,7 @@ const db = require('../config/database');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 
@@ -39,17 +40,14 @@ const storage = multer.diskStorage({
     cb(null, tempPath);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
+    const ext = getSafeImageExtension(file);
     cb(null, `perfil_${Date.now()}${ext}`);
   },
 });
 
 const upload = multer({
   storage,
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Solo se permiten imágenes'), false);
-  },
+  fileFilter: imageFileFilter,
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 

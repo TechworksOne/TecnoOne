@@ -4,6 +4,7 @@ const { parseLimit } = require('../utils/pagination');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { imageFileFilter, getSafeImageExtension, sanitizeBaseName } = require('../utils/uploadSecurity');
 
 // Ruta base de uploads — siempre absoluta para ser compatible con Docker bind mount
 // Dentro del contenedor es /app/uploads (mapeado a /var/www/Tecnocell_storage/uploads en el host)
@@ -22,21 +23,14 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const timestamp = Date.now();
-    const ext = path.extname(file.originalname);
-    const basename = path.basename(file.originalname, ext);
-    const sanitized = basename.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ext = getSafeImageExtension(file);
+    const sanitized = sanitizeBaseName(file.originalname, 'ingreso');
     
     cb(null, `ingreso_${sanitized}_${timestamp}${ext}`);
   }
 });
 
-const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
-    cb(null, true);
-  } else {
-    cb(new Error('Solo se permiten archivos de imagen'), false);
-  }
-};
+const fileFilter = imageFileFilter;
 
 const upload = multer({
   storage: storage,

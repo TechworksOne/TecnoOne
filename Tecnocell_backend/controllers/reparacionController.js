@@ -4,6 +4,7 @@ const { parseLimit } = require('../utils/pagination');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { imageFileFilter, getSafeImageExtension, sanitizeBaseName } = require('../utils/uploadSecurity');
 const cajaController = require('./cajaController');
 const contratoService = require('../services/contratoService');
 
@@ -110,11 +111,10 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const timestamp = Date.now();
-    const ext = path.extname(file.originalname);
-    const basename = path.basename(file.originalname, ext);
+    const ext = getSafeImageExtension(file);
     
     // Sanitizar nombre
-    const sanitized = basename.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const sanitized = sanitizeBaseName(file.originalname, 'reparacion');
     
     // hist_123456789.jpg
     cb(null, `${sanitized}_${timestamp}${ext}`);
@@ -122,14 +122,7 @@ const storage = multer.diskStorage({
 });
 
 // Filtros de archivo
-const fileFilter = (req, file, cb) => {
-  // Solo permitir imágenes
-  if (file.mimetype.startsWith('image/')) {
-    cb(null, true);
-  } else {
-    cb(new Error('Solo se permiten archivos de imagen'), false);
-  }
-};
+const fileFilter = imageFileFilter;
 
 // Configuración de multer
 const upload = multer({

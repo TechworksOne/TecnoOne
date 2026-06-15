@@ -2,6 +2,7 @@ const db = require('../config/database');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 const MONEDAS_PERMITIDAS = {
@@ -95,17 +96,14 @@ const logoStorage = multer.diskStorage({
     cb(null, destDir);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.png';
+    const ext = getSafeImageExtension(file, '.png');
     cb(null, `logo_${Date.now()}${ext}`);
   },
 });
 
 const uploadLogo = multer({
   storage: logoStorage,
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype && file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Solo se permiten imágenes'), false);
-  },
+  fileFilter: imageFileFilter,
   limits: { fileSize: 3 * 1024 * 1024 },
 });
 

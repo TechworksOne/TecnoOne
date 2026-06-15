@@ -3,6 +3,7 @@ const { parsePagination } = require('../utils/pagination');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { imageFileFilter, getSafeImageExtension, sanitizeBaseName } = require('../utils/uploadSecurity');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 const REPUESTOS_UPLOAD_DIR = path.join(UPLOADS_BASE, 'repuestos');
@@ -40,30 +41,16 @@ const storageRepuestos = multer.diskStorage({
     cb(null, REPUESTOS_UPLOAD_DIR);
   },
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const allowedExt = ['.jpg', '.jpeg', '.png', '.webp'];
-    const safeExt = allowedExt.includes(ext) ? ext : '.jpg';
+    const ext = getSafeImageExtension(file);
+    const baseName = sanitizeBaseName(file.originalname, 'repuesto').substring(0, 40);
 
-    const baseName = path
-      .basename(file.originalname, ext)
-      .replace(/[^a-zA-Z0-9-_]/g, '_')
-      .substring(0, 40);
-
-    const filename = `repuesto_${Date.now()}_${Math.round(Math.random() * 1e9)}_${baseName}${safeExt}`;
+    const filename = `repuesto_${Date.now()}_${Math.round(Math.random() * 1e9)}_${baseName}${ext}`;
 
     cb(null, filename);
   },
 });
 
-const fileFilterRepuestos = (_req, file, cb) => {
-  const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-
-  if (!allowedMimeTypes.includes(file.mimetype)) {
-    return cb(new Error('Solo se permiten imágenes JPG, PNG o WEBP'), false);
-  }
-
-  cb(null, true);
-};
+const fileFilterRepuestos = imageFileFilter;
 
 const uploadRepuestos = multer({
   storage: storageRepuestos,
