@@ -432,6 +432,8 @@ exports.createReparacion = async (req, res) => {
       // Anticipo
       montoAnticipo = 0,
       metodoAnticipo,
+      cuentaBancariaId = null,
+      cuentaBancariaAnticipoId = null,
       // Items
       items = [],
       manoDeObra = 0,
@@ -467,6 +469,8 @@ exports.createReparacion = async (req, res) => {
     const impuestosCentavos = Math.round(totalSinImpuestos * 0.12);
     const totalCentavos = totalSinImpuestos + impuestosCentavos;
     const anticipoCentavos = quetzalesACentavos(montoAnticipo);
+    const metodoAnticipoNormalizado = anticipoCentavos > 0 ? (metodoAnticipo || 'efectivo') : null;
+    const cuentaAnticipoId = cuentaBancariaAnticipoId || cuentaBancariaId || null;
 
     const precioRevisionContrato = normalizePrecioRevisionContrato(req.body);
     const condicionesServicioContrato = normalizeCondicionesServicioContrato(req.body);
@@ -492,7 +496,7 @@ exports.createReparacion = async (req, res) => {
         estadoFisico, diagnosticoInicial,
         estado, prioridad,
         manoObraCentavos, subtotalCentavos, impuestosCentavos, totalCentavos,
-        anticipoCentavos, anticipoCentavos, metodoAnticipo,
+        anticipoCentavos, anticipoCentavos, metodoAnticipoNormalizado,
         fechaIngreso || new Date().toISOString().split('T')[0], observaciones,
         precioRevisionContrato, condicionesServicioContrato,
         authUserName
@@ -536,7 +540,7 @@ exports.createReparacion = async (req, res) => {
     
     // 4. Crear entrada inicial en historial
     const notaInicial = anticipoCentavos > 0
-      ? `Reparación creada. Anticipo recibido: Q${centavosAQuetzales(anticipoCentavos).toFixed(2)} (${metodoAnticipo})`
+      ? `Reparación creada. Anticipo registrado: Q${centavosAQuetzales(anticipoCentavos).toFixed(2)} (${metodoAnticipoNormalizado}) pendiente de confirmación en Caja/Bancos`
       : 'Reparación creada';
     
     const [historialResult] = await connection.query(
@@ -547,6 +551,136 @@ exports.createReparacion = async (req, res) => {
     );
     
     const historialId = historialResult.insertId;
+
+    // 4.1. Registrar anticipo como movimiento pendiente en Caja/Bancos
+    if (anticipoCentavos > 0) {
+      const montoDecimal = centavosAQuetzales(anticipoCentavos);
+      const conceptoAnticipo = `Anticipo de reparación ${repairId}`;
+      const metodoLabel =
+        metodoAnticipoNormalizado === 'efectivo' ? 'Efectivo'
+        : metodoAnticipoNormalizado === 'transferencia' ? 'Transferencia'
+        : metodoAnticipoNormalizado === 'tarjeta_bac' ? 'Tarjeta BAC'
+        : metodoAnticipoNormalizado === 'tarjeta_neonet' ? 'Tarjeta Neonet'
+        : 'Tarjeta';
+
+      let cuentaUsadaId = null;
+
+      if (metodoAnticipoNormalizado === 'efectivo') {
+        await connection.query(
+          `INSERT INTO caja_chica
+           (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones, referencia_tipo, referencia_id)
+           VALUES (?, 'INGRESO', ?, ?, 'ANTICIPO_REPARACION', 'PENDIENTE', ?, 'Anticipo registrado desde recepción de reparación', 'REPARACION', ?)`,
+          [empresaId, montoDecimal, conceptoAnticipo, authUserName || 'Sistema', repairId]
+        );
+      } else if (metodoAnticipoNormalizado === 'transferencia') {
+        if (!cuentaAnticipoId) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'Debe seleccionar una cuenta bancaria para el anticipo por transferencia'
+          });
+        }
+
+        const [cuentas] = await connection.query(
+          `SELECT id FROM cuentas_bancarias
+           WHERE id = ? AND empresa_id = ? AND activa = TRUE
+           LIMIT 1`,
+          [cuentaAnticipoId, empresaId]
+        );
+
+        if (cuentas.length === 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'Cuenta bancaria no encontrada para esta empresa'
+          });
+        }
+
+        cuentaUsadaId = Number(cuentaAnticipoId);
+
+        await connection.query(
+          `INSERT INTO movimientos_bancarios
+           (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones, referencia_tipo, referencia_id)
+           VALUES (?, ?, 'INGRESO', ?, ?, 'ANTICIPO_REPARACION', 'PENDIENTE', ?, 'Anticipo por transferencia registrado desde recepción de reparación', 'REPARACION', ?)`,
+          [empresaId, cuentaUsadaId, montoDecimal, conceptoAnticipo, authUserName || 'Sistema', repairId]
+        );
+      } else if (metodoAnticipoNormalizado === 'tarjeta_bac') {
+        const [cuentaBac] = await connection.query(
+          `SELECT id FROM cuentas_bancarias
+           WHERE empresa_id = ?
+             AND (nombre LIKE '%BAC%' OR pos_asociado LIKE '%BAC%')
+             AND activa = TRUE
+           ORDER BY id
+           LIMIT 1`,
+          [empresaId]
+        );
+
+        cuentaUsadaId = cuentaBac.length > 0 ? cuentaBac[0].id : null;
+
+        if (!cuentaUsadaId) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'No hay una cuenta bancaria activa asociada a POS BAC'
+          });
+        }
+
+        await connection.query(
+          `INSERT INTO movimientos_bancarios
+           (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones, referencia_tipo, referencia_id)
+           VALUES (?, ?, 'INGRESO', ?, ?, 'ANTICIPO_REPARACION', 'PENDIENTE', ?, 'Anticipo por tarjeta BAC registrado desde recepción de reparación', 'REPARACION', ?)`,
+          [empresaId, cuentaUsadaId, montoDecimal, conceptoAnticipo, authUserName || 'Sistema', repairId]
+        );
+      } else if (metodoAnticipoNormalizado === 'tarjeta_neonet') {
+        const [cuentaNeonet] = await connection.query(
+          `SELECT id FROM cuentas_bancarias
+           WHERE empresa_id = ?
+             AND (nombre LIKE '%Industrial%' OR nombre LIKE '%Neonet%' OR pos_asociado LIKE '%NEONET%' OR pos_asociado LIKE '%Industrial%')
+             AND activa = TRUE
+           ORDER BY id
+           LIMIT 1`,
+          [empresaId]
+        );
+
+        cuentaUsadaId = cuentaNeonet.length > 0 ? cuentaNeonet[0].id : null;
+
+        if (!cuentaUsadaId) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'No hay una cuenta bancaria activa asociada a POS Neonet/Industrial'
+          });
+        }
+
+        await connection.query(
+          `INSERT INTO movimientos_bancarios
+           (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones, referencia_tipo, referencia_id)
+           VALUES (?, ?, 'INGRESO', ?, ?, 'ANTICIPO_REPARACION', 'PENDIENTE', ?, 'Anticipo por tarjeta Neonet registrado desde recepción de reparación', 'REPARACION', ?)`,
+          [empresaId, cuentaUsadaId, montoDecimal, conceptoAnticipo, authUserName || 'Sistema', repairId]
+        );
+      }
+
+      if (cuentaUsadaId) {
+        await connection.query(
+          `UPDATE reparaciones
+           SET cuenta_bancaria_anticipo_id = ?
+           WHERE id = ? AND empresa_id = ?`,
+          [cuentaUsadaId, repairId, empresaId]
+        );
+      }
+
+      await connection.query(
+        `INSERT INTO reparaciones_historial
+         (reparacion_id, estado, nota, user_nombre, tipo_evento, estado_anterior, descripcion)
+         VALUES (?, 'ANTICIPO_REGISTRADO', ?, ?, 'ANTICIPO_REGISTRADO', NULL, ?)`,
+        [
+          repairId,
+          `Anticipo Q${montoDecimal.toFixed(2)} (${metodoLabel}) – pendiente de confirmación en Caja/Bancos`,
+          authUserName || 'Sistema',
+          `Anticipo de Q${montoDecimal.toFixed(2)} registrado por ${metodoLabel}. Pendiente de confirmación.`
+        ]
+      );
+    }
     
     // 5. Si hay fotos de recepción, asociarlas
     if (fotosRecepcion && fotosRecepcion.length > 0) {

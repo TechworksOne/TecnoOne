@@ -165,6 +165,8 @@ export const createReparacion = async (
       // Anticipo
       montoAnticipo: repairData.recepcion.montoAnticipo || 0,
       metodoAnticipo: repairData.recepcion.metodoAnticipo,
+      cuentaBancariaId: (repairData.recepcion as any).cuentaBancariaId ?? null,
+      cuentaBancariaAnticipoId: (repairData.recepcion as any).cuentaBancariaId ?? null,
 
       // Items
       items: repairData.items,

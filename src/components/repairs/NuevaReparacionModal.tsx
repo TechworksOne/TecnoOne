@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 import {
   X, User, Smartphone, FileText, Save, Printer,
   ArrowLeft, ChevronRight, AlertCircle, CheckCircle2,
@@ -12,6 +13,7 @@ import Select from '../ui/Select';
 import equipoService from '../../services/equipoService';
 import type { EquipoMarca, EquipoModelo, TipoEquipo } from '../../types/equipo';
 import { abrirContratoReparacion, createReparacion } from '../../services/repairService';
+import API_URL from '../../services/config';
 import { useAuth } from '../../store/useAuth';
 import { useEmpresa } from '../../store/useEmpresa';
 import PatternLock from './PatternLock';
@@ -21,6 +23,14 @@ import ConfirmModal from '../ui/ConfirmModal';
 // ── Types ────────────────────────────────────────────────────────────────────
 type Step = 'cliente' | 'equipo' | 'resumen';
 
+interface CuentaBancaria {
+  id: number;
+  nombre: string;
+  tipo_cuenta?: string;
+  numero_cuenta?: string;
+  pos_asociado?: string | null;
+}
+
 interface EquipmentData {
   tipo: string;
   marca: string;
@@ -29,6 +39,11 @@ interface EquipmentData {
   imei: string;
   accesoTipo: 'ninguno' | 'pin' | 'patron';
   accesoValor: string;
+  dejoAnticipo: boolean;
+  montoAnticipo: string;
+  metodoAnticipo: 'efectivo' | 'transferencia' | 'tarjeta_bac' | 'tarjeta_neonet';
+  recargoPosPorcentaje: string;
+  cuentaBancariaId: string;
   diagnostico: string;
 }
 
@@ -51,6 +66,11 @@ const INITIAL_EQUIPMENT: EquipmentData = {
   imei: '',
   accesoTipo: 'ninguno',
   accesoValor: '',
+  dejoAnticipo: false,
+  montoAnticipo: '',
+  metodoAnticipo: 'efectivo',
+  recargoPosPorcentaje: '0',
+  cuentaBancariaId: '',
   diagnostico: '',
 };
 
@@ -62,6 +82,11 @@ function hasDirtyData(
     !!customer ||
     equip.marca !== '' ||
     equip.modelo !== '' ||
+    equip.dejoAnticipo ||
+    equip.montoAnticipo !== '' ||
+    equip.metodoAnticipo !== 'efectivo' ||
+    equip.recargoPosPorcentaje !== '0' ||
+    equip.cuentaBancariaId !== '' ||
     equip.diagnostico !== ''
   );
 }
@@ -90,6 +115,7 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
   const [nuevoModelo, setNuevoModelo] = useState('');
   const [marcaError, setMarcaError] = useState<string | null>(null);
   const [modeloError, setModeloError] = useState<string | null>(null);
+  const [cuentasBancarias, setCuentasBancarias] = useState<CuentaBancaria[]>([]);
   const [patternArr, setPatternArr]   = useState<number[]>([]);
   const [showPin, setShowPin]         = useState(false);
 
@@ -121,6 +147,7 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
       );
       setCondicionesServicioContrato(empresa?.condiciones_servicio_contrato || '');
       loadEmpresa().catch(() => undefined);
+      loadBancos();
     }
   }, [isOpen, empresa?.precio_revision_default, empresa?.condiciones_servicio_contrato, loadEmpresa]);
 
@@ -167,6 +194,19 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
   }, [isOpen]);
 
   // ── API helpers ────────────────────────────────────────────────────────────
+  const loadBancos = async () => {
+    try {
+      const token = sessionStorage.getItem('token') || localStorage.getItem('token');
+      const res = await axios.get(`${API_URL}/caja/bancos`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        validateStatus: s => s < 500,
+      });
+      if (res.data?.success) setCuentasBancarias(res.data.data || []);
+    } catch {
+      setCuentasBancarias([]);
+    }
+  };
+
   const loadMarcas = async (tipo: TipoEquipo) => {
     setLoadingMarcas(true);
     try { setMarcas(await equipoService.getAllMarcas(tipo)); }
@@ -224,6 +264,8 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
       if (!equipmentData.marca.trim() || !equipmentData.modelo.trim()) return false;
       if (equipmentData.accesoTipo === 'pin' && !equipmentData.accesoValor.trim()) return false;
       if (equipmentData.accesoTipo === 'patron' && patternArr.length < 4) return false;
+      if (equipmentData.dejoAnticipo && Number(equipmentData.montoAnticipo) <= 0) return false;
+      if (equipmentData.dejoAnticipo && equipmentData.metodoAnticipo === 'transferencia' && !equipmentData.cuentaBancariaId) return false;
       return true;
     }
     return true;
@@ -290,6 +332,11 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
           fotosRecepcion: [],
           fechaRecepcion,
           userRecepcion: authUserName,
+          montoAnticipo: equipmentData.dejoAnticipo ? Number(equipmentData.montoAnticipo) : 0,
+          metodoAnticipo: equipmentData.dejoAnticipo ? equipmentData.metodoAnticipo : undefined,
+          cuentaBancariaId: equipmentData.dejoAnticipo && equipmentData.metodoAnticipo === 'transferencia'
+            ? Number(equipmentData.cuentaBancariaId)
+            : null,
         },
         estado: 'RECIBIDA',
         prioridad: 'MEDIA',
@@ -347,6 +394,31 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
   // ── Input class helpers ────────────────────────────────────────────────────
   const inputCls = 'w-full px-3 py-2 rounded-xl text-sm border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border-slate-300 dark:border-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition';
   const labelCls = 'block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wide';
+
+  const esMetodoPos =
+    equipmentData.metodoAnticipo === 'tarjeta_bac' ||
+    equipmentData.metodoAnticipo === 'tarjeta_neonet';
+
+  const montoAnticipoBase = Number(equipmentData.montoAnticipo) || 0;
+  const recargoPosPorcentaje = Math.max(0, Number(equipmentData.recargoPosPorcentaje) || 0);
+  const totalCobrarPos = montoAnticipoBase * (1 + recargoPosPorcentaje / 100);
+  const recargoPosMonto = Math.max(0, totalCobrarPos - montoAnticipoBase);
+
+  const cuentaTexto = (c: CuentaBancaria) =>
+    `${c.nombre || ''} ${c.pos_asociado || ''}`.toLowerCase();
+
+  const tieneCuentaBac = cuentasBancarias.some(c => cuentaTexto(c).includes('bac'));
+
+  const tieneCuentaNeonet = cuentasBancarias.some(c => {
+    const txt = cuentaTexto(c);
+    return txt.includes('neonet') || txt.includes('industrial');
+  });
+  const metodoAnticipoLabel: Record<EquipmentData['metodoAnticipo'], string> = {
+    efectivo: 'efectivo',
+    transferencia: 'transferencia',
+    tarjeta_bac: 'tarjeta BAC',
+    tarjeta_neonet: 'tarjeta Neonet',
+  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
@@ -652,6 +724,133 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
                 </div>
               )}
 
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wide">Anticipo</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Registra el monto recibido al crear la orden</p>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={equipmentData.dejoAnticipo}
+                      onChange={e => setEquipmentData({
+                        ...equipmentData,
+                        dejoAnticipo: e.target.checked,
+                        montoAnticipo: e.target.checked ? equipmentData.montoAnticipo : '',
+                      })}
+                      className="w-4 h-4 rounded accent-blue-600"
+                    />
+                    Cliente deja anticipo
+                  </label>
+                </div>
+
+                {equipmentData.dejoAnticipo && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelCls}>Monto del anticipo <span className="text-red-500">*</span></label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={equipmentData.montoAnticipo}
+                        onChange={e => setEquipmentData({ ...equipmentData, montoAnticipo: e.target.value })}
+                        placeholder="0.00"
+                        className={inputCls}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Método</label>
+                      <select
+                        value={equipmentData.metodoAnticipo}
+                        onChange={e => setEquipmentData({
+                          ...equipmentData,
+                          metodoAnticipo: e.target.value as EquipmentData['metodoAnticipo'],
+                          recargoPosPorcentaje: (e.target.value === 'tarjeta_bac' || e.target.value === 'tarjeta_neonet')
+                            ? equipmentData.recargoPosPorcentaje
+                            : '0',
+                          cuentaBancariaId: '',
+                        })}
+                        className={inputCls}
+                      >
+                        <option value="efectivo">Efectivo</option>
+                        <option value="transferencia">Transferencia</option>
+                        {tieneCuentaBac && <option value="tarjeta_bac">Tarjeta BAC</option>}
+                        {tieneCuentaNeonet && <option value="tarjeta_neonet">Tarjeta Neonet</option>}
+                      </select>
+                      {(!tieneCuentaBac || !tieneCuentaNeonet) && (
+                        <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                          Los métodos POS solo aparecen si existe una cuenta bancaria activa asociada.
+                        </p>
+                      )}
+                    </div>
+
+                    {esMetodoPos && (
+                      <div className="sm:col-span-2 rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 p-3 space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className={labelCls}>% recargo POS</label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                min="0"
+                                max="25"
+                                step="0.01"
+                                value={equipmentData.recargoPosPorcentaje}
+                                onChange={e => setEquipmentData({ ...equipmentData, recargoPosPorcentaje: e.target.value })}
+                                placeholder="Ej. 5"
+                                className={`${inputCls} pr-8`}
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">%</span>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl bg-white dark:bg-slate-900 border border-orange-200 dark:border-orange-800 p-3">
+                            <p className="text-[10px] uppercase tracking-wide text-orange-700 dark:text-orange-300 font-bold">
+                              Total a cobrar al cliente
+                            </p>
+                            <p className="text-xl font-bold text-orange-700 dark:text-orange-300">
+                              Q{totalCobrarPos.toFixed(2)}
+                            </p>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                              Base Q{montoAnticipoBase.toFixed(2)} + recargo Q{recargoPosMonto.toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <p className="text-[11px] text-orange-700 dark:text-orange-300">
+                          Solo Q{montoAnticipoBase.toFixed(2)} se registrará como anticipo pendiente en Banco.
+                          El recargo POS solo se usa para indicar cuánto cobrar al cliente.
+                        </p>
+                      </div>
+                    )}
+
+                    {equipmentData.metodoAnticipo === 'transferencia' && (
+                      <div className="sm:col-span-2">
+                        <label className={labelCls}>Cuenta bancaria <span className="text-red-500">*</span></label>
+                        <select
+                          value={equipmentData.cuentaBancariaId}
+                          onChange={e => setEquipmentData({ ...equipmentData, cuentaBancariaId: e.target.value })}
+                          className={inputCls}
+                        >
+                          <option value="">Seleccionar cuenta...</option>
+                          {cuentasBancarias.map(c => (
+                            <option key={c.id} value={String(c.id)}>
+                              {c.nombre}{c.tipo_cuenta ? ` — ${c.tipo_cuenta}` : ''}{c.numero_cuenta ? ` (${c.numero_cuenta})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {cuentasBancarias.length === 0 && (
+                          <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                            No hay cuentas bancarias activas registradas.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Diagnóstico */}
               <div>
                 <label className={labelCls}>Diagnóstico Inicial</label>
@@ -737,6 +936,19 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
                       <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wide">Acceso</p>
                       <p className="text-slate-700 dark:text-slate-200">
                         {equipmentData.accesoTipo === 'pin' ? 'PIN registrado' : `Patrón: ${patternArr.join('-')}`}
+                      </p>
+                    </div>
+                  )}
+                  {equipmentData.dejoAnticipo && Number(equipmentData.montoAnticipo) > 0 && (
+                    <div>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wide">Anticipo</p>
+                      <p className="font-semibold text-slate-800 dark:text-slate-100">
+                        Q{Number(equipmentData.montoAnticipo).toFixed(2)} ({metodoAnticipoLabel[equipmentData.metodoAnticipo]})
+                        {esMetodoPos && recargoPosPorcentaje > 0 && (
+                          <span className="block text-[10px] text-orange-600 dark:text-orange-400">
+                            Total cobrado POS: Q{totalCobrarPos.toFixed(2)} con {recargoPosPorcentaje}% de recargo
+                          </span>
+                        )}
                       </p>
                     </div>
                   )}
