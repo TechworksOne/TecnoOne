@@ -297,7 +297,7 @@ export default function Sidebar() {
       >
         {isOpen && (
           <p style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: "0.05em", color: "var(--color-text-muted)" }}>
-            v2.0 · TecnoOne
+            v1.0 · TecnoOne
           </p>
         )}
         <button
