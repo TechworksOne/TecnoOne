@@ -13,9 +13,15 @@ function addTenantCondition(req, conditions, params, alias = 'u') {
   }
 }
 
+const USER_SELECT_WHITELIST = new Map([
+  ['id', 'id'],
+  ['basic', 'id, active, role, empresa_id'],
+]);
+
 function scopedUserExistsQuery(req, id, select = 'id') {
+  const safeSelect = USER_SELECT_WHITELIST.get(select) || USER_SELECT_WHITELIST.get('id');
   const params = [id];
-  let query = `SELECT ${select} FROM users WHERE id = ?`;
+  let query = `SELECT ${safeSelect} FROM users WHERE id = ?`;
 
   if (!req.tenant?.isSuperadmin) {
     query += ' AND empresa_id = ?';
@@ -320,7 +326,7 @@ exports.updateUsuario = async (req, res) => {
 exports.toggleEstado = async (req, res) => {
   try {
     const { id } = req.params;
-    const userScope = scopedUserExistsQuery(req, id, 'id, active, role, empresa_id');
+    const userScope = scopedUserExistsQuery(req, id, 'basic');
     const [[user]] = await db.query(userScope.query, userScope.params);
     if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
 

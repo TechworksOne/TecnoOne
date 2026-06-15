@@ -1169,9 +1169,32 @@ exports.changeRepairState = async (req, res) => {
       }
     }
     
-    // Construir query de actualización
-    const updateFields = Object.keys(updates).map(key => `${key} = ?`).join(', ');
-    const updateValues = Object.values(updates);
+    // Construir query de actualización con whitelist de columnas permitidas
+    const allowedUpdateFields = new Set([
+      'estado',
+      'sub_etapa',
+      'saldo_anticipo',
+      'total_invertido',
+      'sticker_serie_interna',
+      'sticker_ubicacion',
+      'fecha_cierre',
+      'diferencia_reparacion',
+      'total_ganancia',
+    ]);
+
+    const updateKeys = Object.keys(updates);
+
+    const invalidUpdateFields = updateKeys.filter(key => !allowedUpdateFields.has(key));
+    if (invalidUpdateFields.length > 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Campos de actualización no permitidos',
+      });
+    }
+
+    const updateFields = updateKeys.map(key => `${key} = ?`).join(', ');
+    const updateValues = updateKeys.map(key => updates[key]);
     
     await connection.query(
       `UPDATE reparaciones r SET ${updateFields} WHERE r.id = ?${tenant.sql}`,
