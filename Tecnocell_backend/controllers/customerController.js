@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { parseLimit } = require('../utils/pagination');
 
 const METODOS_PAGO_PERMITIDOS = new Set(['efectivo', 'tarjeta', 'transferencia']);
 
@@ -99,10 +100,10 @@ const searchCustomers = async (req, res) => {
   try {
     const query = String(req.query.query || '').trim();
 
-    const rawLimit = Number(req.query.limit);
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0
-      ? Math.min(rawLimit, 20)
-      : (query ? 20 : 5);
+    const limit = parseLimit(req.query.limit, {
+      defaultLimit: query ? 20 : 5,
+      maxLimit: 20,
+    });
 
     const conditions = ['c.activo = true'];
     const params = [];

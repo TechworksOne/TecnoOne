@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { parsePagination } = require('../utils/pagination');
 
 /**
  * CONTROLADOR DE COTIZACIONES
@@ -213,9 +214,10 @@ const getAllCotizaciones = async (req, res) => {
 
     query += ' ORDER BY created_at DESC';
 
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const offset = (pageNum - 1) * limitNum;
+    const { page: pageNum, limit: limitNum, offset } = parsePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
     query += ' LIMIT ? OFFSET ?';
     values.push(limitNum, offset);
 

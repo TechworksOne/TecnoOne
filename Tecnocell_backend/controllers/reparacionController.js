@@ -1,5 +1,6 @@
 // Controller para gestionar reparaciones con imágenes
 const db = require('../config/database');
+const { parseLimit } = require('../utils/pagination');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -912,7 +913,7 @@ exports.getAllReparaciones = async (req, res) => {
     }
     
     query += ' ORDER BY r.updated_at DESC LIMIT ?';
-    params.push(parseInt(limit));
+    params.push(parseLimit(limit, { defaultLimit: 50, maxLimit: 100 }));
     
     const [reparaciones] = await db.query(query, params);
     

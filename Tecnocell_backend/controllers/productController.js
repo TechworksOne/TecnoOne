@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { parsePagination, parseLimit } = require('../utils/pagination');
 const fs = require('fs');
 const path = require('path');
 
@@ -48,12 +49,11 @@ const saveBase64Image = (base64String, productoId, index) => {
 // Obtener todos los productos con sus imágenes y paginación
 exports.getAllProducts = async (req, res) => {
   try {
-    const { categoria, activo, conStock, search, page = 1, limit = 20 } = req.query;
-    
-    // Convertir a números
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const offset = (pageNum - 1) * limitNum;
+    const { categoria, activo, conStock, search } = req.query;
+    const { page: pageNum, limit: limitNum, offset } = parsePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
     
     let query = `
       SELECT 
@@ -683,6 +683,8 @@ exports.getProductKardex = async (req, res) => {
       });
     }
 
+    const safeLimit = parseLimit(limit, { defaultLimit: 50, maxLimit: 100 });
+
     const [kardex] = await db.query(
       `SELECT
         k.*,
@@ -693,7 +695,7 @@ exports.getProductKardex = async (req, res) => {
       WHERE k.producto_id = ?${tenant.sql}
       ORDER BY k.created_at DESC
       LIMIT ?`,
-      [id, ...tenant.params, parseInt(limit)]
+      [id, ...tenant.params, safeLimit]
     );
     
     res.json({

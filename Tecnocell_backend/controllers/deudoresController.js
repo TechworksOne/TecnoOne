@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { parseLimit } = require('../utils/pagination');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -239,6 +240,7 @@ exports.createDeudor = async (req, res) => {
 exports.searchReparaciones = async (req, res) => {
   try {
     const { search = '', limit = 15 } = req.query;
+    const safeLimit = parseLimit(limit, { defaultLimit: 15, maxLimit: 50 });
     const like = `%${search}%`;
     const empresaId = requireTenantEmpresaId(req);
     const [rows] = await db.query(
@@ -254,7 +256,7 @@ exports.searchReparaciones = async (req, res) => {
          AND estado NOT IN ('CANCELADA')
        ORDER BY created_at DESC
        LIMIT ?`,
-      [like, like, like, like, empresaId, parseInt(limit)]
+      [like, like, like, like, empresaId, safeLimit]
     );
     res.json({ success: true, data: rows });
   } catch (error) {

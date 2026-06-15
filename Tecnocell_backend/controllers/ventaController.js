@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { parsePagination } = require('../utils/pagination');
 const cajaController = require('./cajaController');
 
 function isSuperadminTenant(req) {
@@ -495,10 +496,13 @@ exports.getAllVentas = async (req, res) => {
     // Ordenar por fecha más reciente
     query += ' ORDER BY COALESCE(v.fecha_venta, v.created_at) DESC';
 
-    // Paginación
-    const offset = (page - 1) * limit;
+    // Paginación segura
+    const { limit: limitNum, offset } = parsePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
     query += ' LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), parseInt(offset));
+    params.push(limitNum, offset);
 
     const [ventas] = await db.query(query, params);
     const ventasParsed = ventas.map(parseVentaJSON);

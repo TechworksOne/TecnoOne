@@ -1,5 +1,6 @@
 // Controller para gestionar el flujo de reparaciones (estados, checklist, historial)
 const db = require('../config/database');
+const { parseLimit } = require('../utils/pagination');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -482,7 +483,7 @@ exports.getReparacionesFlujoActivo = async (req, res) => {
     }
 
     query += ' ORDER BY r.updated_at DESC LIMIT ?';
-    params.push(parseInt(limit));
+    params.push(parseLimit(limit, { defaultLimit: 50, maxLimit: 100 }));
 
     const [rows] = await db.query(query, params);
 
@@ -556,7 +557,7 @@ exports.getEntregadas = async (req, res) => {
     }
 
     query += ' ORDER BY COALESCE(r.fecha_entrega, r.fecha_cierre) DESC LIMIT ?';
-    params.push(parseInt(limit));
+    params.push(parseLimit(limit, { defaultLimit: 50, maxLimit: 100 }));
 
     const [rows] = await db.query(query, params);
 

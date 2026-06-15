@@ -1,5 +1,6 @@
 // Controller para gestionar compras de productos y repuestos
 const db = require('../config/database');
+const { parsePagination } = require('../utils/pagination');
 const tarjetaCtrl = require('./tarjetaCreditoController');
 
 function isSuperadminTenant(req) {
@@ -547,7 +548,11 @@ exports.createCompra = async (req, res) => {
 // ========== OBTENER TODAS LAS COMPRAS ==========
 exports.getAllCompras = async (req, res) => {
   try {
-    const { estado, fecha_desde, fecha_hasta, proveedor, page = 1, limit = 20 } = req.query;
+    const { estado, fecha_desde, fecha_hasta, proveedor } = req.query;
+    const { page: pageNum, limit: limitNum, offset } = parsePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
     const tenant = compraTenantClause(req);
 
     let query = 'SELECT * FROM compras WHERE 1=1';
@@ -585,11 +590,6 @@ exports.getAllCompras = async (req, res) => {
       params.push(searchPattern);
       countParams.push(searchPattern);
     }
-
-    // Paginación
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const offset = (pageNum - 1) * limitNum;
 
     const [countResult] = await db.query(countQuery, countParams);
     const total = countResult[0].total;

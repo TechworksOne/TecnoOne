@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { parsePagination } = require('../utils/pagination');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -312,9 +313,12 @@ exports.getAllRepuestos = async (req, res) => {
 
     query += ' ORDER BY created_at DESC';
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { limit: limitNum, offset } = parsePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
     query += ' LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), offset);
+    params.push(limitNum, offset);
 
     const [repuestos] = await db.query(query, params);
 

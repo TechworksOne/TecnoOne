@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { parseLimit } = require('../utils/pagination');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -55,7 +56,7 @@ exports.getAllSuppliers = async (req, res) => {
     }
 
     query += ' GROUP BY p.id ORDER BY p.nombre LIMIT ?';
-    params.push(parseInt(limit));
+    params.push(parseLimit(limit, { defaultLimit: 50, maxLimit: 100 }));
 
     const [suppliers] = await db.query(query, params);
 
