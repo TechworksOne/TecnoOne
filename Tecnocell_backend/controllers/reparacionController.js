@@ -20,6 +20,48 @@ function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
 }
 
+
+function normalizePrecioRevisionContrato(reqBody) {
+  const raw =
+    reqBody?.precioRevisionContrato ??
+    reqBody?.precio_revision_contrato ??
+    null;
+
+  if (raw === null || raw === undefined || raw === '') return null;
+
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function normalizeCondicionesServicioContrato(reqBody) {
+  const raw =
+    reqBody?.condicionesServicioContrato ??
+    reqBody?.condiciones_servicio_contrato ??
+    null;
+
+  if (raw === null || raw === undefined) return null;
+
+  const value = String(raw).trim();
+  return value.length > 0 ? value : null;
+}
+
+function splitCondicionesServicio(value) {
+  if (!value) return [];
+  return String(value)
+    .split(/\r?\n/)
+    .map((linea) => linea.trim())
+    .filter(Boolean);
+}
+
+function firstNonEmptyValue(...values) {
+  for (const value of values) {
+    if (value !== null && value !== undefined && String(value).trim() !== '') {
+      return value;
+    }
+  }
+  return null;
+}
+
 function getTenantEmpresaId(req) {
   return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
 }
@@ -141,29 +183,214 @@ function normalizeFirmaUsuarioUrl(firma) {
   if (!firma || typeof firma !== 'string') return null;
 
   const raw = firma.trim();
-  if (raw.startsWith('/uploads/') || raw.startsWith('uploads/') || raw.startsWith('/app/uploads/')) {
+  if (!raw) return null;
+
+  if (/^data:image\/(png|jpeg|jpg);base64,/i.test(raw)) {
     return raw;
+  }
+
+  if (/^data:image\/(png|jpeg|jpg);base64,/i.test(raw)) {
+    return raw;
+  }
+
+  const normalized = raw.replaceAll(String.fromCharCode(92), '/');
+
+  const uploadsIndex = normalized.indexOf('/uploads/');
+  if (uploadsIndex >= 0) {
+    return normalized.slice(uploadsIndex);
+  }
+
+  if (normalized.startsWith('/uploads/')) {
+    return normalized;
+  }
+
+  if (normalized.startsWith('uploads/')) {
+    return `/${normalized}`;
+  }
+
+  if (normalized.startsWith('firmas/')) {
+    return `/uploads/${normalized}`;
+  }
+
+  if (normalized.startsWith('/firmas/')) {
+    return `/uploads${normalized}`;
+  }
+
+  if (normalized.startsWith('/app/uploads/')) {
+    return normalized.replace('/app', '');
+  }
+
+  return `/uploads/${normalized.replace(/^\/+/, '')}`;
+}
+
+function safeSqlIdentifier(value) {
+  const clean = String(value || '').trim();
+
+  if (!/^[a-zA-Z0-9_]+$/.test(clean)) {
+    throw new Error(`Identificador SQL no seguro: ${clean}`);
+  }
+
+  return `\`${clean}\``;
+}
+
+
+function resolveFirmaClienteUrlByRepairId(repairId) {
+  if (!repairId) return null;
+
+  const firmaPath = path.join(
+    __dirname,
+    '..',
+    'uploads',
+    'firmas',
+    'reparaciones',
+    String(repairId),
+    'firma_cliente.png'
+  );
+
+  if (fs.existsSync(firmaPath)) {
+    return `/uploads/firmas/reparaciones/${repairId}/firma_cliente.png`;
   }
 
   return null;
 }
 
 const getAuthUserFirmaUrl = async (req, connection) => {
-  const userId = req.user?.id || req.user?.userId || req.user?.usuario_id;
-  if (!userId) return null;
-
   try {
-    const conn = connection || db;
-    const [rows] = await conn.query(
-      `SELECT p.firma
-       FROM user_profiles p
-       WHERE p.user_id = ?
-       LIMIT 1`,
-      [userId]
+    const userId =
+      req.user?.id ||
+      req.user?.userId ||
+      req.user?.usuario_id ||
+      req.user?.usuarioId ||
+      req.user?.id_usuario;
+
+    const username =
+      req.user?.username ||
+      req.user?.usuario ||
+      req.user?.nombre_usuario ||
+      null;
+
+    const email =
+      req.user?.email ||
+      req.user?.correo ||
+      null;
+
+    console.log('[ContratoPDF] req.user receptor:', {
+      id: req.user?.id,
+      userId: req.user?.userId,
+      usuario_id: req.user?.usuario_id,
+      usuarioId: req.user?.usuarioId,
+      id_usuario: req.user?.id_usuario,
+      username: req.user?.username,
+      usuario: req.user?.usuario,
+      nombre_usuario: req.user?.nombre_usuario,
+      email: req.user?.email,
+      correo: req.user?.correo,
+    });
+
+    if (!userId && !username && !email) {
+      console.warn('[ContratoPDF] No se encontró identificador para firma receptor');
+      return null;
+    }
+
+    const [columns] = await connection.query(
+      `SELECT TABLE_NAME, COLUMN_NAME
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND (
+           COLUMN_NAME IN (
+             'firma',
+             'firma_url',
+             'firmaUrl',
+             'firma_path',
+             'firma_digital',
+             'signature',
+             'signature_url'
+           )
+           OR COLUMN_NAME LIKE '%firma%'
+           OR COLUMN_NAME LIKE '%signature%'
+         )
+       ORDER BY TABLE_NAME, COLUMN_NAME`
     );
 
-    return normalizeFirmaUsuarioUrl(rows[0]?.firma);
-  } catch (_) {
+    console.log('[ContratoPDF] columnas candidatas firma receptor:', columns);
+
+    for (const candidate of columns) {
+      const tableName = candidate.TABLE_NAME;
+      const firmaColumn = candidate.COLUMN_NAME;
+
+      const [tableColumns] = await connection.query(
+        `SELECT COLUMN_NAME
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = ?`,
+        [tableName]
+      );
+
+      const colSet = new Set(tableColumns.map((c) => c.COLUMN_NAME));
+
+      const where = [];
+      const params = [];
+
+      if (userId) {
+        for (const col of ['usuario_id', 'user_id', 'id_usuario', 'id_user', 'created_by', 'id']) {
+          if (colSet.has(col)) {
+            where.push(`${safeSqlIdentifier(col)} = ?`);
+            params.push(userId);
+          }
+        }
+      }
+
+      if (username) {
+        for (const col of ['username', 'usuario', 'nombre_usuario', 'created_by_username']) {
+          if (colSet.has(col)) {
+            where.push(`${safeSqlIdentifier(col)} = ?`);
+            params.push(username);
+          }
+        }
+      }
+
+      if (email) {
+        for (const col of ['email', 'correo']) {
+          if (colSet.has(col)) {
+            where.push(`${safeSqlIdentifier(col)} = ?`);
+            params.push(email);
+          }
+        }
+      }
+
+      if (where.length === 0) {
+        continue;
+      }
+
+      const query = `
+        SELECT ${safeSqlIdentifier(firmaColumn)} AS firma
+        FROM ${safeSqlIdentifier(tableName)}
+        WHERE (${where.join(' OR ')})
+          AND ${safeSqlIdentifier(firmaColumn)} IS NOT NULL
+          AND TRIM(${safeSqlIdentifier(firmaColumn)}) <> ''
+        LIMIT 1
+      `;
+
+      const [rows] = await connection.query(query, params);
+
+      if (rows[0]?.firma) {
+        const firmaNormalizada = normalizeFirmaUsuarioUrl(rows[0].firma);
+
+        console.log('[ContratoPDF] firma receptor encontrada en:', {
+          tableName,
+          firmaColumn,
+          firmaBD: rows[0].firma,
+          firmaNormalizada,
+        });
+
+        return firmaNormalizada;
+      }
+    }
+
+    console.warn('[ContratoPDF] No se encontró firma receptor en tablas candidatas');
+    return null;
+  } catch (error) {
+    console.warn('[ContratoPDF] No se pudo obtener firma del usuario receptor:', error.message);
     return null;
   }
 };
@@ -240,6 +467,9 @@ exports.createReparacion = async (req, res) => {
     const impuestosCentavos = Math.round(totalSinImpuestos * 0.12);
     const totalCentavos = totalSinImpuestos + impuestosCentavos;
     const anticipoCentavos = quetzalesACentavos(montoAnticipo);
+
+    const precioRevisionContrato = normalizePrecioRevisionContrato(req.body);
+    const condicionesServicioContrato = normalizeCondicionesServicioContrato(req.body);
     
     // 1. Insertar reparación
     await connection.query(
@@ -251,8 +481,10 @@ exports.createReparacion = async (req, res) => {
         estado, prioridad,
         mano_obra, subtotal, impuestos, total,
         monto_anticipo, saldo_anticipo, metodo_anticipo,
-        fecha_ingreso, observaciones, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        fecha_ingreso, observaciones,
+        precio_revision_contrato, condiciones_servicio_contrato,
+        created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         repairId, empresaId, clienteId || null, clienteNombre, clienteTelefono, clienteEmail,
         tipoEquipo, marca, modelo, color, imeiSerie, patronContrasena,
@@ -262,6 +494,7 @@ exports.createReparacion = async (req, res) => {
         manoObraCentavos, subtotalCentavos, impuestosCentavos, totalCentavos,
         anticipoCentavos, anticipoCentavos, metodoAnticipo,
         fechaIngreso || new Date().toISOString().split('T')[0], observaciones,
+        precioRevisionContrato, condicionesServicioContrato,
         authUserName
       ]
     );
@@ -387,9 +620,10 @@ exports.createReparacion = async (req, res) => {
 
       try {
         const [empresas] = await db.query(
-          `SELECT id, nombre, razon_social, nit, telefono,
+          `SELECT id, nombre, nombre_comercial, razon_social, nit, telefono,
                   COALESCE(NULLIF(correo, ''), email) AS email,
-                  direccion, logo_url, color_primario
+                  direccion, logo_url, color_primario,
+                  precio_revision_default, condiciones_servicio_contrato
            FROM empresas
            WHERE id = ?
            LIMIT 1`,
@@ -399,7 +633,7 @@ exports.createReparacion = async (req, res) => {
         if (empresas.length > 0) {
           const empresa = empresas[0];
           negocioContrato = {
-            nombre: empresa.nombre || 'Negocio',
+            nombre: empresa.nombre_comercial || empresa.nombre || empresa.razon_social || 'Negocio',
             razonSocial: empresa.razon_social || null,
             nit: empresa.nit || null,
             telefono: empresa.telefono || null,
@@ -407,6 +641,8 @@ exports.createReparacion = async (req, res) => {
             direccion: empresa.direccion || null,
             logoUrl: empresa.logo_url || null,
             colorPrimario: empresa.color_primario || null,
+            precioRevisionDefault: empresa.precio_revision_default != null ? Number(empresa.precio_revision_default) : null,
+            condicionesServicioContrato: empresa.condiciones_servicio_contrato || null,
           };
         }
       } catch (empresaErr) {
@@ -449,6 +685,16 @@ exports.createReparacion = async (req, res) => {
         patronContrasena: patronContrasena || patron_contrasena || null,
         mostrarValorAcceso: true,
         descripcion:   diagnosticoInicial,
+        precioRevision: firstNonEmptyValue(
+          normalizePrecioRevisionContrato(req.body),
+          negocioContrato.precioRevisionDefault
+        ),
+        condicionesServicio: splitCondicionesServicio(
+          firstNonEmptyValue(
+            normalizeCondicionesServicioContrato(req.body),
+            negocioContrato.condicionesServicioContrato
+          )
+        ),
         costoTotal:    centavosAQuetzales(totalCentavos),
         anticipo:      centavosAQuetzales(anticipoCentavos),
         saldo:         centavosAQuetzales(totalCentavos - anticipoCentavos),
@@ -1786,7 +2032,8 @@ exports.descargarContrato = async (req, res) => {
     if (!fs.existsSync(contratoPath)) {
       console.warn('[ContratoPDF] contrato faltante, regenerando:', contratoPath);
       const [[empresa]] = await db.query(
-        `SELECT id, nombre, razon_social, nit, telefono, email, direccion, logo_url, color_primario
+        `SELECT id, nombre, nombre_comercial, razon_social, nit, telefono, correo, email, direccion, logo_url, color_primario,
+                precio_revision_default, condiciones_servicio_contrato
          FROM empresas
          WHERE id = ?
          LIMIT 1`,
@@ -1816,14 +2063,14 @@ exports.descargarContrato = async (req, res) => {
           reparacionId: rep.id,
           fecha: formatFechaContrato(rep.fecha_ingreso || rep.created_at),
           negocio: {
-            nombre: empresa.nombre || 'Negocio',
-            razonSocial: empresa.razon_social || null,
-            nit: empresa.nit || null,
-            telefono: empresa.telefono || null,
-            email: empresa.email || null,
-            direccion: empresa.direccion || null,
-            logoUrl: empresa.logo_url || null,
-            colorPrimario: empresa.color_primario || null,
+            nombre: empresa.nombre_comercial || empresa.nombre || empresa.razon_social || 'Negocio',
+            razonSocial: empresa.razon_social || empresa.nombre_legal || null,
+            nit: empresa.nit || empresa.nit_empresa || null,
+            telefono: empresa.telefono || empresa.telefono_empresa || empresa.celular || null,
+            email: empresa.correo || empresa.email || empresa.email_empresa || null,
+            direccion: empresa.direccion || empresa.direccion_empresa || null,
+            logoUrl: empresa.logo_url || empresa.logoUrl || empresa.logo || null,
+            colorPrimario: empresa.color_primario || empresa.colorPrimario || null,
           },
           clienteNombre: rep.cliente_nombre || '',
           clienteTel: rep.cliente_telefono || '',
@@ -1839,10 +2086,20 @@ exports.descargarContrato = async (req, res) => {
           patronContrasena: rep.patron_contrasena || null,
           mostrarValorAcceso: true,
           descripcion: rep.diagnostico_inicial || rep.observaciones || '',
+          precioRevision: firstNonEmptyValue(
+            rep.precio_revision_contrato != null ? Number(rep.precio_revision_contrato) : null,
+            empresa.precio_revision_default != null ? Number(empresa.precio_revision_default) : null
+          ),
+          condicionesServicio: splitCondicionesServicio(
+            firstNonEmptyValue(
+              rep.condiciones_servicio_contrato,
+              empresa.condiciones_servicio_contrato
+            )
+          ),
           costoTotal: centavosAQuetzales(rep.total || 0),
           anticipo: centavosAQuetzales(rep.monto_anticipo || 0),
           anticipoRecibido: centavosAQuetzales(rep.monto_anticipo || 0),
-          firmaClienteUrl: rep.firma_cliente_url || null,
+          firmaClienteUrl: rep.firma_cliente_url || resolveFirmaClienteUrlByRepairId(rep.id) || null,
           receptorNombre: rep.created_by || 'Usuario receptor',
           receptorUsuario,
           firmaReceptorUrl,

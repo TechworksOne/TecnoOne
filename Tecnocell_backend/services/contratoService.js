@@ -23,7 +23,7 @@ const FONT_BUSINESS = 22;
 
 const LOGO_MAX_W = 75;
 const LOGO_MAX_H = 55;
-const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const LOGO_MAX_BYTES = 8 * 1024 * 1024;
 const FIRMA_CLIENTE_X = 78;
 const FIRMA_CLIENTE_Y = 158;
 const FIRMA_CLIENTE_W = 190;
@@ -372,20 +372,53 @@ function resolveFirmaPath(firmaClienteUrl) {
 }
 
 async function insertarFirmaImagen(pdfDoc, page, firmaUrl, x, y, width, height, label) {
-  console.log(`[ContratoPDF] ${label}:`, firmaUrl);
+  console.log(`[ContratoPDF] ${label}:`, firmaUrl ? String(firmaUrl).slice(0, 90) : firmaUrl);
 
-  const firmaPath = resolveFirmaPath(firmaUrl);
-  console.log(`[ContratoPDF] ${label} path:`, firmaPath);
-  console.log(`[ContratoPDF] existe ${label}:`, firmaPath ? fs.existsSync(firmaPath) : false);
-
-  if (!firmaPath || !fs.existsSync(firmaPath)) {
+  if (!firmaUrl) {
+    console.log(`[ContratoPDF] ${label} path:`, null);
+    console.log(`[ContratoPDF] existe ${label}:`, false);
     console.warn(`[ContratoPDF] ${label} no encontrada. PDF generado con linea manual.`);
     return false;
   }
 
+  const raw = String(firmaUrl).trim();
+
   try {
+    const dataUriMatch = raw.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+
+    if (dataUriMatch) {
+      const ext = dataUriMatch[1].toLowerCase();
+      const base64Data = dataUriMatch[2];
+      const firmaBytes = Buffer.from(base64Data, 'base64');
+
+      const firmaImage = ext === 'jpg' || ext === 'jpeg'
+        ? await pdfDoc.embedJpg(firmaBytes)
+        : await pdfDoc.embedPng(firmaBytes);
+
+      page.drawImage(firmaImage, {
+        x,
+        y,
+        width,
+        height,
+      });
+
+      console.log(`[ContratoPDF] ${label} insertada correctamente desde base64`);
+      return true;
+    }
+
+    const firmaPath = resolveFirmaPath(raw);
+
+    console.log(`[ContratoPDF] ${label} path:`, firmaPath);
+    console.log(`[ContratoPDF] existe ${label}:`, firmaPath ? fs.existsSync(firmaPath) : false);
+
+    if (!firmaPath || !fs.existsSync(firmaPath)) {
+      console.warn(`[ContratoPDF] ${label} no encontrada. PDF generado con linea manual.`);
+      return false;
+    }
+
     const firmaBytes = fs.readFileSync(firmaPath);
     const lowerPath = firmaPath.toLowerCase();
+
     const firmaImage = lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')
       ? await pdfDoc.embedJpg(firmaBytes)
       : await pdfDoc.embedPng(firmaBytes);
@@ -397,7 +430,7 @@ async function insertarFirmaImagen(pdfDoc, page, firmaUrl, x, y, width, height, 
       height,
     });
 
-    console.log(`[ContratoPDF] ${label} insertada correctamente`);
+    console.log(`[ContratoPDF] ${label} insertada correctamente desde archivo`);
     return true;
   } catch (err) {
     console.error(`[ContratoPDF] Error insertando ${label}:`, err.message);
@@ -455,27 +488,70 @@ function buildCompactInfo(negocio) {
 
 function normalizeAccesoTipo(accesoTipo) {
   if (isEmpty(accesoTipo)) return 'ninguno';
-  return String(accesoTipo).trim().toLowerCase();
+
+  const raw = String(accesoTipo).trim().toLowerCase();
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (normalized === 'ninguno' || normalized === 'none' || normalized === 'n/a') return 'ninguno';
+
+  if (
+    normalized === 'pin' ||
+    normalized === 'password' ||
+    normalized === 'contrasena' ||
+    normalized === 'clave'
+  ) {
+    return 'pin';
+  }
+
+  if (normalized === 'patron' || normalized === 'pattern') return 'patron';
+
+  // Compatibilidad con texto dañado tipo patr?n o contrase?a
+  if (raw.includes('patr')) return 'patron';
+  if (raw.includes('contrase') || raw.includes('clave') || raw.includes('password')) return 'pin';
+
+  return 'ninguno';
 }
 
-function getAccesoLabel(accesoTipo) {
-  const normalized = normalizeAccesoTipo(accesoTipo);
-  const labels = {
-    pin: 'PIN',
-    patron: 'Patrón',
-    patrón: 'Patrón',
-    pattern: 'Patrón',
-    password: 'Contraseña',
-    contrasena: 'Contraseña',
-    contraseña: 'Contraseña',
-    clave: 'Contraseña',
-  };
+function getAccesoLabel(accesoTipo, tipoResuelto) {
+  const raw = String(accesoTipo || '').trim().toLowerCase();
 
-  return labels[normalized] || String(accesoTipo).trim();
+  if (tipoResuelto === 'patron') return 'Patron';
+
+  if (
+    raw.includes('contrase') ||
+    raw.includes('password') ||
+    raw.includes('clave')
+  ) {
+    return 'Contrasena';
+  }
+
+  if (tipoResuelto === 'pin') return 'PIN';
+
+  return 'Acceso';
+}
+
+function parecePatron(value) {
+  if (isEmpty(value)) return false;
+
+  const clean = String(value).trim();
+
+  // Patron real: debe tener separadores.
+  // Validos: 1-2-3, 1,2,3, 1 → 2 → 3, 6 3 2 1.
+  // PIN como 1234 NO debe ser tratado como patron.
+  return /^[1-9](?:[-,\s→]+[1-9]){1,8}$/.test(clean);
+}
+
+function formatPatternSequence(value) {
+  if (isEmpty(value)) return '';
+  const nodes = String(value).match(/[1-9]/g) || [];
+  return nodes.join(' -> ');
 }
 
 function parsePatternNodes(value) {
-  if (isEmpty(value)) return [];
+  if (!parecePatron(value)) return [];
+
   const matches = String(value).match(/[1-9]/g) || [];
   return [...new Set(matches.map(Number))].filter((n) => n >= 1 && n <= 9);
 }
@@ -493,8 +569,9 @@ function drawPatternGrid(page, value, x, y, size = 58) {
   }));
 
   for (let i = 0; i < nodes.length - 1; i += 1) {
-    const a = points.find((p) => p.n === nodes[i]);
-    const b = points.find((p) => p.n === nodes[i + 1]);
+    const a = points.find((point) => point.n === nodes[i]);
+    const b = points.find((point) => point.n === nodes[i + 1]);
+
     if (a && b) {
       page.drawLine({
         start: { x: a.x, y: a.y },
@@ -507,6 +584,7 @@ function drawPatternGrid(page, value, x, y, size = 58) {
 
   for (const point of points) {
     const selected = nodes.includes(point.n);
+
     page.drawCircle({
       x: point.x,
       y: point.y,
@@ -520,60 +598,78 @@ function drawPatternGrid(page, value, x, y, size = 58) {
   return true;
 }
 
-function drawAccesoEquipo(page, datos, x, y, fonts) {
-  const accesoTipo = normalizeAccesoTipo(datos.accesoTipo);
-  const tieneAccesoTipo = !isEmpty(datos.accesoTipo);
-  const fallbackPatron = !isEmpty(datos.patronContrasena) ? datos.patronContrasena : null;
-  const drawPatternValue = (label, value) => {
-    let nextY = drawLabelValue(page, label, value || 'registrado', x, y, fonts);
-    if (drawPatternGrid(page, value, x + 18, nextY - 8, 52)) {
-      nextY -= 68;
-    }
-    return nextY;
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (!isEmpty(value)) return String(value).trim();
+  }
+
+  return '';
+}
+
+function resolveAccesoEquipo(datos = {}) {
+  const tipoOriginal = normalizeAccesoTipo(datos.accesoTipo);
+
+  const valor = firstNonEmpty(
+    datos.accesoValor,
+    datos.acceso,
+    datos.patronContrasena
+  );
+
+  if (isEmpty(valor)) {
+    return {
+      tipo: 'ninguno',
+      valor: '',
+      label: 'Acceso',
+    };
+  }
+
+  let tipo = tipoOriginal;
+
+  if (tipo === 'ninguno') {
+    tipo = parecePatron(valor) ? 'patron' : 'pin';
+  }
+
+  // Regla crítica:
+  // Si dice patron pero el valor es 1234, NO dibujar patrón.
+  // 1234 debe ser PIN.
+  if (tipo === 'patron' && !parecePatron(valor)) {
+    tipo = 'pin';
+  }
+
+  return {
+    tipo,
+    valor,
+    label: getAccesoLabel(datos.accesoTipo, tipo),
   };
+}
 
-  if (tieneAccesoTipo && accesoTipo === 'ninguno') {
-    if (fallbackPatron) {
-      return drawPatternValue('Patron', fallbackPatron);
-    }
+function drawAccesoEquipo(page, datos, x, y, fonts) {
+  const acceso = resolveAccesoEquipo(datos);
 
+  if (acceso.tipo === 'ninguno' || isEmpty(acceso.valor)) {
     drawSafeText(page, 'No registrado / no aplica', x, y, {
       _font: fonts.normal,
       _fontBold: fonts.bold,
       size: FONT_NORMAL,
     });
+
     return y - 17;
   }
 
-  if (tieneAccesoTipo && ['patron', 'patr?n', 'pattern'].includes(accesoTipo)) {
-    const valor = datos.mostrarValorAcceso !== false && !isEmpty(datos.accesoValor)
-      ? datos.accesoValor
-      : fallbackPatron;
-    return drawPatternValue(getAccesoLabel(datos.accesoTipo), valor);
+  if (acceso.tipo === 'patron') {
+    const secuencia = formatPatternSequence(acceso.valor);
+    let nextY = drawLabelValue(page, acceso.label, secuencia || acceso.valor, x, y, fonts);
+
+    if (drawPatternGrid(page, acceso.valor, x + 18, nextY - 8, 52)) {
+      nextY -= 68;
+    }
+
+    return nextY;
   }
 
-  if (tieneAccesoTipo) {
-    const valor = datos.mostrarValorAcceso !== false && !isEmpty(datos.accesoValor)
-      ? datos.accesoValor
-      : 'no especificado';
-    return drawLabelValue(page, getAccesoLabel(datos.accesoTipo), valor, x, y, fonts);
-  }
-
-  if (!isEmpty(datos.acceso)) {
-    return drawLabelValue(page, 'Acceso', datos.acceso, x, y, fonts);
-  }
-
-  if (fallbackPatron) {
-    return drawPatternValue('Patron', fallbackPatron);
-  }
-
-  drawSafeText(page, 'No registrado / no aplica', x, y, {
-    _font: fonts.normal,
-    _fontBold: fonts.bold,
-    size: FONT_NORMAL,
-  });
-  return y - 17;
+  return drawLabelValue(page, acceso.label, acceso.valor, x, y, fonts);
 }
+
 async function generarContrato(datos) {
   const {
     reparacionId,
@@ -602,6 +698,7 @@ async function generarContrato(datos) {
     receptorNombre = '',
     receptorUsuario = '',
     firmaReceptorUrl = null,
+    condicionesServicio = null,
   } = datos;
 
   const negocio = normalizeNegocio(datos.negocio);
@@ -697,7 +794,10 @@ async function generarContrato(datos) {
   drawLine(page2, MARGIN_X, 711, PAGE_WIDTH - MARGIN_X, 711, COLOR_LINE);
 
   let conditionY = 674;
-  CONDICIONES_SERVICIO.forEach((condicion, index) => {
+  const condicionesAUsar = (Array.isArray(condicionesServicio) && condicionesServicio.length > 0)
+    ? condicionesServicio
+    : CONDICIONES_SERVICIO;
+  condicionesAUsar.forEach((condicion, index) => {
     dt(page2, `${index + 1}.`, MARGIN_X, conditionY, {
       bold: true,
       size: FONT_NORMAL,

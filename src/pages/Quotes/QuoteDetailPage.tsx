@@ -25,6 +25,8 @@ export default function QuoteDetailPage() {
   const [activeTab, setActiveTab] = useState<'resumen' | 'imprimir'>('resumen');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showConvertSaleDialog, setShowConvertSaleDialog] = useState(false);
+  const [isConvertingSale, setIsConvertingSale] = useState(false);
 
   // Cargar cotización desde el backend
   useEffect(() => {
@@ -146,15 +148,39 @@ export default function QuoteDetailPage() {
     }, 300);
   };
 
-  const handleConvertToSale = () => {
+  const handleConvertToSale = async () => {
+    if (isConvertingSale) return;
+
     if (quote.tipo !== 'VENTA') {
-      toast.add('Esta cotización no es de tipo VENTA', 'error');
+      toast.add('Esta cotizacion no es de tipo VENTA', 'error');
       return;
     }
-    
-    // TODO: conectar API real - por ahora navegamos con estado en memoria
-    toast.add('Cotización enviada a Ventas', 'success');
-    navigate('/ventas', { state: { fromQuote: quote } });
+
+    if (quote.estado !== 'ABIERTA') {
+      toast.add('Esta cotizacion no esta disponible para convertir', 'error');
+      return;
+    }
+
+    setIsConvertingSale(true);
+    try {
+      const venta = await cotizacionService.convertirAVenta(quote.id);
+      const ventaId = venta?.id || venta?.venta_id || venta?.data?.venta_id;
+
+      setQuote(prev => prev ? { ...prev, estado: 'CERRADA' } : prev);
+      updateQuoteStatus(quote.id, 'CERRADA');
+      toast.add('Cotizacion convertida a venta', 'success');
+      navigate('/ventas', {
+        state: {
+          convertedFromQuote: quote.id,
+          ventaId,
+        },
+      });
+    } catch (error: any) {
+      const message = error?.response?.data?.error || error?.response?.data?.message || 'No se pudo convertir la cotizacion a venta';
+      toast.add(message, 'error');
+    } finally {
+      setIsConvertingSale(false);
+    }
   };
 
   const handleConvertToRepair = () => {
@@ -264,8 +290,12 @@ export default function QuoteDetailPage() {
                 </Button>
               ) : (
                 <>
-                  {quote.tipo === 'VENTA' && (
-                    <Button onClick={handleConvertToSale} className="bg-green-600 hover:bg-green-700">
+                  {quote.tipo === 'VENTA' && quote.estado === 'ABIERTA' && (
+                    <Button
+                      onClick={() => setShowConvertSaleDialog(true)}
+                      disabled={isConvertingSale}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
                       <ShoppingCart size={16} />
                       Convertir a Venta
                     </Button>
@@ -462,6 +492,16 @@ export default function QuoteDetailPage() {
         message={`¿Estás seguro de que deseas eliminar la cotización ${quote.numero}? Esta acción no se puede deshacer.`}
         confirmText="Eliminar"
       />
+      <ConfirmDialog
+        open={showConvertSaleDialog}
+        onClose={() => setShowConvertSaleDialog(false)}
+        onConfirm={handleConvertToSale}
+        title="Convertir a venta"
+        message={`Deseas convertir la cotizacion ${quote.numero} en una venta real? Esta accion cerrara la cotizacion y creara la venta.`}
+        confirmText={isConvertingSale ? 'Convirtiendo...' : 'Convertir'}
+        type="info"
+      />
+
     </div>
   );
 }

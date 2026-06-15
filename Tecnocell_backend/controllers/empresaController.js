@@ -65,6 +65,8 @@ const buildEmpresaSelect = () => `
     moneda_codigo,
     moneda_simbolo,
     zona_horaria,
+    precio_revision_default,
+    condiciones_servicio_contrato,
     created_at,
     updated_at
   FROM empresas
@@ -81,6 +83,8 @@ const formatEmpresaResponse = (empresa) => ({
   moneda_codigo: empresa.moneda_codigo || 'GTQ',
   moneda_simbolo: empresa.moneda_simbolo || MONEDAS_PERMITIDAS[empresa.moneda_codigo] || 'Q',
   zona_horaria: empresa.zona_horaria || 'America/Guatemala',
+  precio_revision_default: empresa.precio_revision_default != null ? Number(empresa.precio_revision_default) : null,
+  condiciones_servicio_contrato: empresa.condiciones_servicio_contrato || null,
 });
 
 const logoStorage = multer.diskStorage({
@@ -164,6 +168,8 @@ const updateEmpresaMe = async (req, res) => {
       moneda_codigo,
       moneda_simbolo,
       zona_horaria,
+      precio_revision_default,
+      condiciones_servicio_contrato,
     } = req.body || {};
 
     const updates = [];
@@ -188,6 +194,14 @@ const updateEmpresaMe = async (req, res) => {
       moneda_codigo: monedaCodigoValue,
       moneda_simbolo: monedaSimboloValue,
       zona_horaria: zona_horaria === undefined ? undefined : normalizeText(zona_horaria),
+      precio_revision_default: precio_revision_default === undefined
+        ? undefined
+        : (precio_revision_default === null || precio_revision_default === '')
+          ? null
+          : parseFloat(precio_revision_default),
+      condiciones_servicio_contrato: condiciones_servicio_contrato === undefined
+        ? undefined
+        : (condiciones_servicio_contrato === null ? null : String(condiciones_servicio_contrato)),
     };
 
     if (colorValue !== undefined && allowedFields.color_principal === null && normalizeText(colorValue)) {

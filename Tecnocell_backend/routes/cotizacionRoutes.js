@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const cotizacionController = require('../controllers/cotizacionController');
+const ventaController = require('../controllers/ventaController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
@@ -28,6 +29,12 @@ router.get('/proximas-vencer', cotizacionController.getCotizacionesProximasVence
 
 // Obtener cotización por ID
 router.get('/:id', cotizacionController.getCotizacionById);
+
+// Convertir cotización de venta en venta real
+router.post('/:id/convertir-venta', (req, res) => {
+  req.params.cotizacionId = req.params.id;
+  return ventaController.createVentaFromQuote(req, res);
+});
 
 // Crear nueva cotización (SIN autenticación para desarrollo)
 router.post('/', cotizacionController.createCotizacion);

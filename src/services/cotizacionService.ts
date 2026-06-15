@@ -96,6 +96,14 @@ export interface CotizacionEstadisticas {
   tasa_conversion: number;
 }
 
+export interface ConvertirVentaResponse {
+  id?: number;
+  venta_id?: number;
+  cotizacion_id?: number;
+  numero_venta?: string;
+  [key: string]: any;
+}
+
 // ============================================
 // CREAR COTIZACIÓN
 // ============================================
@@ -179,6 +187,19 @@ export const cambiarEstadoCotizacion = async (
     console.log(`🔄 Estado de cotización ${id} cambiado a: ${estado}`);
   } catch (error: any) {
     console.error('❌ Error al cambiar estado:', error);
+    throw error;
+  }
+};
+
+// ============================================
+// CONVERTIR COTIZACIÓN A VENTA
+// ============================================
+export const convertirAVenta = async (id: number | string): Promise<ConvertirVentaResponse> => {
+  try {
+    const response = await api.post(`/cotizaciones/${id}/convertir-venta`);
+    return response.data;
+  } catch (error: any) {
+    console.error('❌ Error al convertir cotización a venta:', error.response?.data || error);
     throw error;
   }
 };

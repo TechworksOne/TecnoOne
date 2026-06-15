@@ -25,7 +25,13 @@ interface CatalogState {
     totalPages: number;
   };
   loadCategories: () => Promise<void>;
-  loadProducts: (page?: number, limit?: number, search?: string, categoria?: string) => Promise<void>;
+  loadProducts: (
+    page?: number,
+    limit?: number,
+    search?: string,
+    categoria?: string,
+    options?: { activo?: boolean; conStock?: boolean }
+  ) => Promise<void>;
   addProduct: (product: Omit<Product, "id">) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   adjustStock: (productId: string, quantity: number, note: string) => Promise<void>;
@@ -67,7 +73,7 @@ export const useCatalog = create<CatalogState>((set, get) => ({
     }
   },
 
-  loadProducts: async (page = 1, limit = 20, search?: string, categoria?: string) => {
+  loadProducts: async (page = 1, limit = 20, search?: string, categoria?: string, options = {}) => {
     set({ isLoadingProducts: true });
     try {
       const response = await productService.getAllProducts({ 
@@ -75,6 +81,8 @@ export const useCatalog = create<CatalogState>((set, get) => ({
         limit,
         ...(search ? { search } : {}),
         ...(categoria ? { categoria } : {}),
+        ...(options.activo !== undefined ? { activo: options.activo } : {}),
+        ...(options.conStock !== undefined ? { conStock: options.conStock } : {}),
       });
       if (response.success) {
         // Mapear productos de BD a formato frontend

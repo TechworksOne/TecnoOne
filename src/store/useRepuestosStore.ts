@@ -10,7 +10,7 @@ interface RepuestosState {
   error: string | null;
   
   // Actions
-  loadRepuestos: () => Promise<void>;
+  loadRepuestos: (filters?: RepuestoFilters) => Promise<void>;
   setRepuestos: (repuestos: Repuesto[]) => void;
   upsertRepuesto: (repuesto: RepuestoFormData, id?: string) => void;
   removeRepuesto: (id: string) => void;
@@ -28,10 +28,10 @@ export const useRepuestosStore = create<RepuestosState>((set, get) => ({
   isLoading: false,
   error: null,
 
-  loadRepuestos: async () => {
+  loadRepuestos: async (filters) => {
     set({ isLoading: true, error: null });
     try {
-      const data = await repuestoService.getAllRepuestos({ limit: 500 });
+      const data = await repuestoService.getAllRepuestos(filters || { limit: 500 });
       
       // Mapear datos de BD a formato frontend
       const repuestosMapped: Repuesto[] = data.map(rep => ({

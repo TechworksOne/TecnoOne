@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   Building2, Camera, CheckCircle2, Loader2, Mail, MapPin,
-  FileText, Palette, Phone, Save, Upload, Wallet,
+  FileText, Palette, Phone, Save, Upload, Wallet, DollarSign, AlignLeft,
 } from "lucide-react";
 import { useEmpresa } from "../../store/useEmpresa";
 import { useToast } from "../../components/ui/Toast";
@@ -30,6 +30,8 @@ interface FormState {
   color_principal: string;
   moneda_codigo: string;
   moneda_simbolo: string;
+  precio_revision_default: string;
+  condiciones_servicio_contrato: string;
 }
 
 const emptyForm: FormState = {
@@ -43,6 +45,8 @@ const emptyForm: FormState = {
   color_principal: "#2563eb",
   moneda_codigo: "GTQ",
   moneda_simbolo: "Q",
+  precio_revision_default: "",
+  condiciones_servicio_contrato: "",
 };
 
 const inputStyle = {
@@ -87,6 +91,8 @@ export default function EmpresaPage() {
       color_principal: empresa.color_principal || empresa.color_primario || "#2563eb",
       moneda_codigo: empresa.moneda_codigo || "GTQ",
       moneda_simbolo: empresa.moneda_simbolo || "Q",
+      precio_revision_default: empresa.precio_revision_default != null ? String(empresa.precio_revision_default) : "",
+      condiciones_servicio_contrato: empresa.condiciones_servicio_contrato || "",
     });
     setLogoPreview(empresa.logo_url ? getImageUrl(empresa.logo_url) : "");
   }, [empresa]);
@@ -133,6 +139,8 @@ export default function EmpresaPage() {
         color_principal: form.color_principal,
         moneda_codigo: form.moneda_codigo,
         moneda_simbolo: form.moneda_simbolo,
+        precio_revision_default: form.precio_revision_default !== "" ? parseFloat(form.precio_revision_default) : null,
+        condiciones_servicio_contrato: form.condiciones_servicio_contrato || null,
       });
 
       if (logoFile) {
@@ -361,6 +369,38 @@ export default function EmpresaPage() {
                 onChange={(event) => setField("direccion", event.target.value)}
                 className={`${inputCls} min-h-[96px] resize-y`}
                 style={inputStyle}
+              />
+            </label>
+
+            <label className="block">
+              <span className="flex items-center gap-2 text-sm font-semibold mb-1.5" style={{ color: "var(--color-text)" }}>
+                <DollarSign size={15} /> Precio por revisión / diagnóstico
+              </span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.precio_revision_default}
+                onChange={(event) => setField("precio_revision_default", event.target.value)}
+                placeholder="Ej. 50.00"
+                className={inputCls}
+                style={inputStyle}
+              />
+            </label>
+
+            <label className="block md:col-span-2">
+              <span className="flex items-center gap-2 text-sm font-semibold mb-1.5" style={{ color: "var(--color-text)" }}>
+                <AlignLeft size={15} /> Condiciones de servicio del contrato
+              </span>
+              <p className="text-xs mb-1.5" style={{ color: "var(--color-text-sec)" }}>
+                Escribe una condición por línea. Si se dejan vacías se usarán las condiciones predeterminadas.
+              </p>
+              <textarea
+                value={form.condiciones_servicio_contrato}
+                onChange={(event) => setField("condiciones_servicio_contrato", event.target.value)}
+                className={`${inputCls} min-h-[180px] resize-y`}
+                style={inputStyle}
+                placeholder={"El cliente declara que la información proporcionada es correcta.\nEl costo final será informado después del diagnóstico."}
               />
             </label>
           </div>

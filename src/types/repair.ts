@@ -30,23 +30,27 @@ export interface RepairReception {
   modelo?: string;
   color?: string;
   imeiSerie?: string;
-  imei?: string;           // alias mapped from API (imei_serie)
+  imei?: string;
+
+  // Acceso del equipo
   patronContraseña?: string;
-  contraseña?: string;     // alias mapped from API (patron_contrasena)
+  patronContrasena?: string;
+  contraseña?: string;
+  contrasena?: string;
   accesoTipo?: 'ninguno' | 'pin' | 'patron';
   accesoValor?: string | null;
+
   accesoriosRecibidos: AccessoriesReceived;
   estadoFisico?: string;
   diagnosticoInicial?: string;
   fotosRecepcion: string[];
   fechaRecepcion: string;
   userRecepcion?: string;
-  recepcionConfirmada?: boolean; // Para bloquear edición
-  
-  // Anticipo
+  recepcionConfirmada?: boolean;
+
   montoAnticipo?: number;
   metodoAnticipo?: 'efectivo' | 'transferencia' | 'tarjeta' | 'tarjeta_bac' | 'tarjeta_neonet' | 'tarjeta_otra';
-  comprobanteTransferencia?: string; // Para transferencias
+  comprobanteTransferencia?: string;
 }
 
 export interface StateHistoryEntry {
@@ -169,6 +173,10 @@ export interface RepairFormData {
   manoDeObra: number;
   observaciones?: string;
   tecnicoAsignado?: string;
+
+  // Contrato específico para esta reparación
+  precioRevisionContrato?: number | null;
+  condicionesServicioContrato?: string | null;
   
   // Fotos opcionales del equipo
   fotosEquipo?: string[];

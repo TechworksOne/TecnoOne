@@ -20,6 +20,8 @@ export interface EmpresaConfig {
   moneda_codigo?: string | null;
   moneda_simbolo?: string | null;
   zona_horaria?: string | null;
+  precio_revision_default?: number | null;
+  condiciones_servicio_contrato?: string | null;
 }
 
 export interface EmpresaUpdatePayload {
@@ -35,6 +37,8 @@ export interface EmpresaUpdatePayload {
   moneda_codigo?: string | null;
   moneda_simbolo?: string | null;
   zona_horaria?: string | null;
+  precio_revision_default?: number | null;
+  condiciones_servicio_contrato?: string | null;
 }
 
 interface EmpresaResponse {

@@ -80,6 +80,83 @@ function calcSaldo(r: Repair): number {
   return Math.max(0, total - pagado);
 }
 
+type AccessInfo = {
+  tipo: 'ninguno' | 'pin' | 'patron';
+  valor: string;
+  label: string | null;
+};
+
+function normalizeAccessType(value?: string | null): AccessInfo['tipo'] {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (normalized === 'patron' || normalized === 'pattern') return 'patron';
+  if (normalized === 'pin' || normalized === 'password' || normalized === 'contrasena') return 'pin';
+
+  return 'ninguno';
+}
+
+function formatPatternSequence(value?: string | null): string {
+  const nodes = String(value || '').match(/[1-9]/g) || [];
+  return nodes.join(' → ');
+}
+
+function getAccessInfo(recepcion?: any): AccessInfo {
+  const tipoRaw = normalizeAccessType(recepcion?.accesoTipo ?? recepcion?.acceso_tipo);
+
+  const valor = String(
+    recepcion?.accesoValor ??
+    recepcion?.acceso_valor ??
+    recepcion?.contrasena ??
+    recepcion?.contraseña ??
+    recepcion?.patronContrasena ??
+    recepcion?.patronContraseña ??
+    recepcion?.patron_contrasena ??
+    ''
+  ).trim();
+
+  const looksLikePattern =
+    /^[1-9](?:[-,\s→]*[1-9]){1,8}$/.test(valor) && /[-,\s→]/.test(valor);
+
+  const tipo = tipoRaw === 'ninguno' && valor
+    ? (looksLikePattern ? 'patron' : 'pin')
+    : tipoRaw;
+
+  if (tipo === 'patron') {
+    const sequence = formatPatternSequence(valor);
+    return {
+      tipo: 'patron',
+      valor,
+      label: valor ? `Patrón: ${sequence || valor}` : 'Patrón registrado',
+    };
+  }
+
+  if (tipo === 'pin') {
+    return {
+      tipo: 'pin',
+      valor,
+      label: valor ? `PIN: ${valor}` : 'PIN registrado',
+    };
+  }
+
+  if (valor) {
+    return {
+      tipo: 'pin',
+      valor,
+      label: `PIN: ${valor}`,
+    };
+  }
+
+  return {
+    tipo: 'ninguno',
+    valor: '',
+    label: null,
+  };
+}
+
 function calcTotalPagado(r: Repair): number {
   return (r.recepcion.montoAnticipo || 0) + (r.montoPagadoAdicional || 0);
 }
@@ -568,6 +645,7 @@ function RepairCard({
   const totalPagado = calcTotalPagado(repair);
   const isPaid = repair.total > 0 && saldo <= 0;
   const hasTotal = repair.total > 0;
+  const accessInfo = getAccessInfo(repair.recepcion);
 
   return (
     <div className={`border rounded-2xl p-4 shadow-sm transition-all ${isCancelled ? 'bg-red-50/60 dark:bg-red-950/20 border-red-200 dark:border-red-900/60' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:shadow-md hover:border-slate-300 dark:hover:bg-slate-900/90'}`}>
@@ -640,7 +718,11 @@ function RepairCard({
             {(repair.recepcion.tipoEquipo || repair.recepcion.color) && (
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{[repair.recepcion.tipoEquipo, repair.recepcion.color].filter(Boolean).join(' · ')}</p>
             )}
-            {repair.recepcion.imei && <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-0.5">IMEI: {repair.recepcion.imei}</p>}
+            {accessInfo.label && (
+            <p className="text-[11px] text-blue-600 dark:text-blue-400 font-medium mt-1">
+              {accessInfo.label}
+            </p>
+          )}
           </div>
 
           {/* Fecha + diagnóstico */}
@@ -869,145 +951,262 @@ export default function RepairsPage() {
     }
   };
 
-  const handleImprimirTicket = (r: Repair) => {
-    const printWindow = window.open('', '_blank', 'width=220,height=130');
-    if (!printWindow) return;
+const handleImprimirTicket = (r: Repair) => {
+  const printWindow = window.open(
+    '',
+    '_blank',
+    'width=520,height=720,left=200,top=80,resizable=yes,scrollbars=yes'
+  );
 
-    const ra = r as any;
-    const tecnico = (ra.tecnicoNombre?.trim() && ra.tecnicoNombre.trim() !== '')
-      ? ra.tecnicoNombre.trim()
-      : ra.tecnicoUsername || r.tecnicoAsignado || 'Sin asignar';
+  if (!printWindow) return;
 
-    const equipo = [r.recepcion.marca, r.recepcion.modelo].filter(Boolean).join(' ') || 'N/A';
-    const detalle = [r.recepcion.tipoEquipo, r.recepcion.color].filter(Boolean).join(' / ') || '';
-    const imei = r.recepcion.imei || r.recepcion.imeiSerie || '';
+  const equipo = [r.recepcion.marca, r.recepcion.modelo].filter(Boolean).join(' ') || 'N/A';
 
-    const anticipo = r.recepcion.montoAnticipo ?? 0;
-    const pagadoAdicional = r.montoPagadoAdicional ?? 0;
-    const saldo = Math.max(0, (r.total || 0) - anticipo - pagadoAdicional);
+  const anticipo = r.recepcion.montoAnticipo ?? 0;
+  const pagadoAdicional = r.montoPagadoAdicional ?? 0;
+  const saldo = Math.max(0, (r.total || 0) - anticipo - pagadoAdicional);
 
-    const fechaIngreso = (() => {
-      const v = r.recepcion.fechaRecepcion || r.fechaIngreso;
-      if (!v) return 'N/A';
-      const match = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (!match) return String(v);
-      const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-      return isNaN(d.getTime()) ? String(v)
-        : d.toLocaleDateString('es-GT', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    })();
+  const fechaIngreso = (() => {
+    const v = r.recepcion.fechaRecepcion || r.fechaIngreso;
 
-    const problema = r.recepcion.diagnosticoInicial || r.observaciones || 'N/A';
-    const estadoLabel = STATUS_LABEL[r.estado] || r.estado.replace(/_/g, ' ');
-    const creadoPor = r.recepcion.userRecepcion || 'N/A';
-    const garantia = r.garantiaDias ? `${r.garantiaDias} días` : 'N/A';
-    const recepcion = r.recepcion as any;
-    const accesoTipo = recepcion?.accesoTipo;
-    const accesoValor =
-      recepcion?.accesoValor ||
-      recepcion?.contrasena ||
-      recepcion?.contraseña ||
-      recepcion?.patronContrasena ||
-      recepcion?.patronContraseña ||
-      '';
-    const accesoLabel = !accesoTipo || accesoTipo === 'ninguno'
-      ? (accesoValor ? `Contraseña/PIN: ${accesoValor}` : null)
-      : accesoTipo === 'patron'
-        ? 'Patrón'
-        : `PIN: ${accesoValor}`;
+    if (!v) return 'N/A';
 
-    const esc = (s: unknown) =>
-      String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const match = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
 
-    const parsePattern = (value?: string | null): number[] => {
-      if (!value) return [];
-      const parsed = String(value).match(/[1-9]/g)?.map(Number) || [];
-      return Array.from(new Set(parsed)).filter(n => n >= 1 && n <= 9);
-    };
+    if (!match) return String(v);
 
-    const patternNodes = parsePattern(accesoTipo === 'patron' ? accesoValor : '');
-    const patternSvg = patternNodes.length > 0 ? (() => {
-      const points = Array.from({ length: 9 }, (_, i) => ({
-        n: i + 1,
-        x: 8 + (i % 3) * 14,
-        y: 8 + Math.floor(i / 3) * 14,
-      }));
-      const linePoints = patternNodes
-        .map(n => points.find(p => p.n === n))
-        .filter(Boolean)
-        .map(p => `${p!.x},${p!.y}`)
-        .join(' ');
-      return `<svg class="pattern" viewBox="0 0 44 44" aria-label="Patr?n">${linePoints ? `<polyline points="${linePoints}" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />` : ''}${points.map(p => `<circle cx="${p.x}" cy="${p.y}" r="${patternNodes.includes(p.n) ? 2.5 : 1.8}" fill="${patternNodes.includes(p.n) ? '#000' : '#fff'}" stroke="#000" stroke-width="1" />`).join('')}</svg>`;
-    })() : '';
+    const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 
-    const logoUrl = empresa?.logo_url ? getImageUrl(empresa.logo_url) : '';
-    const empresaNombre = empresa?.nombre_comercial || empresa?.nombre || 'TecnoOne';
-    const logoHtml = logoUrl
-      ? `<img class="brand-logo" src="${esc(logoUrl)}" alt="${esc(empresaNombre)}" />`
-      : '<div class="brand-mark">TO</div>';
+    return isNaN(d.getTime())
+      ? String(v)
+      : d.toLocaleDateString('es-GT', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        });
+  })();
 
-    const html = `<!DOCTYPE html>
+  const problema = r.recepcion.diagnosticoInicial || r.observaciones || 'N/A';
+  const creadoPor = r.recepcion.userRecepcion || 'N/A';
+
+  const accessInfo = getAccessInfo(r.recepcion);
+
+  const formatPatternForTicket = (value?: string | null): string => {
+    const nodes = String(value || '').match(/[1-9]/g) || [];
+    return nodes.join(' > ');
+  };
+
+  const accesoLabel = accessInfo.label
+    ? accessInfo.tipo === 'patron'
+      ? `Patrón: ${formatPatternForTicket(accessInfo.valor) || accessInfo.valor}`
+      : accessInfo.label
+    : null;
+
+  const esc = (s: unknown) =>
+    String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+  const logoUrl = empresa?.logo_url ? getImageUrl(empresa.logo_url) : '';
+  const empresaNombre = empresa?.nombre_comercial || empresa?.nombre || 'TecnoOne';
+
+  const logoHtml = logoUrl
+    ? `<img class="brand-logo" src="${esc(logoUrl)}" alt="${esc(empresaNombre)}" />`
+    : '<div class="brand-mark">TO</div>';
+
+  const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Ticket ${r.id}</title>
+  <title>Ticket ${esc(r.id)}</title>
   <style>
-    @page { size: 2in 1in; margin: 0.8mm; }
-    * { box-sizing: border-box; }
+    @page {
+      size: 2in 1in;
+      margin: 0.7mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
     body {
-      font-family: Arial, sans-serif;
-      font-size: 6px;
-      color: #000;
-      background: #fff;
       margin: 0;
       padding: 0;
+      background: #fff;
+      color: #000;
+      font-family: Arial, sans-serif;
+      font-size: 5.6px;
+      line-height: 1.2;
     }
-    .ticket { width: 100%; }
-    .header { text-align: center; border-bottom: 1px solid #000; padding-bottom: 0.5mm; margin-bottom: 0.5mm; display: flex; align-items: center; gap: 1mm; }
-    .brand-mark { height: 7mm; width: 7mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 5px; font-weight: bold; color: #000; background: #fff; border: 1px solid #000; border-radius: 1mm; }
-    .brand-logo { max-height: 7mm; max-width: 14mm; object-fit: contain; filter: grayscale(1) contrast(1.25); -webkit-filter: grayscale(1) contrast(1.25); }
-    .header-text { font-size: 8px; font-weight: bold; line-height: 1.2; }
-    .header-text span { font-size: 6px; font-weight: normal; display: block; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1mm; }
-    .row { line-height: 1.35; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .row.full { grid-column: span 2; white-space: normal; word-break: break-word; }
-    .b { font-weight: bold; }
-    .nota { font-size: 5.5px; line-height: 1.3; max-height: 10mm; overflow: hidden; }
-    .access { display: flex; align-items: center; gap: 1mm; }
-    .pattern { width: 10mm; height: 10mm; flex-shrink: 0; }
+
+    .ticket {
+      width: 100%;
+      max-width: 2in;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 1mm;
+      border-bottom: 1px solid #000;
+      padding-bottom: 0.4mm;
+      margin-bottom: 0.4mm;
+      min-height: 7mm;
+    }
+
+    .brand-mark {
+      width: 7mm;
+      height: 7mm;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 5px;
+      font-weight: bold;
+      border: 1px solid #000;
+      border-radius: 1mm;
+      color: #000;
+      background: #fff;
+    }
+
+    .brand-logo {
+      max-width: 13mm;
+      max-height: 7mm;
+      object-fit: contain;
+      filter: grayscale(1) contrast(1.25);
+      -webkit-filter: grayscale(1) contrast(1.25);
+      flex-shrink: 0;
+    }
+
+    .header-text {
+      font-size: 7px;
+      font-weight: bold;
+      line-height: 1.05;
+      overflow: hidden;
+    }
+
+    .header-text span {
+      display: block;
+      font-size: 5.2px;
+      font-weight: normal;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 1mm;
+    }
+
+    .row {
+      line-height: 1.22;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .row.full {
+      grid-column: span 2;
+      white-space: normal;
+      word-break: break-word;
+    }
+
+    .b {
+      font-weight: bold;
+    }
+
+    .access {
+      font-weight: bold;
+      font-size: 5.8px;
+    }
+
+    .nota {
+      font-size: 5.2px;
+      line-height: 1.15;
+      max-height: 7mm;
+      overflow: hidden;
+    }
+
+    @media screen {
+      body {
+        padding: 18px;
+        background: #e5e7eb;
+      }
+
+      .ticket {
+        background: #fff;
+        border: 1px solid #111;
+        padding: 3mm;
+        width: 2in;
+        max-width: 2in;
+        min-height: 1in;
+        margin: 0 auto;
+        transform: scale(2.2);
+        transform-origin: top center;
+      }
+    }
+
     @media print {
-      body { background: #fff !important; color: #000 !important; }
+      body {
+        background: #fff !important;
+        color: #000 !important;
+      }
+
+      .ticket {
+        border: none !important;
+        transform: none !important;
+        padding: 0 !important;
+      }
     }
   </style>
 </head>
 <body>
-<div class="ticket">
-  <div class="header">${logoHtml}<div class="header-text">${esc(empresaNombre)}<span>Ticket de reparaci\u00f3n</span></div></div>
-  <div class="grid">
-    <div class="row full"><span class="b"># </span>${esc(r.id)}</div>
-    <div class="row"><span class="b">Cliente: </span>${esc(r.clienteNombre || 'N/A')}</div>
-    <div class="row"><span class="b">Tel: </span>${esc(r.clienteTelefono || 'N/A')}</div>
-    <div class="row"><span class="b">Equipo: </span>${esc(equipo)}</div>
-    <div class="row"><span class="b">Ingreso: </span>${esc(fechaIngreso)}</div>
-    <div class="row"><span class="b">T\u00e9cnico: </span>${esc(tecnico)}</div>
-    <div class="row"><span class="b">Prioridad: </span>${esc(r.prioridad)}</div>
-    <div class="row"><span class="b">Recibido por: </span>${esc(creadoPor)}</div>
-    ${accesoLabel ? `<div class="row ${patternSvg ? 'full access' : ''}"><span class="b">Acceso: </span>${esc(accesoLabel)} ${patternSvg}</div>` : ''}
-    <div class="row full nota"><span class="b">Nota: </span>${esc(problema)}</div>
+  <div class="ticket">
+    <div class="header">
+      ${logoHtml}
+      <div class="header-text">
+        ${esc(empresaNombre)}
+        <span>Ticket de reparación</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="row full"><span class="b"># </span>${esc(r.id)}</div>
+      <div class="row"><span class="b">Cliente: </span>${esc(r.clienteNombre || 'N/A')}</div>
+      <div class="row"><span class="b">Tel: </span>${esc(r.clienteTelefono || 'N/A')}</div>
+      <div class="row"><span class="b">Equipo: </span>${esc(equipo)}</div>
+      <div class="row"><span class="b">Ingreso: </span>${esc(fechaIngreso)}</div>
+      <div class="row"><span class="b">Recibido: </span>${esc(creadoPor)}</div>
+      ${accesoLabel ? `<div class="row full access"><span class="b">Acceso: </span>${esc(accesoLabel)}</div>` : ''}
+      ${r.total > 0 ? `<div class="row"><span class="b">Total: </span>Q${Number(r.total || 0).toFixed(2)}</div>` : ''}
+      ${saldo > 0 ? `<div class="row"><span class="b">Saldo: </span>Q${saldo.toFixed(2)}</div>` : ''}
+      <div class="row full nota"><span class="b">Nota: </span>${esc(problema)}</div>
+    </div>
   </div>
-</div>
-<script>
-  window.onload = function() {
-    window.print();
-    setTimeout(function() { window.close(); }, 500);
-  };
-</script>
+
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+      }, 250);
+
+      window.onafterprint = function() {
+        setTimeout(function() {
+          window.close();
+        }, 400);
+      };
+    };
+  </script>
 </body>
 </html>`;
 
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-  };
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+};
 
   return (
     <div className="space-y-4">
