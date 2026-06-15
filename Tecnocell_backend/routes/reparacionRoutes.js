@@ -4,9 +4,11 @@ const router = express.Router();
 const reparacionController = require('../controllers/reparacionController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
 router.use(verifyToken);
 router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
 // Rutas CRUD
 router.get('/', reparacionController.getAllReparaciones);

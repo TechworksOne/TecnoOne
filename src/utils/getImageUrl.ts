@@ -13,6 +13,11 @@ const addUploadsCacheVersion = (url: string): string => {
   return `${url}${separator}v=${UPLOADS_CACHE_VERSION}`;
 };
 
+const isUnsafeImagePath = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase();
+  return normalized === '' || normalized === 'undefined' || normalized === 'null' || normalized === 'nan';
+};
+
 /**
  * Construye la URL completa para una imagen almacenada en /uploads del backend.
  * Maneja todos los formatos posibles de ruta:
@@ -28,7 +33,7 @@ export const getImageUrl = (imagePath?: string | null): string => {
 
   const cleanPath = String(imagePath).trim();
 
-  if (!cleanPath) return '';
+  if (isUnsafeImagePath(cleanPath)) return '';
 
   // URLs absolutas y especiales: devolver tal cual (sin cache busting)
   if (

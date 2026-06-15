@@ -32,11 +32,11 @@ const getTipoIcon = (tipo: Repuesto['tipo']) => {
 
 const getCondicionColor = (condicion: Repuesto['condicion']) => {
   switch (condicion) {
-    case 'Original': return 'bg-green-100 text-green-800';
-    case 'OEM': return 'bg-blue-100 text-blue-800';
-    case 'Genérico': return 'bg-yellow-100 text-yellow-800';
-    case 'Usado': return 'bg-gray-100 text-gray-800';
-    default: return 'bg-gray-100 text-gray-800';
+    case 'Original': return 'bg-emerald-50 text-emerald-700 dark:bg-[#202124] dark:text-emerald-400 dark:border dark:border-emerald-900/50';
+    case 'OEM': return 'bg-blue-50 text-blue-700 dark:bg-[#202124] dark:text-blue-400 dark:border dark:border-blue-900/50';
+    case 'Genérico': return 'bg-amber-50 text-amber-700 dark:bg-[#202124] dark:text-amber-400 dark:border dark:border-amber-900/50';
+    case 'Usado': return 'bg-gray-100 text-gray-700 dark:bg-[#202124] dark:text-[#9AA0A6] dark:border dark:border-[#303134]';
+    default: return 'bg-gray-100 text-gray-700 dark:bg-[#202124] dark:text-[#9AA0A6] dark:border dark:border-[#303134]';
   }
 };
 
@@ -57,9 +57,9 @@ export default function RepuestoCard({
   const masCompatibilidad = repuesto.compatibilidad && repuesto.compatibilidad.length > 2;
 
   return (
-    <Card className="group hover:shadow-lg transition-all duration-200 overflow-hidden">
+    <Card className="group transition-all duration-200 overflow-hidden">
       {/* Imagen mejorada */}
-      <div className="relative h-48 bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden">
+      <div className="relative h-48 bg-gray-50 dark:bg-[var(--color-surface-soft)] overflow-hidden">
         {imagenes.length > 0 ? (
           <div className="relative w-full h-full">
             <img
@@ -79,7 +79,7 @@ export default function RepuestoCard({
                     e.stopPropagation();
                     setShowImageModal(true);
                   }}
-                  className="p-2 bg-white dark:bg-slate-800 rounded-full shadow-lg hover:bg-gray-100 transition-colors"
+                  className="p-2 bg-white dark:bg-[#202124] rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-[#2A2B2F] transition-colors"
                   title="Ver imagen completa"
                 >
                   <ZoomIn size={16} />
@@ -98,7 +98,7 @@ export default function RepuestoCard({
             )}
           </div>
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-400 bg-gray-100">
+          <div className="w-full h-full flex items-center justify-center text-gray-400 dark:text-[#9AA0A6] bg-gray-100 dark:bg-[var(--color-surface-soft)]">
             <div className="text-center">
               {getTipoIcon(repuesto.tipo)}
               <p className="text-xs mt-2">Sin imagen</p>
@@ -130,20 +130,20 @@ export default function RepuestoCard({
       <div className="p-4 space-y-3">
         {/* SKU */}
         {repuesto.sku && (
-          <div className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600">
-            <span className="text-xs text-gray-500 font-medium">SKU:</span>
-            <span className="text-xs font-mono text-gray-700 font-semibold">{repuesto.sku}</span>
+          <div className="flex items-center justify-between bg-gray-50 dark:bg-[var(--color-surface-soft)] px-3 py-2 rounded-lg border border-gray-200 dark:border-[var(--color-border)]">
+            <span className="text-xs text-gray-500 dark:text-[var(--color-text-sec)] font-medium">SKU:</span>
+            <span className="text-xs font-mono text-gray-700 dark:text-[var(--color-text)] font-semibold">{repuesto.sku}</span>
           </div>
         )}
 
         {/* Nombre */}
-        <h3 className="font-semibold text-gray-900 line-clamp-2 group-hover:text-blue-600 transition-colors">
+        <h3 className="font-semibold text-gray-900 dark:text-[var(--color-text)] line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-[var(--tenant-primary-color)] transition-colors">
           {repuesto.nombre}
         </h3>
 
         {/* Chips de tipo y condición */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1 bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full text-xs">
+          <div className="flex items-center gap-1 bg-blue-50 text-blue-700 dark:bg-[#202124] dark:text-blue-400 dark:border dark:border-blue-900/50 px-2 py-1 rounded-full text-xs">
             {getTipoIcon(repuesto.tipo)}
             <span>{repuesto.tipo}</span>
           </div>
@@ -153,11 +153,11 @@ export default function RepuestoCard({
         </div>
 
         {/* Marca y línea */}
-        <div className="text-sm text-gray-600">
+        <div className="text-sm text-gray-600 dark:text-[var(--color-text-sec)]">
           <span className="font-medium">{repuesto.marca}</span>
           {repuesto.linea && <span> • {repuesto.linea}</span>}
           {repuesto.proveedor && (
-            <div className="text-xs text-gray-500 mt-1">
+            <div className="text-xs text-gray-500 dark:text-[var(--color-text-muted)] mt-1">
               📦 {repuesto.proveedor}
             </div>
           )}
@@ -165,7 +165,7 @@ export default function RepuestoCard({
 
         {/* Compatibilidad */}
         {compatibilidadCorta && (
-          <div className="text-xs text-gray-500" title={repuesto.compatibilidad?.join(', ')}>
+          <div className="text-xs text-gray-500 dark:text-[var(--color-text-muted)]" title={repuesto.compatibilidad?.join(', ')}>
             Compatible: {compatibilidadCorta}
             {masCompatibilidad && <span className="font-medium"> +{repuesto.compatibilidad!.length - 2} más</span>}
           </div>
@@ -174,13 +174,13 @@ export default function RepuestoCard({
         {/* Precio y stock */}
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-lg font-bold text-green-600">
+            <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
               {formatMoney(repuesto.precio)}
             </div>
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-gray-500 dark:text-[var(--color-text-muted)]">
               Costo: {formatMoney(repuesto.precioCosto)}
             </div>
-            <div className={`text-sm ${stockBajo ? 'text-red-600' : 'text-gray-500'}`}>
+            <div className={`text-sm ${stockBajo ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-[var(--color-text-muted)]'}`}>
               {repuesto.stock} {repuesto.stock === 1 ? 'unidad' : 'unidades'}
               {stockBajo && (
                 <AlertTriangle size={14} className="inline ml-1" />
@@ -190,10 +190,10 @@ export default function RepuestoCard({
           
           {/* Indicador de margen */}
           <div className="text-right">
-            <div className="text-xs text-emerald-600 font-medium">
+            <div className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
               +{(((repuesto.precio - repuesto.precioCosto) / repuesto.precioCosto) * 100).toFixed(0)}%
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-500 dark:text-[var(--color-text-muted)]">
               margen
             </div>
           </div>
@@ -205,19 +205,19 @@ export default function RepuestoCard({
             {repuesto.tags.slice(0, 3).map((tag, index) => (
               <span
                 key={index}
-                className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded"
+                className="text-xs bg-slate-100 text-slate-700 dark:bg-[#202124] dark:text-[#9AA0A6] dark:border dark:border-[#303134] px-2 py-1 rounded"
               >
                 {tag}
               </span>
             ))}
             {repuesto.tags.length > 3 && (
-              <span className="text-xs text-gray-500">+{repuesto.tags.length - 3}</span>
+              <span className="text-xs text-gray-500 dark:text-[var(--color-text-muted)]">+{repuesto.tags.length - 3}</span>
             )}
           </div>
         )}
 
         {/* Botones */}
-        <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-slate-700">
+        <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-[var(--color-border)]">
           <Button
             variant="ghost"
             size="sm"

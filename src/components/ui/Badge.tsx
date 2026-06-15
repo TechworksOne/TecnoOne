@@ -10,23 +10,23 @@ export default function Badge({ children, color = "gray", className = "" }: Badg
   const getColorClasses = (color: string) => {
     switch (color) {
       case "red":
-        return "bg-red-100 text-red-700";
+        return "bg-red-50 text-red-700 border-red-200 dark:bg-[#202124] dark:text-red-300 dark:border-[#303134]";
       case "green":
-        return "bg-green-100 text-green-700";
+        return "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-[#202124] dark:text-emerald-300 dark:border-[#303134]";
       case "yellow":
-        return "bg-yellow-100 text-yellow-700";
+        return "bg-amber-50 text-amber-700 border-amber-200 dark:bg-[#202124] dark:text-amber-300 dark:border-[#303134]";
       case "blue":
-        return "bg-blue-100 text-blue-700";
+        return "bg-sky-50 text-sky-700 border-sky-200 dark:bg-[#202124] dark:text-blue-300 dark:border-[#303134]";
       case "purple":
-        return "bg-purple-100 text-purple-700";
+        return "bg-violet-50 text-violet-700 border-violet-200 dark:bg-[#202124] dark:text-[#9AA0A6] dark:border-[#303134]";
       case "gray":
       default:
-        return "bg-gray-100 text-gray-700";
+        return "bg-slate-100 text-slate-700 border-slate-200 dark:bg-[#202124] dark:text-[#9AA0A6] dark:border-[#303134]";
     }
   };
 
   return (
-    <span className={`px-2 py-1 rounded-full text-xs ${getColorClasses(color)} ${className}`}>
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${getColorClasses(color)} ${className}`}>
       {children}
     </span>
   );

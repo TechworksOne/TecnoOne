@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { X, Search, Package, DollarSign, ChevronDown } from 'lucide-react';
+import { Search, Package, ChevronDown } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
@@ -28,39 +28,57 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
   
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [precioMin, setPrecioMin] = useState<number | ''>('');
-  const [precioMax, setPrecioMax] = useState<number | ''>('');
-  const [soloConStock, setSoloConStock] = useState(true);
+  const [soloConStock, setSoloConStock] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<Map<string, { product: Product; cantidad: number; precioUnit: number; aplicarImpuestos: boolean }>>(new Map());
 
   const categories = getAllCategories();
 
-  // Cargar productos cuando se abre el modal
+  // Cargar productos cuando se abre el modal o cambian filtros remotos
   useEffect(() => {
-    if (open) {
-      loadProducts(1, 100); // Cargar más productos para el selector
-    }
-  }, [open, loadProducts]);
+    if (!open) return;
+
+    const query = searchTerm.trim();
+    const categoria = categoryFilter === 'all' ? undefined : categoryFilter;
+    const hasRemoteFilters = query !== '' || Boolean(categoria);
+    const limit = hasRemoteFilters ? 20 : 5;
+
+    loadProducts(1, limit, query || undefined, categoria, {
+      activo: true,
+      conStock: soloConStock ? true : undefined,
+    });
+  }, [open, searchTerm, categoryFilter, soloConStock, loadProducts]);
 
   // Filtrar productos
   const filteredProducts = useMemo(() => {
-    return products.filter(product => {
-      if (!product.active) return false;
+    return products.filter((product: any) => {
+      const active = product.active ?? product.activo ?? true;
+      if (!active) return false;
+
+      const name = String(product.name ?? product.nombre ?? '').toLowerCase();
+      const sku = String(product.sku ?? '').toLowerCase();
+      const category = String(product.category ?? product.categoria ?? '');
+      const stock = Number(product.stock ?? 0);
+      const search = searchTerm.toLowerCase();
       
       const matchesSearch = searchTerm === '' || 
-        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.sku.toLowerCase().includes(searchTerm.toLowerCase());
+        name.includes(search) ||
+        sku.includes(search);
       
-      const matchesCategory = categoryFilter === 'all' || product.category === categoryFilter;
+      const matchesCategory = categoryFilter === 'all' || category === categoryFilter;
       
-      const matchesStock = !soloConStock || product.stock > 0;
+      const matchesStock = !soloConStock || stock > 0;
       
-      const matchesPrecioMin = precioMin === '' || product.price >= precioMin;
-      const matchesPrecioMax = precioMax === '' || product.price <= precioMax;
-      
-      return matchesSearch && matchesCategory && matchesStock && matchesPrecioMin && matchesPrecioMax;
+      return matchesSearch && matchesCategory && matchesStock;
     });
-  }, [products, searchTerm, categoryFilter, soloConStock, precioMin, precioMax]);
+  }, [products, searchTerm, categoryFilter, soloConStock]);
+
+  const displayedProducts = useMemo(() => {
+    const hasUserFilters =
+      searchTerm.trim() !== '' ||
+      categoryFilter !== 'all';
+
+    return hasUserFilters ? filteredProducts : filteredProducts.slice(0, 5);
+  }, [filteredProducts, searchTerm, categoryFilter]);
 
   const handleToggleProduct = (product: Product) => {
     const newSelected = new Map(selectedProducts);
@@ -125,8 +143,6 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
     setSelectedProducts(new Map());
     setSearchTerm('');
     setCategoryFilter('all');
-    setPrecioMin('');
-    setPrecioMax('');
     onClose();
   };
 
@@ -136,7 +152,7 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
     <Modal open={open} onClose={handleClose} title="Seleccionar Productos">
       <div className="space-y-6">
         {/* Filtros */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_220px_auto] gap-4">
           <div className="relative">
             <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <Input
@@ -157,23 +173,6 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
             <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" size={18} />
           </div>
 
-          <div className="flex gap-2">
-            <Input
-              type="number"
-              placeholder="Precio mín"
-              value={precioMin}
-              onChange={(e) => setPrecioMin(e.target.value === '' ? '' : Number(e.target.value))}
-              className="w-full"
-            />
-            <Input
-              type="number"
-              placeholder="Precio máx"
-              value={precioMax}
-              onChange={(e) => setPrecioMax(e.target.value === '' ? '' : Number(e.target.value))}
-              className="w-full"
-            />
-          </div>
-
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -181,7 +180,7 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
               onChange={(e) => setSoloConStock(e.target.checked)}
               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
-            <span className="text-sm text-gray-700">Solo con stock</span>
+            <span className="text-sm text-gray-700 dark:text-slate-300">Solo con stock</span>
           </label>
         </div>
 
@@ -192,21 +191,25 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
               <Package size={48} className="mx-auto mb-2 text-gray-400 animate-pulse" />
               <p>Cargando productos...</p>
             </div>
-          ) : filteredProducts.length === 0 ? (
+          ) : displayedProducts.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
               <Package size={48} className="mx-auto mb-2 text-gray-400" />
               <p>No se encontraron productos</p>
             </div>
           ) : (
             <div className="divide-y">
-              {filteredProducts.map(product => {
+              {displayedProducts.map(product => {
                 const isSelected = selectedProducts.has(product.id);
                 const selection = selectedProducts.get(product.id);
+                const stockReal = Number(product.stock ?? 0);
+                const stockDisplay = Math.max(stockReal, 0);
+                const stockLabel = stockReal <= 0 ? 'Sin stock' : `Stock: ${stockDisplay}`;
+                const stockColor = stockReal > Number(product.stockMin ?? 0) ? 'green' : 'red';
                 
                 return (
                   <div
                     key={product.id}
-                    className={`p-4 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors ${isSelected ? 'bg-blue-50' : ''}`}
+                    className={`p-4 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : ''}`}
                   >
                     <div className="flex items-center gap-4">
                       <input
@@ -217,18 +220,16 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
                       />
                       
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-gray-900 truncate">{product.name}</h4>
+                        <h4 className="font-medium text-gray-900 dark:text-slate-100 truncate">{product.name}</h4>
                         <div className="flex items-center gap-3 mt-1">
-                          <span className="text-sm text-gray-500">SKU: {product.sku}</span>
-                          <Badge color={product.stock > product.stockMin ? 'green' : 'red'}>
-                            Stock: {product.stock}
-                          </Badge>
+                          <span className="text-sm text-gray-500 dark:text-slate-400">SKU: {product.sku}</span>
+                          <Badge color={stockColor}>{stockLabel}</Badge>
                           <Badge>{product.category}</Badge>
                         </div>
                       </div>
 
                       <div className="text-right">
-                        <p className="text-lg font-bold text-blue-600">{formatMoney(product.price)}</p>
+                        <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatMoney(product.price)}</p>
                       </div>
                     </div>
 
@@ -240,7 +241,6 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
                           <Input
                             type="number"
                             min="1"
-                            max={product.stock}
                             value={selection.cantidad}
                             onChange={(e) => handleUpdateCantidad(product.id, Number(e.target.value))}
                             className="w-full"
@@ -261,7 +261,7 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
 
                         <div>
                           <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Subtotal</label>
-                          <div className="px-3 py-2 bg-gray-100 rounded-lg font-bold text-green-600">
+                          <div className="px-3 py-2 bg-gray-100 dark:bg-slate-800 rounded-lg font-bold text-green-600 dark:text-green-400">
                             {formatMoney(selection.cantidad * selection.precioUnit)}
                           </div>
                         </div>
@@ -274,7 +274,7 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
                               onChange={() => handleToggleImpuestos(product.id)}
                               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                             />
-                            <span className="text-sm text-gray-700">Aplicar impuestos (IVA 12%)</span>
+                            <span className="text-sm text-gray-700 dark:text-slate-300">Aplicar impuestos (IVA 12%)</span>
                           </label>
                         </div>
                       </div>
@@ -288,9 +288,9 @@ export default function ProductoPicker({ open, onClose, onSelect }: ProductoPick
 
         {/* Footer con acciones */}
         <div className="flex items-center justify-between pt-4 border-t">
-          <div className="text-sm text-gray-600">
+          <div className="text-sm text-gray-600 dark:text-slate-400">
             {totalSeleccionados > 0 ? (
-              <span className="font-medium text-blue-600">
+              <span className="font-medium text-blue-600 dark:text-blue-400">
                 {totalSeleccionados} producto{totalSeleccionados !== 1 ? 's' : ''} seleccionado{totalSeleccionados !== 1 ? 's' : ''}
               </span>
             ) : (

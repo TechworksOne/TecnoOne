@@ -128,17 +128,23 @@ export default function NuevaCotizacionModal({ open, onClose }: Props) {
   }, [open]);
 
   useEffect(() => {
-    loadCustomers();
-  }, [loadCustomers]);
+    if (!open) return;
+    const query = searchCliente.trim();
+    loadCustomers({ search: query, limit: query ? 20 : 5 });
+  }, [open, searchCliente, loadCustomers]);
 
   // ── Clientes ─────────────────────────────────────────────────────────────
-  const filteredCustomers = customers.filter(c => {
+  const filteredCustomersBase = customers.filter(c => {
     if (!searchCliente) return true;
     const sl = searchCliente.toLowerCase();
     const nombre = `${c.firstName} ${c.lastName}`.toLowerCase();
     return nombre.includes(sl) || (c.phone || '').includes(searchCliente) ||
       (c.nit || '').includes(searchCliente) || (c.email || '').toLowerCase().includes(sl);
   });
+
+  const filteredCustomers = searchCliente.trim()
+    ? filteredCustomersBase
+    : filteredCustomersBase.slice(0, 5);
 
   const handleSelectCliente = (customer: typeof customers[0]) => {
     const fullName = (

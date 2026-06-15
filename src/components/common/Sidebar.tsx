@@ -5,9 +5,10 @@ import {
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
-import BrandMark from "./BrandMark";
 import { useSidebar } from "../../store/useSidebar";
 import { useAuth } from "../../store/useAuth";
+import { useEmpresa } from "../../store/useEmpresa";
+import { getImageUrl } from "../../utils/getImageUrl";
 
 // ─── Grupos de navegación ──────────────────────────────────────────────────
 // roles: null = visible para todos los roles autenticados
@@ -50,13 +51,21 @@ const GROUPS = [
       { to: "/clientes",       label: "Clientes",        icon: <Users size={17} />,     roles: ["ADMINISTRADOR", "VENTAS"]     },
       { to: "/proveedores",    label: "Proveedores",     icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"]               },
       { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />,    roles: ["ADMINISTRADOR"]               },
+      { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, roles: ["ADMINISTRADOR"]                 },
     ],
   },
 ];
 
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  return (name || "TE").slice(0, 2).toUpperCase();
+}
+
 export default function Sidebar() {
   const { isOpen, toggle } = useSidebar();
   const { user } = useAuth();
+  const { empresa, loadEmpresa } = useEmpresa();
   const location = useLocation();
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -73,6 +82,10 @@ export default function Sidebar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
+  useEffect(() => {
+    if (user) loadEmpresa();
+  }, [user, loadEmpresa]);
+
   // Calcular roles efectivos (RBAC + campo legado para compatibilidad)
   const userRoles: string[] = user?.roles ?? [];
   const legacyRole = (user?.role ?? '').toLowerCase();
@@ -85,6 +98,9 @@ export default function Sidebar() {
   const sidebarTransform = isMobile && !isOpen ? 'translateX(-100%)' : 'translateX(0)';
   // En mobile, el contenido siempre se muestra expandido (isOpen determina visibilidad)
   const showExpanded = isMobile ? true : isOpen;
+  const empresaName = empresa?.nombre_comercial || empresa?.nombre || "TecnoOne";
+  const empresaLogo = empresa?.logo_url ? getImageUrl(empresa.logo_url) : "";
+  const empresaColor = empresa?.color_principal || empresa?.color_primario || "var(--tenant-primary-color)";
 
   return (
     <>
@@ -101,6 +117,7 @@ export default function Sidebar() {
         style={{
           width: sidebarWidth,
           borderRight: "1px solid var(--color-border)",
+          boxShadow: "none",
           transition: "width 280ms cubic-bezier(.4,0,.2,1), transform 280ms cubic-bezier(.4,0,.2,1)",
           transform: sidebarTransform,
         }}
@@ -117,18 +134,46 @@ export default function Sidebar() {
       >
         {isOpen ? (
           <div className="flex items-center gap-3 overflow-hidden w-full">
-            <BrandMark size="sm" />
+            {empresaLogo ? (
+              <img
+                src={empresaLogo}
+                alt={empresaName}
+                className="rounded-xl object-contain shrink-0"
+                style={{ width: 38, height: 38, background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}
+              />
+            ) : (
+              <div
+                className="flex items-center justify-center rounded-xl text-white font-bold text-sm shrink-0"
+                style={{ width: 38, height: 38, background: empresaColor }}
+              >
+                {getInitials(empresaName)}
+              </div>
+            )}
             <div className="leading-tight overflow-hidden">
-              <p style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.06em", color: "var(--color-text)", whiteSpace: "nowrap" }}>
-                TecnoOne
+              <p style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0, color: "var(--color-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {empresaName}
               </p>
-              <p style={{ fontSize: 9, fontWeight: 500, letterSpacing: "0.12em", color: "var(--color-text-muted)", textTransform: "uppercase" }}>
-                Sistema comercial
+              <p style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.08em", color: "var(--color-text-muted)", textTransform: "uppercase" }}>
+                TecnoOne SaaS
               </p>
             </div>
           </div>
         ) : (
-          <BrandMark size="sm" />
+          empresaLogo ? (
+            <img
+              src={empresaLogo}
+              alt={empresaName}
+              className="rounded-xl object-contain"
+              style={{ width: 36, height: 36, background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}
+            />
+          ) : (
+            <div
+              className="flex items-center justify-center rounded-xl text-white font-bold text-sm"
+              style={{ width: 36, height: 36, background: empresaColor }}
+            >
+              {getInitials(empresaName)}
+            </div>
+          )
         )}
       </div>
 
@@ -146,7 +191,7 @@ export default function Sidebar() {
               {/* Grupo label — solo expandido */}
               {isOpen ? (
                 <div className="flex items-center gap-1.5" style={{ padding: "12px 6px 4px" }}>
-                  <div style={{ height: 1, width: 10, background: "#48B9E6", borderRadius: 999, opacity: 0.7 }} />
+                  <div style={{ height: 1, width: 10, background: "var(--tenant-primary-color)", borderRadius: 999, opacity: 0.7 }} />
                   <p style={{
                     fontSize: 9.5,
                     fontWeight: 700,
@@ -181,14 +226,12 @@ export default function Sidebar() {
                           borderRadius: 10,
                           position: "relative",
                           cursor: "pointer",
-                          background: isActive
-                            ? "linear-gradient(90deg, rgba(72,185,230,0.18) 0%, rgba(72,185,230,0.07) 100%)"
-                            : "transparent",
-                          boxShadow: isActive ? "inset 0 0 0 1px rgba(72,185,230,0.22)" : "none",
+                          background: isActive ? "rgba(37,99,235,0.16)" : "transparent",
+                          boxShadow: isActive ? "inset 0 0 0 1px rgba(37,99,235,0.28)" : "none",
                           color: isActive ? "var(--color-text)" : "var(--color-text-sec)",
                         }}
                         onMouseEnter={(e) => {
-                          if (!isActive) e.currentTarget.style.background = "rgba(72,185,230,0.08)";
+                          if (!isActive) e.currentTarget.style.background = "var(--color-row-hover)";
                         }}
                         onMouseLeave={(e) => {
                           if (!isActive) e.currentTarget.style.background = "transparent";
@@ -203,13 +246,13 @@ export default function Sidebar() {
                             height: "60%",
                             width: 3,
                             borderRadius: "0 3px 3px 0",
-                            background: "linear-gradient(180deg, #48B9E6, #2563EB)",
+                            background: "#2563EB",
                           }} />
                         )}
 
                         {/* Icon */}
                         <span style={{
-                          color: isActive ? "#48B9E6" : "var(--color-text-muted)",
+                          color: isActive ? "#2563EB" : "var(--color-text-muted)",
                           flexShrink: 0,
                           display: "flex",
                           alignItems: "center",
@@ -274,9 +317,9 @@ export default function Sidebar() {
             flexShrink: 0,
           }}
           onMouseEnter={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "rgba(72,185,230,0.15)";
-            (e.currentTarget as HTMLElement).style.color = "#48B9E6";
-            (e.currentTarget as HTMLElement).style.borderColor = "rgba(72,185,230,0.4)";
+            (e.currentTarget as HTMLElement).style.background = "rgba(var(--tenant-primary-rgb),0.15)";
+            (e.currentTarget as HTMLElement).style.color = "var(--tenant-primary-color)";
+            (e.currentTarget as HTMLElement).style.borderColor = "rgba(var(--tenant-primary-rgb),0.4)";
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLElement).style.background = "var(--color-surface-soft)";

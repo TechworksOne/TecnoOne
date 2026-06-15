@@ -12,9 +12,11 @@ import Modal from '../../components/ui/Modal';
 import ModalHistorialReparacion from '../../components/repairs/ModalHistorialReparacion';
 import NuevaReparacionModal from '../../components/repairs/NuevaReparacionModal';
 import PatternPreview from '../../components/repairs/PatternPreview';
-import { generarPDFRecepcion } from '../../lib/pdfGenerator';
+import { useEmpresa } from '../../store/useEmpresa';
+import { getImageUrl } from '../../utils/getImageUrl';
 import {
   getAllReparaciones,
+  abrirContratoReparacion,
   updatePrioridad,
   registrarPagoSaldo,
   cancelarReparacion,
@@ -76,6 +78,83 @@ function calcSaldo(r: Repair): number {
   const total = r.total || 0;
   const pagado = (r.recepcion.montoAnticipo || 0) + (r.montoPagadoAdicional || 0);
   return Math.max(0, total - pagado);
+}
+
+type AccessInfo = {
+  tipo: 'ninguno' | 'pin' | 'patron';
+  valor: string;
+  label: string | null;
+};
+
+function normalizeAccessType(value?: string | null): AccessInfo['tipo'] {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (normalized === 'patron' || normalized === 'pattern') return 'patron';
+  if (normalized === 'pin' || normalized === 'password' || normalized === 'contrasena') return 'pin';
+
+  return 'ninguno';
+}
+
+function formatPatternSequence(value?: string | null): string {
+  const nodes = String(value || '').match(/[1-9]/g) || [];
+  return nodes.join(' → ');
+}
+
+function getAccessInfo(recepcion?: any): AccessInfo {
+  const tipoRaw = normalizeAccessType(recepcion?.accesoTipo ?? recepcion?.acceso_tipo);
+
+  const valor = String(
+    recepcion?.accesoValor ??
+    recepcion?.acceso_valor ??
+    recepcion?.contrasena ??
+    recepcion?.contraseña ??
+    recepcion?.patronContrasena ??
+    recepcion?.patronContraseña ??
+    recepcion?.patron_contrasena ??
+    ''
+  ).trim();
+
+  const looksLikePattern =
+    /^[1-9](?:[-,\s→]*[1-9]){1,8}$/.test(valor) && /[-,\s→]/.test(valor);
+
+  const tipo = tipoRaw === 'ninguno' && valor
+    ? (looksLikePattern ? 'patron' : 'pin')
+    : tipoRaw;
+
+  if (tipo === 'patron') {
+    const sequence = formatPatternSequence(valor);
+    return {
+      tipo: 'patron',
+      valor,
+      label: valor ? `Patrón: ${sequence || valor}` : 'Patrón registrado',
+    };
+  }
+
+  if (tipo === 'pin') {
+    return {
+      tipo: 'pin',
+      valor,
+      label: valor ? `PIN: ${valor}` : 'PIN registrado',
+    };
+  }
+
+  if (valor) {
+    return {
+      tipo: 'pin',
+      valor,
+      label: `PIN: ${valor}`,
+    };
+  }
+
+  return {
+    tipo: 'ninguno',
+    valor: '',
+    label: null,
+  };
 }
 
 function calcTotalPagado(r: Repair): number {
@@ -566,6 +645,7 @@ function RepairCard({
   const totalPagado = calcTotalPagado(repair);
   const isPaid = repair.total > 0 && saldo <= 0;
   const hasTotal = repair.total > 0;
+  const accessInfo = getAccessInfo(repair.recepcion);
 
   return (
     <div className={`border rounded-2xl p-4 shadow-sm transition-all ${isCancelled ? 'bg-red-50/60 dark:bg-red-950/20 border-red-200 dark:border-red-900/60' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:shadow-md hover:border-slate-300 dark:hover:bg-slate-900/90'}`}>
@@ -638,7 +718,11 @@ function RepairCard({
             {(repair.recepcion.tipoEquipo || repair.recepcion.color) && (
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{[repair.recepcion.tipoEquipo, repair.recepcion.color].filter(Boolean).join(' · ')}</p>
             )}
-            {repair.recepcion.imei && <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-0.5">IMEI: {repair.recepcion.imei}</p>}
+            {accessInfo.label && (
+            <p className="text-[11px] text-blue-600 dark:text-blue-400 font-medium mt-1">
+              {accessInfo.label}
+            </p>
+          )}
           </div>
 
           {/* Fecha + diagnóstico */}
@@ -713,7 +797,7 @@ function RepairCard({
             </button>
           )}
           <button onClick={() => onPrintPDF(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
-            <Printer size={12} /> PDF
+            <Printer size={12} /> Contrato
           </button>
           <button onClick={() => onPrintTicket(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800" title="Imprimir ticket térmico">
             <Printer size={12} /> Ticket
@@ -750,6 +834,7 @@ export default function RepairsPage() {
   const { repairs, deleteRepair, changeRepairState, updateRepair, searchRepairs, isLoading, validateStickerUniqueness } = useRepairs();
   const { user } = useAuth();
   const userIsAdmin = isAdmin(user?.roles);
+  const { empresa, loadEmpresa } = useEmpresa();
 
   const [searchQuery,    setSearchQuery]    = useState('');
   const [statusFilter,   setStatusFilter]   = useState('');
@@ -769,7 +854,7 @@ export default function RepairsPage() {
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [grupoFiltro, setGrupoFiltro]       = useState<GrupoFiltro>('proceso');
 
-  useEffect(() => { loadRepairs(); }, []);
+  useEffect(() => { loadRepairs(); loadEmpresa(); }, [loadEmpresa]);
 
   useEffect(() => {
     if (userIsAdmin) {
@@ -857,125 +942,271 @@ export default function RepairsPage() {
   });
 
   // ── PDF helpers ───────────────────────────────────────────────────────
-  const buildPayload = (r: Repair) => ({
-    cliente: { nombre: r.clienteNombre, telefono: r.clienteTelefono ?? '', email: r.clienteEmail },
-    equipo: {
-      tipo: r.recepcion.tipoEquipo,
-      marca: r.recepcion.marca ?? '',
-      modelo: r.recepcion.modelo ?? '',
-      color: r.recepcion.color ?? '',
-      imei: r.recepcion.imei ?? r.recepcion.imeiSerie,
-      accesoTipo: (r.recepcion.accesoTipo ?? 'ninguno') as 'ninguno' | 'pin' | 'patron',
-      accesoValor: r.recepcion.accesoValor ?? r.recepcion.patronContraseña ?? undefined,
-      diagnostico: r.recepcion.diagnosticoInicial ?? '',
-    },
-    numeroReparacion: r.id,
-    fecha: r.recepcion.fechaRecepcion || new Date().toISOString(),
-  });
-  const handleGeneratePDF = (r: Repair) => generarPDFRecepcion(buildPayload(r), false);
-  const handlePreviewPDF  = (r: Repair) => generarPDFRecepcion(buildPayload(r), true);
+  // Contrato de recepción se genera desde backend para respetar tenant, logo, firmas y formato oficial.
+  const handleOpenContrato = async (r: Repair) => {
+    try {
+      await abrirContratoReparacion(r.id);
+    } catch (error: any) {
+      showToast(error?.message || 'Error al obtener contrato', 'error');
+    }
+  };
 
-  const handleImprimirTicket = (r: Repair) => {
-    const printWindow = window.open('', '_blank', 'width=220,height=130');
-    if (!printWindow) return;
+const handleImprimirTicket = (r: Repair) => {
+  const printWindow = window.open(
+    '',
+    '_blank',
+    'width=520,height=720,left=200,top=80,resizable=yes,scrollbars=yes'
+  );
 
-    const ra = r as any;
-    const tecnico = (ra.tecnicoNombre?.trim() && ra.tecnicoNombre.trim() !== '')
-      ? ra.tecnicoNombre.trim()
-      : ra.tecnicoUsername || r.tecnicoAsignado || 'Sin asignar';
+  if (!printWindow) return;
 
-    const equipo = [r.recepcion.marca, r.recepcion.modelo].filter(Boolean).join(' ') || 'N/A';
-    const detalle = [r.recepcion.tipoEquipo, r.recepcion.color].filter(Boolean).join(' / ') || '';
-    const imei = r.recepcion.imei || r.recepcion.imeiSerie || '';
+  const equipo = [r.recepcion.marca, r.recepcion.modelo].filter(Boolean).join(' ') || 'N/A';
 
-    const anticipo = r.recepcion.montoAnticipo ?? 0;
-    const pagadoAdicional = r.montoPagadoAdicional ?? 0;
-    const saldo = Math.max(0, (r.total || 0) - anticipo - pagadoAdicional);
+  const anticipo = r.recepcion.montoAnticipo ?? 0;
+  const pagadoAdicional = r.montoPagadoAdicional ?? 0;
+  const saldo = Math.max(0, (r.total || 0) - anticipo - pagadoAdicional);
 
-    const fechaIngreso = (() => {
-      const v = r.recepcion.fechaRecepcion || r.fechaIngreso;
-      if (!v) return 'N/A';
-      const match = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (!match) return String(v);
-      const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-      return isNaN(d.getTime()) ? String(v)
-        : d.toLocaleDateString('es-GT', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    })();
+  const fechaIngreso = (() => {
+    const v = r.recepcion.fechaRecepcion || r.fechaIngreso;
 
-    const problema = r.recepcion.diagnosticoInicial || r.observaciones || 'N/A';
-    const estadoLabel = STATUS_LABEL[r.estado] || r.estado.replace(/_/g, ' ');
-    const creadoPor = r.recepcion.userRecepcion || 'N/A';
-    const garantia = r.garantiaDias ? `${r.garantiaDias} días` : 'N/A';
-    const accesoTipo = r.recepcion.accesoTipo;
-    const accesoLabel = !accesoTipo || accesoTipo === 'ninguno'
-      ? null
-      : accesoTipo === 'patron'
-        ? 'Patrón'
-        : `PIN: ${r.recepcion.contraseña || r.recepcion.patronContraseña || ''}`;
+    if (!v) return 'N/A';
 
-    const esc = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const match = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
 
-    const html = `<!DOCTYPE html>
+    if (!match) return String(v);
+
+    const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+
+    return isNaN(d.getTime())
+      ? String(v)
+      : d.toLocaleDateString('es-GT', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        });
+  })();
+
+  const problema = r.recepcion.diagnosticoInicial || r.observaciones || 'N/A';
+  const creadoPor = r.recepcion.userRecepcion || 'N/A';
+
+  const accessInfo = getAccessInfo(r.recepcion);
+
+  const formatPatternForTicket = (value?: string | null): string => {
+    const nodes = String(value || '').match(/[1-9]/g) || [];
+    return nodes.join(' > ');
+  };
+
+  const accesoLabel = accessInfo.label
+    ? accessInfo.tipo === 'patron'
+      ? `Patrón: ${formatPatternForTicket(accessInfo.valor) || accessInfo.valor}`
+      : accessInfo.label
+    : null;
+
+  const esc = (s: unknown) =>
+    String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+  const logoUrl = empresa?.logo_url ? getImageUrl(empresa.logo_url) : '';
+  const empresaNombre = empresa?.nombre_comercial || empresa?.nombre || 'TecnoOne';
+
+  const logoHtml = logoUrl
+    ? `<img class="brand-logo" src="${esc(logoUrl)}" alt="${esc(empresaNombre)}" />`
+    : '<div class="brand-mark">TO</div>';
+
+  const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Ticket ${r.id}</title>
+  <title>Ticket ${esc(r.id)}</title>
   <style>
-    @page { size: 2in 1in; margin: 0.8mm; }
-    * { box-sizing: border-box; }
+    @page {
+      size: 2in 1in;
+      margin: 0.7mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
     body {
-      font-family: Arial, sans-serif;
-      font-size: 6px;
-      color: #000;
-      background: #fff;
       margin: 0;
       padding: 0;
+      background: #fff;
+      color: #000;
+      font-family: Arial, sans-serif;
+      font-size: 5.6px;
+      line-height: 1.2;
     }
-    .ticket { width: 100%; }
-    .header { text-align: center; border-bottom: 1px solid #000; padding-bottom: 0.5mm; margin-bottom: 0.5mm; display: flex; align-items: center; gap: 1mm; }
-    .brand-mark { height: 7mm; width: 7mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 5px; font-weight: bold; color: #fff; background: #48B9E6; border-radius: 1mm; }
-    .header-text { font-size: 8px; font-weight: bold; line-height: 1.2; }
-    .header-text span { font-size: 6px; font-weight: normal; display: block; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1mm; }
-    .row { line-height: 1.35; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .row.full { grid-column: span 2; white-space: normal; word-break: break-word; }
-    .b { font-weight: bold; }
-    .nota { font-size: 5.5px; line-height: 1.3; max-height: 10mm; overflow: hidden; }
+
+    .ticket {
+      width: 100%;
+      max-width: 2in;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 1mm;
+      border-bottom: 1px solid #000;
+      padding-bottom: 0.4mm;
+      margin-bottom: 0.4mm;
+      min-height: 7mm;
+    }
+
+    .brand-mark {
+      width: 7mm;
+      height: 7mm;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 5px;
+      font-weight: bold;
+      border: 1px solid #000;
+      border-radius: 1mm;
+      color: #000;
+      background: #fff;
+    }
+
+    .brand-logo {
+      max-width: 13mm;
+      max-height: 7mm;
+      object-fit: contain;
+      filter: grayscale(1) contrast(1.25);
+      -webkit-filter: grayscale(1) contrast(1.25);
+      flex-shrink: 0;
+    }
+
+    .header-text {
+      font-size: 7px;
+      font-weight: bold;
+      line-height: 1.05;
+      overflow: hidden;
+    }
+
+    .header-text span {
+      display: block;
+      font-size: 5.2px;
+      font-weight: normal;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 1mm;
+    }
+
+    .row {
+      line-height: 1.22;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .row.full {
+      grid-column: span 2;
+      white-space: normal;
+      word-break: break-word;
+    }
+
+    .b {
+      font-weight: bold;
+    }
+
+    .access {
+      font-weight: bold;
+      font-size: 5.8px;
+    }
+
+    .nota {
+      font-size: 5.2px;
+      line-height: 1.15;
+      max-height: 7mm;
+      overflow: hidden;
+    }
+
+    @media screen {
+      body {
+        padding: 18px;
+        background: #e5e7eb;
+      }
+
+      .ticket {
+        background: #fff;
+        border: 1px solid #111;
+        padding: 3mm;
+        width: 2in;
+        max-width: 2in;
+        min-height: 1in;
+        margin: 0 auto;
+        transform: scale(2.2);
+        transform-origin: top center;
+      }
+    }
+
     @media print {
-      body { background: #fff !important; color: #000 !important; }
+      body {
+        background: #fff !important;
+        color: #000 !important;
+      }
+
+      .ticket {
+        border: none !important;
+        transform: none !important;
+        padding: 0 !important;
+      }
     }
   </style>
 </head>
 <body>
-<div class="ticket">
-  <div class="header"><div class="brand-mark">TO</div><div class="header-text">TecnoOne<span>Ticket de reparaci\u00f3n</span></div></div>
-  <div class="grid">
-    <div class="row full"><span class="b"># </span>${esc(r.id)}</div>
-    <div class="row"><span class="b">Cliente: </span>${esc(r.clienteNombre || 'N/A')}</div>
-    <div class="row"><span class="b">Tel: </span>${esc(r.clienteTelefono || 'N/A')}</div>
-    <div class="row"><span class="b">Equipo: </span>${esc(equipo)}</div>
-    <div class="row"><span class="b">Ingreso: </span>${esc(fechaIngreso)}</div>
-    <div class="row"><span class="b">T\u00e9cnico: </span>${esc(tecnico)}</div>
-    <div class="row"><span class="b">Prioridad: </span>${esc(r.prioridad)}</div>
-    <div class="row"><span class="b">Recibido por: </span>${esc(creadoPor)}</div>
-    ${accesoLabel ? `<div class="row"><span class="b">Acceso: </span>${esc(accesoLabel)}</div>` : ''}
-    <div class="row full nota"><span class="b">Nota: </span>${esc(problema)}</div>
+  <div class="ticket">
+    <div class="header">
+      ${logoHtml}
+      <div class="header-text">
+        ${esc(empresaNombre)}
+        <span>Ticket de reparación</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="row full"><span class="b"># </span>${esc(r.id)}</div>
+      <div class="row"><span class="b">Cliente: </span>${esc(r.clienteNombre || 'N/A')}</div>
+      <div class="row"><span class="b">Tel: </span>${esc(r.clienteTelefono || 'N/A')}</div>
+      <div class="row"><span class="b">Equipo: </span>${esc(equipo)}</div>
+      <div class="row"><span class="b">Ingreso: </span>${esc(fechaIngreso)}</div>
+      <div class="row"><span class="b">Recibido: </span>${esc(creadoPor)}</div>
+      ${accesoLabel ? `<div class="row full access"><span class="b">Acceso: </span>${esc(accesoLabel)}</div>` : ''}
+      ${r.total > 0 ? `<div class="row"><span class="b">Total: </span>Q${Number(r.total || 0).toFixed(2)}</div>` : ''}
+      ${saldo > 0 ? `<div class="row"><span class="b">Saldo: </span>Q${saldo.toFixed(2)}</div>` : ''}
+      <div class="row full nota"><span class="b">Nota: </span>${esc(problema)}</div>
+    </div>
   </div>
-</div>
-<script>
-  window.onload = function() {
-    window.print();
-    setTimeout(function() { window.close(); }, 500);
-  };
-</script>
+
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+      }, 250);
+
+      window.onafterprint = function() {
+        setTimeout(function() {
+          window.close();
+        }, 400);
+      };
+    };
+  </script>
 </body>
 </html>`;
 
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-  };
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+};
 
   return (
     <div className="space-y-4">
@@ -1104,7 +1335,7 @@ export default function RepairsPage() {
             onViewDetail={rep => { setSelectedRepair(rep); setShowDetailModal(true); setShowDetailPin(false); }}
             onHistory={id => setShowHistoryModal(id)}
             onFlowManage={() => navigate('/flujo-reparaciones')}
-            onPrintPDF={handleGeneratePDF}
+            onPrintPDF={handleOpenContrato}
             onPrintTicket={handleImprimirTicket}
             onEditPriority={rep => setShowPriorityModal(rep)}
             onPayBalance={rep => setShowPayModal(rep)}
@@ -1330,11 +1561,11 @@ export default function RepairsPage() {
 
               {/* Actions */}
               <div className="flex flex-wrap gap-2 pt-1">
-                <button onClick={() => handlePreviewPDF(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors">
-                  <FileSearch size={13} /> Vista previa
+                <button onClick={() => handleOpenContrato(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors">
+                  <FileSearch size={13} /> Ver contrato
                 </button>
-                <button onClick={() => handleGeneratePDF(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors">
-                  <Printer size={13} /> Imprimir PDF
+                <button onClick={() => handleOpenContrato(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors">
+                  <Printer size={13} /> Descargar contrato
                 </button>
                 <button onClick={() => handleImprimirTicket(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-amber-700 dark:text-amber-300 transition-colors">
                   <Printer size={13} /> Imprimir Ticket

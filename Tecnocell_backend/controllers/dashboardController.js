@@ -142,12 +142,12 @@ exports.getDashboardStats = async (req, res) => {
     // ── Reparaciones activas ─────────────────────────────────────────────────
     const [[reparaciones]] = await connection.query(`
       SELECT
-        COUNT(*) AS total,
-        SUM(CASE WHEN r.id IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS con_checklist,
-        SUM(CASE WHEN r.id NOT IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS sin_checklist,
+        SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') THEN 1 ELSE 0 END) AS total,
+        SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') AND r.id IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS con_checklist,
+        SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') AND r.id NOT IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS sin_checklist,
         SUM(CASE WHEN estado = 'COMPLETADA' THEN 1 ELSE 0 END) AS completadas
       FROM reparaciones r
-      WHERE estado NOT IN ('ENTREGADA', 'CANCELADA')
+      WHERE 1=1
         ${reparacionesAliasTenant.sql}
     `, reparacionesAliasTenant.params);
 
@@ -199,9 +199,10 @@ exports.getDashboardStats = async (req, res) => {
         SELECT COUNT(*) AS total FROM clientes
         WHERE MONTH(created_at) = MONTH(CURDATE())
           AND YEAR(created_at)  = YEAR(CURDATE())
+          AND activo = 1
           ${clientesTenant.sql}
       `, clientesTenant.params);
-      const [[cliTotal]] = await connection.query(`SELECT COUNT(*) AS total FROM clientes WHERE 1=1${clientesTenant.sql}`, clientesTenant.params);
+      const [[cliTotal]] = await connection.query(`SELECT COUNT(*) AS total FROM clientes WHERE activo = 1${clientesTenant.sql}`, clientesTenant.params);
       clientesNuevosMes = Number(cliNuevos.total) || 0;
       clientesTotal     = Number(cliTotal.total)  || 0;
     } catch (_) { /* tabla puede no tener created_at */ }

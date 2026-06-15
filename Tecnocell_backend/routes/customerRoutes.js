@@ -3,9 +3,11 @@ const router = express.Router();
 const customerController = require('../controllers/customerController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
 router.use(verifyToken);
 router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
 // Rutas de lectura
 router.get('/', customerController.getAllCustomers);

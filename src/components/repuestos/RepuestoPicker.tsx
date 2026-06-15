@@ -1,10 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search, Plus, Minus, X } from "lucide-react";
 import Modal from "../ui/Modal";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import Select from "../ui/Select";
-import RepuestoCard from "./RepuestoCard";
 import { useRepuestosStore } from "../../store/useRepuestosStore";
 import { Repuesto, RepuestoSeleccionado, MARCAS_LINEAS } from "../../types/repuesto";
 import { formatMoney } from "../../lib/format";
@@ -26,11 +25,25 @@ const TIPOS_REPUESTO = [
 ];
 
 export default function RepuestoPicker({ isOpen, onClose, onConfirm }: RepuestoPickerProps) {
-  const { filteredRepuestos, setFilters, clearFilters } = useRepuestosStore();
+  const { filteredRepuestos, loadRepuestos, clearFilters, isLoading } = useRepuestosStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [tipoFiltro, setTipoFiltro] = useState('');
   const [marcaFiltro, setMarcaFiltro] = useState('');
   const [carrito, setCarrito] = useState<RepuestoEnCarrito[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const query = searchTerm.trim();
+    const hayFiltros = query !== '' || tipoFiltro !== '' || marcaFiltro !== '';
+    loadRepuestos({
+      searchTerm: query || undefined,
+      tipo: tipoFiltro || undefined,
+      marca: marcaFiltro || undefined,
+      activo: true,
+      limit: hayFiltros ? 20 : 5,
+    });
+  }, [isOpen, searchTerm, tipoFiltro, marcaFiltro, loadRepuestos]);
 
   const handleAddToCarrito = (repuesto: Repuesto) => {
     const existente = carrito.find(item => item.id === repuesto.id);
@@ -97,8 +110,17 @@ export default function RepuestoPicker({ isOpen, onClose, onConfirm }: RepuestoP
     const matchesTipo = !tipoFiltro || rep.tipo === tipoFiltro;
     const matchesMarca = !marcaFiltro || rep.marca === marcaFiltro;
     
-    return matchesSearch && matchesTipo && matchesMarca && rep.stock > 0;
+    return matchesSearch && matchesTipo && matchesMarca;
   });
+
+  const hayFiltrosActivos =
+    searchTerm.trim() !== '' ||
+    tipoFiltro !== '' ||
+    marcaFiltro !== '';
+
+  const repuestosVisibles = hayFiltrosActivos
+    ? repuestosFiltrados
+    : repuestosFiltrados.slice(0, 5);
 
   const totalCarrito = carrito.reduce((sum, item) => 
     sum + (item.cantidadSeleccionada * item.precioUnitario), 0
@@ -151,48 +173,58 @@ export default function RepuestoPicker({ isOpen, onClose, onConfirm }: RepuestoP
           {/* Lista de repuestos */}
           <div className="lg:col-span-2">
             <div className="space-y-4 max-h-96 overflow-y-auto">
-              {repuestosFiltrados.length === 0 ? (
+              {isLoading ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Search size={48} className="mx-auto mb-4 text-gray-300 animate-pulse" />
+                  <p>Cargando repuestos...</p>
+                </div>
+              ) : repuestosVisibles.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   <Search size={48} className="mx-auto mb-4 text-gray-300" />
                   <p>No se encontraron repuestos disponibles</p>
                 </div>
               ) : (
-                repuestosFiltrados.map(repuesto => (
-                  <div key={repuesto.id} className="flex items-center gap-4 p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800">
-                    <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center overflow-hidden">
-                      {repuesto.imagenes[0] ? (
-                        <img src={getImageUrl(repuesto.imagenes[0])} alt={repuesto.nombre} className="w-full h-full object-cover"
-                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                        />
-                      ) : (
-                        <div className="text-gray-400 dark:text-slate-500">📱</div>
-                      )}
+                repuestosVisibles.map(repuesto => {
+                  const stockReal = Number(repuesto.stock ?? 0);
+                  const stockDisplay = Math.max(stockReal, 0);
+                  const stockLabel = stockReal <= 0 ? 'Sin stock' : `${stockDisplay} disponibles`;
+
+                  return (
+                    <div key={repuesto.id} className="flex items-center gap-4 p-4 border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800">
+                      <div className="w-16 h-16 bg-gray-100 dark:bg-slate-800 rounded-lg flex items-center justify-center overflow-hidden">
+                        {repuesto.imagenes[0] ? (
+                          <img src={getImageUrl(repuesto.imagenes[0])} alt={repuesto.nombre} className="w-full h-full object-cover"
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        ) : (
+                          <div className="text-xs text-gray-400 dark:text-slate-500">Sin imagen</div>
+                        )}
+                      </div>
+
+                      <div className="flex-1">
+                        <h4 className="font-medium text-gray-900 dark:text-slate-100">{repuesto.nombre}</h4>
+                        <p className="text-sm text-gray-500 dark:text-slate-400">{repuesto.marca} - {repuesto.tipo}</p>
+                        <p className="text-sm font-medium text-green-600 dark:text-green-400">{formatMoney(repuesto.precio)}</p>
+                        <p className="text-xs text-gray-500 dark:text-slate-400">{stockLabel}</p>
+                      </div>
+
+                      <Button
+                        size="sm"
+                        onClick={() => handleAddToCarrito(repuesto)}
+                      >
+                        <Plus size={16} />
+                        Agregar
+                      </Button>
                     </div>
-                    
-                    <div className="flex-1">
-                      <h4 className="font-medium text-gray-900">{repuesto.nombre}</h4>
-                      <p className="text-sm text-gray-500">{repuesto.marca} • {repuesto.tipo}</p>
-                      <p className="text-sm font-medium text-green-600">{formatMoney(repuesto.precio)}</p>
-                      <p className="text-xs text-gray-500">{repuesto.stock} disponibles</p>
-                    </div>
-                    
-                    <Button
-                      size="sm"
-                      onClick={() => handleAddToCarrito(repuesto)}
-                      disabled={carrito.find(item => item.id === repuesto.id)?.cantidadSeleccionada >= repuesto.stock}
-                    >
-                      <Plus size={16} />
-                      Agregar
-                    </Button>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
 
           {/* Carrito */}
           <div className="bg-gray-50 dark:bg-slate-800 rounded-lg p-4">
-            <h3 className="font-medium text-gray-900 mb-4">
+            <h3 className="font-medium text-gray-900 dark:text-slate-100 mb-4">
               Repuestos Seleccionados ({carrito.length})
             </h3>
             
@@ -203,25 +235,24 @@ export default function RepuestoPicker({ isOpen, onClose, onConfirm }: RepuestoP
                 </p>
               ) : (
                 carrito.map(item => (
-                  <div key={item.id} className="bg-white dark:bg-slate-800 p-3 rounded border dark:border-slate-600">
-                    <h4 className="font-medium text-sm">{item.nombre}</h4>
+                  <div key={item.id} className="bg-white dark:bg-slate-900 p-3 rounded border border-gray-200 dark:border-slate-700">
+                    <h4 className="font-medium text-sm text-gray-900 dark:text-slate-100">{item.nombre}</h4>
                     
                     <div className="mt-2 space-y-2">
                       {/* Cantidad */}
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Cantidad:</span>
+                        <span className="text-xs text-gray-500 dark:text-slate-400">Cantidad:</span>
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => handleUpdateCantidad(item.id, item.cantidadSeleccionada - 1)}
-                            className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded text-xs hover:bg-gray-300"
+                            className="w-6 h-6 flex items-center justify-center bg-gray-200 dark:bg-slate-700 rounded text-xs hover:bg-gray-300 dark:hover:bg-slate-600 text-gray-700 dark:text-slate-100"
                           >
                             <Minus size={12} />
                           </button>
-                          <span className="w-8 text-center text-sm">{item.cantidadSeleccionada}</span>
+                          <span className="w-8 text-center text-sm text-gray-900 dark:text-slate-100">{item.cantidadSeleccionada}</span>
                           <button
                             onClick={() => handleUpdateCantidad(item.id, item.cantidadSeleccionada + 1)}
-                            disabled={item.cantidadSeleccionada >= item.stock}
-                            className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded text-xs hover:bg-gray-300 disabled:opacity-50"
+                            className="w-6 h-6 flex items-center justify-center bg-gray-200 dark:bg-slate-700 rounded text-xs hover:bg-gray-300 dark:hover:bg-slate-600 text-gray-700 dark:text-slate-100"
                           >
                             <Plus size={12} />
                           </button>
@@ -230,7 +261,7 @@ export default function RepuestoPicker({ isOpen, onClose, onConfirm }: RepuestoP
 
                       {/* Precio unitario editable */}
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Precio:</span>
+                        <span className="text-xs text-gray-500 dark:text-slate-400">Precio:</span>
                         <Input
                           type="number"
                           value={item.precioUnitario}
@@ -243,7 +274,7 @@ export default function RepuestoPicker({ isOpen, onClose, onConfirm }: RepuestoP
 
                       {/* Subtotal */}
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-medium text-gray-900">
+                        <span className="text-xs font-medium text-gray-900 dark:text-slate-100">
                           Subtotal: {formatMoney(item.cantidadSeleccionada * item.precioUnitario)}
                         </span>
                         <button
@@ -261,10 +292,10 @@ export default function RepuestoPicker({ isOpen, onClose, onConfirm }: RepuestoP
 
             {/* Total */}
             {carrito.length > 0 && (
-              <div className="mt-4 pt-4 border-t">
-                <div className="flex justify-between items-center font-medium">
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+                <div className="flex justify-between items-center font-medium text-gray-900 dark:text-slate-100">
                   <span>Total:</span>
-                  <span className="text-lg text-green-600">{formatMoney(totalCarrito)}</span>
+                  <span className="text-lg text-green-600 dark:text-green-400">{formatMoney(totalCarrito)}</span>
                 </div>
               </div>
             )}

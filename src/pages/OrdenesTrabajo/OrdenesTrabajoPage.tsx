@@ -29,7 +29,7 @@ import type {
 import Modal from '../../components/ui/Modal';
 import ConfirmModal from '../../components/ui/ConfirmModal';
 import ModalActualizarEstado from '../../components/repairs/ModalActualizarEstado';
-import { getImageUrl } from '../../utils/getImageUrl';
+import { getInitialsFromName, getSafeImageUrl } from '../../lib/avatar';
 
 // ── Status maps ────────────────────────────────────────────────────────────
 const STATUS_PILL: Record<string, string> = {
@@ -390,13 +390,16 @@ function CargaTecnicos({ tecnicos, onFiltrar }: { tecnicos: CargaTecnico[]; onFi
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-        {tecnicos.map(t => (
+        {tecnicos.map(t => {
+          const tecnicoFoto = getSafeImageUrl(t.foto_perfil);
+
+          return (
           <div key={t.id} className="rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 p-4 hover:shadow-md transition-all">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2 min-w-0">
-                {t.foto_perfil ? (
+                {tecnicoFoto ? (
                   <img
-                    src={getImageUrl(t.foto_perfil)}
+                    src={tecnicoFoto}
                     alt={t.nombre}
                     loading="lazy"
                     className="w-9 h-9 rounded-xl object-cover shrink-0"
@@ -404,7 +407,7 @@ function CargaTecnicos({ tecnicos, onFiltrar }: { tecnicos: CargaTecnico[]; onFi
                   />
                 ) : (
                   <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
-                    {t.nombre.charAt(0).toUpperCase()}
+                    {getInitialsFromName(t.nombre, 'U')}
                   </div>
                 )}
                 <div className="min-w-0">
@@ -437,7 +440,8 @@ function CargaTecnicos({ tecnicos, onFiltrar }: { tecnicos: CargaTecnico[]; onFi
               <Eye size={11} /> Ver OT
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

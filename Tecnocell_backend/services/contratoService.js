@@ -1,303 +1,874 @@
-/**
- * contratoService.js
- * ──────────────────────────────────────────────────────────────────────────
- * Rellena la plantilla `contrato_tecnocell_oficial_v2.pdf` con los datos
- * dinámicos de la reparación y la firma del cliente.
- *
- * REGLA: NO se genera diseño desde cero. Solo se escriben textos e imagen
- * de firma encima de la plantilla existente.
- *
- * Dependencia:  pdf-lib  (ya instalado)
- * ──────────────────────────────────────────────────────────────────────────
- */
-
 'use strict';
 
 const path = require('path');
-const fs   = require('fs');
+const fs = require('fs');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
-// ── Rutas ────────────────────────────────────────────────────────────────────
-const TEMPLATE_PATH = path.join(
-  __dirname, '..', 'templates', 'contrato_tecnocell_oficial_v2.pdf'
-);
+const BACKEND_DIR = path.join(__dirname, '..');
+const UPLOADS_DIR = path.join(BACKEND_DIR, 'uploads');
 const CONTRATOS_DIR = path.join(__dirname, '..', 'uploads', 'contratos');
+const PAGE_WIDTH = 612;
+const PAGE_HEIGHT = 792;
+const MARGIN_X = 54;
+const COLOR_TEXT = rgb(0.08, 0.09, 0.11);
+const COLOR_MUTED = rgb(0.35, 0.38, 0.42);
+const COLOR_LINE = rgb(0.82, 0.84, 0.87);
+const COLOR_ACCENT_FALLBACK = rgb(0.15, 0.39, 0.92);
 
-// ══════════════════════════════════════════════════════════════════════════════
-// TAMAÑOS DE FUENTE
-// ══════════════════════════════════════════════════════════════════════════════
-const FONT_SMALL  = 8;
-const FONT_NORMAL = 9;
-const FONT_MEDIUM = 10;
-const FONT_BOLD   = 11;
+const FONT_SMALL = 8;
+const FONT_NORMAL = 10;
+const FONT_MEDIUM = 11;
+const FONT_TITLE = 18;
+const FONT_BUSINESS = 22;
 
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 1 — CABECERA (superior derecha)
-// ══════════════════════════════════════════════════════════════════════════════
-const TOP_DATE_X = 505;
-const TOP_DATE_Y = 712;
+const LOGO_MAX_W = 75;
+const LOGO_MAX_H = 55;
+const LOGO_MAX_BYTES = 8 * 1024 * 1024;
+const FIRMA_CLIENTE_X = 78;
+const FIRMA_CLIENTE_Y = 158;
+const FIRMA_CLIENTE_W = 190;
+const FIRMA_CLIENTE_H = 62;
+const FIRMA_RECEPTOR_X = 344;
+const FIRMA_RECEPTOR_Y = 158;
+const FIRMA_RECEPTOR_W = 190;
+const FIRMA_RECEPTOR_H = 62;
 
-const REP_ID_X = 478;
-const REP_ID_Y = 699;
-
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 1 — DATOS CLIENTE
-// ══════════════════════════════════════════════════════════════════════════════
-const NOMBRE_X = 118;
-const NOMBRE_Y = 667;
-
-const TELEFONO_X = 123;
-const TELEFONO_Y = 647;
-
-const FECHA_X = 455;
-const FECHA_Y = 647;
-
-const MARCA_MODELO_X = 140;
-const MARCA_MODELO_Y = 628;
-
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 1 — RECUADRO DESCRIPCIÓN
-// ══════════════════════════════════════════════════════════════════════════════
-const DESCRIPCION_X           = 145;
-const DESCRIPCION_Y           = 530;
-const DESCRIPCION_MAX_WIDTH   = 285;
-const DESCRIPCION_FONT_SIZE   = 9;
-const DESCRIPCION_LINE_HEIGHT = 11;
-
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 2 — CUADROS DE COSTOS (inferior)
-// ══════════════════════════════════════════════════════════════════════════════
-const COSTO_X      = 150;
-const COSTO_Y      = 58;
-
-const ANTICIPO_X   = 315;
-const ANTICIPO_Y   = 58;
-
-const DIFERENCIA_X = 480;
-const DIFERENCIA_Y = 58;
-
-// ══════════════════════════════════════════════════════════════════════════════
-// PÁGINA 2 — FIRMA DEL CLIENTE (inferior derecha, línea "Cliente:")
-// ══════════════════════════════════════════════════════════════════════════════
-const FIRMA_CLIENTE_X = 440;
-const FIRMA_CLIENTE_Y = 8;
-const FIRMA_CLIENTE_W = 130;
-const FIRMA_CLIENTE_H = 38;
-
-const NOMBRE_FIRMA_X = 452;
-const NOMBRE_FIRMA_Y = 2;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// VALORES VACÍOS — no se dibujan
-// ─────────────────────────────────────────────────────────────────────────────
 const EMPTY_VALUES = new Set(['', 'ninguno', 'n/a', 'none', 'null', 'undefined', '-', '—']);
+
+const CONDICIONES_SERVICIO = [
+  'El cliente declara que la información proporcionada sobre el equipo, accesorios entregados y datos de contacto es correcta.',
+  'El equipo se recibe para revisión técnica inicial. El costo final de reparación será informado posteriormente, según diagnóstico, repuestos requeridos y autorización del cliente.',
+  'El precio de revisión o diagnóstico, si aplica, no representa el costo final de reparación.',
+  'Cualquier reparación, repuesto o costo adicional deberá ser autorizado por el cliente antes de continuar con el servicio.',
+  'El negocio no se responsabiliza por información, accesorios, tarjetas SIM, memorias, cuentas, bloqueos, contraseñas o componentes no declarados al momento de la recepción.',
+  'El cliente es responsable de respaldar su información antes de entregar el equipo. El negocio no garantiza la conservación de datos si el daño, bloqueo o procedimiento técnico impide su recuperación.',
+  'Los tiempos de entrega son estimados y pueden variar según disponibilidad de repuestos, pruebas técnicas, autorización del cliente o complejidad del diagnóstico.',
+  'El retiro del equipo requiere identificación, comprobante o autorización del titular registrado.',
+];
 
 function isEmpty(val) {
   if (val == null) return true;
   return EMPTY_VALUES.has(String(val).trim().toLowerCase());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Dibuja texto solo si el valor no está vacío / es "ninguno" / null.
- */
+function sanitizePdfText(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/\uFFFD/g, '')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, '-')
+    .replace(/[•]/g, '-')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7E\u00A0-\u00FF]/g, '');
+}
+
+function hexToRgb(hex) {
+  if (isEmpty(hex)) return COLOR_ACCENT_FALLBACK;
+
+  const clean = String(hex).trim().replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return COLOR_ACCENT_FALLBACK;
+
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+  return rgb(r, g, b);
+}
+
 function drawSafeText(page, value, x, y, opts = {}) {
   if (isEmpty(value)) return;
-  page.drawText(String(value).trim(), {
+  const safeValue = sanitizePdfText(value).trim();
+  if (isEmpty(safeValue)) return;
+
+  page.drawText(safeValue, {
     x,
     y,
-    size:     opts.size  || FONT_NORMAL,
-    font:     opts.bold  ? opts._fontBold : opts._font,
-    color:    opts.color || rgb(0.05, 0.05, 0.05),
+    size: opts.size || FONT_NORMAL,
+    font: opts.bold ? opts._fontBold : opts._font,
+    color: opts.color || COLOR_TEXT,
     maxWidth: opts.maxWidth,
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Dibuja texto con wrap manual (divide en líneas por espacios).
- * Cada línea ocupa `lineHeight` puntos hacia abajo (Y decrece).
- */
 function drawWrappedText(page, value, x, y, maxWidth, lineHeight, fontSize, fontObj, colorObj) {
-  if (isEmpty(value)) return;
-  const words   = String(value).trim().split(/\s+/);
-  const avgChar = fontSize * 0.55; // estimación ancho carácter Helvetica
-  const maxChars = Math.floor(maxWidth / avgChar);
+  if (isEmpty(value)) return y;
 
+  const safeValue = sanitizePdfText(value).trim();
+  if (isEmpty(safeValue)) return y;
+
+  const words = safeValue.split(/\s+/);
+  const lines = [];
   let line = '';
-  let curY = y;
 
   for (const word of words) {
     const test = line ? `${line} ${word}` : word;
-    if (test.length > maxChars && line) {
-      page.drawText(line, { x, y: curY, size: fontSize, font: fontObj, color: colorObj });
-      curY -= lineHeight;
-      line  = word;
+    const width = fontObj.widthOfTextAtSize(test, fontSize);
+
+    if (width > maxWidth && line) {
+      lines.push(line);
+      line = word;
     } else {
       line = test;
     }
   }
+
   if (line) {
-    page.drawText(line, { x, y: curY, size: fontSize, font: fontObj, color: colorObj });
+    lines.push(line);
+  }
+
+  let curY = y;
+  for (const currentLine of lines) {
+    page.drawText(currentLine, {
+      x,
+      y: curY,
+      size: fontSize,
+      font: fontObj,
+      color: colorObj,
+    });
+    curY -= lineHeight;
+  }
+
+  return curY;
+}
+
+function drawSectionTitle(page, title, x, y, fonts, accentColor) {
+  page.drawText(sanitizePdfText(title), {
+    x,
+    y,
+    size: FONT_MEDIUM,
+    font: fonts.bold,
+    color: accentColor,
+  });
+  drawLine(page, x, y - 7, PAGE_WIDTH - MARGIN_X, y - 7, COLOR_LINE);
+}
+
+function drawLine(page, x1, y1, x2, y2, color = COLOR_LINE) {
+  page.drawLine({
+    start: { x: x1, y: y1 },
+    end: { x: x2, y: y2 },
+    thickness: 0.8,
+    color,
+  });
+}
+
+function drawLabelValue(page, label, value, x, y, fonts, opts = {}) {
+  if (isEmpty(value)) return y;
+
+  const labelText = `${sanitizePdfText(label)}:`;
+  const labelWidth = fonts.bold.widthOfTextAtSize(labelText, FONT_NORMAL);
+
+  page.drawText(labelText, {
+    x,
+    y,
+    size: FONT_NORMAL,
+    font: fonts.bold,
+    color: COLOR_TEXT,
+  });
+
+  if (opts.wrap) {
+    return drawWrappedText(
+      page,
+      value,
+      x + labelWidth + 6,
+      y,
+      opts.maxWidth || 360,
+      opts.lineHeight || 13,
+      FONT_NORMAL,
+      fonts.normal,
+      COLOR_TEXT
+    );
+  }
+
+  drawSafeText(page, value, x + labelWidth + 6, y, {
+    _font: fonts.normal,
+    _fontBold: fonts.bold,
+    size: FONT_NORMAL,
+    maxWidth: opts.maxWidth || 360,
+  });
+
+  return y - (opts.lineHeight || 17);
+}
+
+function drawFooter(page, pageNumber, fonts) {
+  drawLine(page, MARGIN_X, 42, PAGE_WIDTH - MARGIN_X, 42, COLOR_LINE);
+  page.drawText(sanitizePdfText('Documento generado mediante TecnoOne'), {
+    x: MARGIN_X,
+    y: 26,
+    size: FONT_SMALL,
+    font: fonts.normal,
+    color: COLOR_MUTED,
+  });
+  page.drawText(sanitizePdfText(`Pagina ${pageNumber} de 2`), {
+    x: PAGE_WIDTH - MARGIN_X - 60,
+    y: 26,
+    size: FONT_SMALL,
+    font: fonts.normal,
+    color: COLOR_MUTED,
+  });
+}
+
+function isPathInside(parentPath, childPath) {
+  const relativePath = path.relative(path.resolve(parentPath), path.resolve(childPath));
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+function resolveLocalLogoPath(logoUrl) {
+  const raw = String(logoUrl || '').trim();
+  const normalized = raw.replace(/\\/g, '/');
+
+  if (normalized.startsWith('/uploads/')) {
+    const logoPath = path.resolve(UPLOADS_DIR, normalized.slice('/uploads/'.length));
+    return isPathInside(UPLOADS_DIR, logoPath) ? logoPath : null;
+  }
+
+  if (normalized.startsWith('uploads/')) {
+    const logoPath = path.resolve(UPLOADS_DIR, normalized.slice('uploads/'.length));
+    return isPathInside(UPLOADS_DIR, logoPath) ? logoPath : null;
+  }
+
+  if (path.isAbsolute(raw)) {
+    const logoPath = path.resolve(raw);
+    return isPathInside(BACKEND_DIR, logoPath) ? logoPath : null;
+  }
+
+  return null;
+}
+
+async function tryLoadLogo(pdfDoc, logoUrl) {
+  let logoPath = null;
+
+  try {
+    console.log('[ContratoPDF] logo_url:', logoUrl || null);
+
+    if (isEmpty(logoUrl)) {
+      console.log('[ContratoPDF] logoPath:', null);
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    const raw = String(logoUrl).trim();
+    if (/^https?:\/\//i.test(raw)) {
+      console.log('[ContratoPDF] logoPath:', null);
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    logoPath = resolveLocalLogoPath(raw);
+    console.log('[ContratoPDF] logoPath:', logoPath || null);
+
+    if (!logoPath || !fs.existsSync(logoPath)) {
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    const stats = fs.statSync(logoPath);
+    if (!stats.isFile() || stats.size > LOGO_MAX_BYTES) {
+      console.warn(`[ContratoPDF] Logo rechazado por tamano o tipo de archivo: ${logoPath}`);
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    const ext = path.extname(logoPath).toLowerCase();
+    if (!['.png', '.jpg', '.jpeg'].includes(ext)) {
+      console.warn('[ContratoPDF] formato de logo no soportado:', ext);
+      console.log('[ContratoPDF] logo cargado:', false);
+      return null;
+    }
+
+    const logoBytes = fs.readFileSync(logoPath);
+    const logoImage = ext === '.png'
+      ? await pdfDoc.embedPng(logoBytes)
+      : await pdfDoc.embedJpg(logoBytes);
+
+    console.log('[ContratoPDF] logo cargado:', Boolean(logoImage));
+    return logoImage || null;
+  } catch (err) {
+    console.warn('[ContratoPDF] No se pudo cargar el logo del negocio:', err.message);
+    console.log('[ContratoPDF] logoPath:', logoPath || null);
+    console.log('[ContratoPDF] logo cargado:', false);
+    return null;
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Convierte la URL relativa guardada en BD a ruta física absoluta.
- */
+async function drawHeader(pdfDoc, page, negocio, fonts, accentColor) {
+  const logoImage = await tryLoadLogo(pdfDoc, negocio.logoUrl);
+  const hasLogo = Boolean(logoImage);
+  const logoX = MARGIN_X;
+  const logoTopY = 767;
+  let textX = MARGIN_X;
+  let textMaxWidth = 360;
+
+  page.drawRectangle({
+    x: 0,
+    y: PAGE_HEIGHT - 104,
+    width: PAGE_WIDTH,
+    height: 104,
+    color: rgb(0.97, 0.98, 1),
+  });
+  page.drawRectangle({
+    x: 0,
+    y: PAGE_HEIGHT - 108,
+    width: PAGE_WIDTH,
+    height: 4,
+    color: accentColor,
+  });
+
+  if (hasLogo) {
+    const scale = Math.min(LOGO_MAX_W / logoImage.width, LOGO_MAX_H / logoImage.height, 1);
+    const logoWidth = logoImage.width * scale;
+    const logoHeight = logoImage.height * scale;
+
+    page.drawImage(logoImage, {
+      x: logoX,
+      y: logoTopY - logoHeight,
+      width: logoWidth,
+      height: logoHeight,
+    });
+
+    textX = logoX + LOGO_MAX_W + 15;
+    textMaxWidth = PAGE_WIDTH - MARGIN_X - textX;
+  }
+
+  drawSafeText(page, negocio.nombre, textX, 740, {
+    _font: fonts.normal,
+    _fontBold: fonts.bold,
+    bold: true,
+    size: hasLogo ? FONT_TITLE : FONT_BUSINESS,
+    color: accentColor,
+    maxWidth: textMaxWidth,
+  });
+  drawSafeText(page, negocio.razonSocial, textX, 722, {
+    _font: fonts.normal,
+    _fontBold: fonts.bold,
+    size: FONT_NORMAL,
+    color: COLOR_MUTED,
+    maxWidth: textMaxWidth,
+  });
+
+  const negocioInfo = buildCompactInfo(negocio);
+  drawWrappedText(page, negocioInfo, textX, 705, textMaxWidth, 11, FONT_SMALL, fonts.normal, COLOR_MUTED);
+  drawSafeText(page, 'Documento generado mediante TecnoOne', textX, 690, {
+    _font: fonts.normal,
+    _fontBold: fonts.bold,
+    size: FONT_SMALL,
+    color: COLOR_MUTED,
+    maxWidth: textMaxWidth,
+  });
+}
+
 function resolveFirmaPath(firmaClienteUrl) {
   if (!firmaClienteUrl) return null;
 
   const raw = String(firmaClienteUrl).trim();
 
-  if (raw.startsWith('/uploads/'))     return path.join('/app', raw);
-  if (raw.startsWith('uploads/'))      return path.join('/app', raw);
+  if (raw.startsWith('/uploads/')) return path.join('/app', raw);
+  if (raw.startsWith('uploads/')) return path.join('/app', raw);
   if (raw.startsWith('/app/uploads/')) return raw;
-  if (path.isAbsolute(raw))            return raw;
+  if (path.isAbsolute(raw)) return raw;
 
   return path.join('/app/uploads', raw);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Embebe la imagen de firma en la página 2.
- * No lanza excepción si la firma no existe — el PDF se genera igual.
- */
-async function insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl, font, colorObj) {
-  console.log('[ContratoPDF] firma_cliente_url:', firmaClienteUrl);
+async function insertarFirmaImagen(pdfDoc, page, firmaUrl, x, y, width, height, label) {
+  console.log(`[ContratoPDF] ${label}:`, firmaUrl ? String(firmaUrl).slice(0, 90) : firmaUrl);
 
-  const firmaPath = resolveFirmaPath(firmaClienteUrl);
-  console.log('[ContratoPDF] firmaPath:', firmaPath);
-  console.log('[ContratoPDF] existe firma:', firmaPath ? fs.existsSync(firmaPath) : false);
-
-  if (!firmaPath || !fs.existsSync(firmaPath)) {
-    console.warn('[ContratoPDF] ⚠️  Firma no encontrada — PDF generado sin firma.');
-    return;
+  if (!firmaUrl) {
+    console.log(`[ContratoPDF] ${label} path:`, null);
+    console.log(`[ContratoPDF] existe ${label}:`, false);
+    console.warn(`[ContratoPDF] ${label} no encontrada. PDF generado con linea manual.`);
+    return false;
   }
 
-  try {
-    const firmaBytes = fs.readFileSync(firmaPath);
-    const firmaImage = await pdfDoc.embedPng(firmaBytes);
+  const raw = String(firmaUrl).trim();
 
-    page2.drawImage(firmaImage, {
-      x:      FIRMA_CLIENTE_X,
-      y:      FIRMA_CLIENTE_Y,
-      width:  FIRMA_CLIENTE_W,
-      height: FIRMA_CLIENTE_H,
+  try {
+    const dataUriMatch = raw.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+
+    if (dataUriMatch) {
+      const ext = dataUriMatch[1].toLowerCase();
+      const base64Data = dataUriMatch[2];
+      const firmaBytes = Buffer.from(base64Data, 'base64');
+
+      const firmaImage = ext === 'jpg' || ext === 'jpeg'
+        ? await pdfDoc.embedJpg(firmaBytes)
+        : await pdfDoc.embedPng(firmaBytes);
+
+      page.drawImage(firmaImage, {
+        x,
+        y,
+        width,
+        height,
+      });
+
+      console.log(`[ContratoPDF] ${label} insertada correctamente desde base64`);
+      return true;
+    }
+
+    const firmaPath = resolveFirmaPath(raw);
+
+    console.log(`[ContratoPDF] ${label} path:`, firmaPath);
+    console.log(`[ContratoPDF] existe ${label}:`, firmaPath ? fs.existsSync(firmaPath) : false);
+
+    if (!firmaPath || !fs.existsSync(firmaPath)) {
+      console.warn(`[ContratoPDF] ${label} no encontrada. PDF generado con linea manual.`);
+      return false;
+    }
+
+    const firmaBytes = fs.readFileSync(firmaPath);
+    const lowerPath = firmaPath.toLowerCase();
+
+    const firmaImage = lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg')
+      ? await pdfDoc.embedJpg(firmaBytes)
+      : await pdfDoc.embedPng(firmaBytes);
+
+    page.drawImage(firmaImage, {
+      x,
+      y,
+      width,
+      height,
     });
 
-    console.log('[ContratoPDF] firma insertada correctamente');
+    console.log(`[ContratoPDF] ${label} insertada correctamente desde archivo`);
+    return true;
   } catch (err) {
-    console.error('[ContratoPDF] ❌ Error insertando firma:', err.message);
+    console.error(`[ContratoPDF] Error insertando ${label}:`, err.message);
+    return false;
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/**
- * Genera el contrato PDF rellenando la plantilla con los datos de la reparación.
- *
- * @param {object}      datos
- * @param {string}      datos.reparacionId
- * @param {string}      datos.fecha             DD/MM/YYYY
- * @param {string}      datos.clienteNombre
- * @param {string}      datos.clienteTel
- * @param {string}      datos.tipoEquipo
- * @param {string}      datos.marca
- * @param {string}      datos.modelo
- * @param {string}      datos.acceso            contraseña/patrón (omitido si "ninguno")
- * @param {string}      datos.descripcion
- * @param {number}      datos.costoTotal        En quetzales
- * @param {number}      datos.anticipo          En quetzales
- * @param {number}      datos.saldo             En quetzales
- * @param {string|null} datos.firmaClienteUrl   URL relativa guardada en BD
- *
- * @returns {Promise<{absolutePath: string, relativePath: string}>}
- */
+async function insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl) {
+  return insertarFirmaImagen(
+    pdfDoc,
+    page2,
+    firmaClienteUrl,
+    FIRMA_CLIENTE_X,
+    FIRMA_CLIENTE_Y,
+    FIRMA_CLIENTE_W,
+    FIRMA_CLIENTE_H,
+    'firma_cliente_url'
+  );
+}
+
+async function insertarFirmaReceptor(pdfDoc, page2, firmaReceptorUrl) {
+  return insertarFirmaImagen(
+    pdfDoc,
+    page2,
+    firmaReceptorUrl,
+    FIRMA_RECEPTOR_X,
+    FIRMA_RECEPTOR_Y,
+    FIRMA_RECEPTOR_W,
+    FIRMA_RECEPTOR_H,
+    'firma_receptor_url'
+  );
+}
+
+function normalizeNegocio(negocio = {}) {
+  return {
+    nombre: negocio.nombre || 'Negocio',
+    razonSocial: negocio.razonSocial || null,
+    nit: negocio.nit || null,
+    telefono: negocio.telefono || null,
+    email: negocio.email || null,
+    direccion: negocio.direccion || null,
+    logoUrl: negocio.logoUrl || null,
+    colorPrimario: negocio.colorPrimario || null,
+  };
+}
+
+function buildCompactInfo(negocio) {
+  return [
+    negocio.nit ? `NIT: ${negocio.nit}` : null,
+    negocio.telefono ? `Tel: ${negocio.telefono}` : null,
+    negocio.email ? `Email: ${negocio.email}` : null,
+    negocio.direccion,
+  ].filter((item) => !isEmpty(item)).join('  |  ');
+}
+
+function normalizeAccesoTipo(accesoTipo) {
+  if (isEmpty(accesoTipo)) return 'ninguno';
+
+  const raw = String(accesoTipo).trim().toLowerCase();
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (normalized === 'ninguno' || normalized === 'none' || normalized === 'n/a') return 'ninguno';
+
+  if (
+    normalized === 'pin' ||
+    normalized === 'password' ||
+    normalized === 'contrasena' ||
+    normalized === 'clave'
+  ) {
+    return 'pin';
+  }
+
+  if (normalized === 'patron' || normalized === 'pattern') return 'patron';
+
+  // Compatibilidad con texto dañado tipo patr?n o contrase?a
+  if (raw.includes('patr')) return 'patron';
+  if (raw.includes('contrase') || raw.includes('clave') || raw.includes('password')) return 'pin';
+
+  return 'ninguno';
+}
+
+function getAccesoLabel(accesoTipo, tipoResuelto) {
+  const raw = String(accesoTipo || '').trim().toLowerCase();
+
+  if (tipoResuelto === 'patron') return 'Patron';
+
+  if (
+    raw.includes('contrase') ||
+    raw.includes('password') ||
+    raw.includes('clave')
+  ) {
+    return 'Contrasena';
+  }
+
+  if (tipoResuelto === 'pin') return 'PIN';
+
+  return 'Acceso';
+}
+
+function parecePatron(value) {
+  if (isEmpty(value)) return false;
+
+  const clean = String(value).trim();
+
+  // Patron real: debe tener separadores.
+  // Validos: 1-2-3, 1,2,3, 1 → 2 → 3, 6 3 2 1.
+  // PIN como 1234 NO debe ser tratado como patron.
+  return /^[1-9](?:[-,\s→]+[1-9]){1,8}$/.test(clean);
+}
+
+function formatPatternSequence(value) {
+  if (isEmpty(value)) return '';
+  const nodes = String(value).match(/[1-9]/g) || [];
+  return nodes.join(' -> ');
+}
+
+function parsePatternNodes(value) {
+  if (!parecePatron(value)) return [];
+
+  const matches = String(value).match(/[1-9]/g) || [];
+  return [...new Set(matches.map(Number))].filter((n) => n >= 1 && n <= 9);
+}
+
+function drawPatternGrid(page, value, x, y, size = 58) {
+  const nodes = parsePatternNodes(value);
+  if (nodes.length === 0) return false;
+
+  const gap = size / 2;
+  const radius = 3.2;
+  const points = Array.from({ length: 9 }, (_, i) => ({
+    n: i + 1,
+    x: x + (i % 3) * gap,
+    y: y - Math.floor(i / 3) * gap,
+  }));
+
+  for (let i = 0; i < nodes.length - 1; i += 1) {
+    const a = points.find((point) => point.n === nodes[i]);
+    const b = points.find((point) => point.n === nodes[i + 1]);
+
+    if (a && b) {
+      page.drawLine({
+        start: { x: a.x, y: a.y },
+        end: { x: b.x, y: b.y },
+        thickness: 1.8,
+        color: COLOR_TEXT,
+      });
+    }
+  }
+
+  for (const point of points) {
+    const selected = nodes.includes(point.n);
+
+    page.drawCircle({
+      x: point.x,
+      y: point.y,
+      size: selected ? radius + 0.8 : radius,
+      color: selected ? COLOR_TEXT : rgb(1, 1, 1),
+      borderColor: COLOR_TEXT,
+      borderWidth: 0.8,
+    });
+  }
+
+  return true;
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (!isEmpty(value)) return String(value).trim();
+  }
+
+  return '';
+}
+
+function resolveAccesoEquipo(datos = {}) {
+  const tipoOriginal = normalizeAccesoTipo(datos.accesoTipo);
+
+  const valor = firstNonEmpty(
+    datos.accesoValor,
+    datos.acceso,
+    datos.patronContrasena
+  );
+
+  if (isEmpty(valor)) {
+    return {
+      tipo: 'ninguno',
+      valor: '',
+      label: 'Acceso',
+    };
+  }
+
+  let tipo = tipoOriginal;
+
+  if (tipo === 'ninguno') {
+    tipo = parecePatron(valor) ? 'patron' : 'pin';
+  }
+
+  // Regla crítica:
+  // Si dice patron pero el valor es 1234, NO dibujar patrón.
+  // 1234 debe ser PIN.
+  if (tipo === 'patron' && !parecePatron(valor)) {
+    tipo = 'pin';
+  }
+
+  return {
+    tipo,
+    valor,
+    label: getAccesoLabel(datos.accesoTipo, tipo),
+  };
+}
+
+function drawAccesoEquipo(page, datos, x, y, fonts) {
+  const acceso = resolveAccesoEquipo(datos);
+
+  if (acceso.tipo === 'ninguno' || isEmpty(acceso.valor)) {
+    drawSafeText(page, 'No registrado / no aplica', x, y, {
+      _font: fonts.normal,
+      _fontBold: fonts.bold,
+      size: FONT_NORMAL,
+    });
+
+    return y - 17;
+  }
+
+  if (acceso.tipo === 'patron') {
+    const secuencia = formatPatternSequence(acceso.valor);
+    let nextY = drawLabelValue(page, acceso.label, secuencia || acceso.valor, x, y, fonts);
+
+    if (drawPatternGrid(page, acceso.valor, x + 18, nextY - 8, 52)) {
+      nextY -= 68;
+    }
+
+    return nextY;
+  }
+
+  return drawLabelValue(page, acceso.label, acceso.valor, x, y, fonts);
+}
+
 async function generarContrato(datos) {
   const {
     reparacionId,
-    fecha           = new Date().toLocaleDateString('es-GT'),
-    clienteNombre   = '',
-    clienteTel      = '',
-    marca           = '',
-    modelo          = '',
-    acceso          = '',
-    descripcion     = '',
-    costoTotal      = 0,
-    anticipo        = 0,
-    saldo           = 0,
+    fecha = new Date().toLocaleDateString('es-GT'),
+    clienteNombre = '',
+    clienteTel = '',
+    clienteEmail = '',
+    clienteNit = '',
+    tipoEquipo = '',
+    marca = '',
+    modelo = '',
+    color = '',
+    imei = '',
+    acceso = '',
+    accesoTipo = '',
+    accesoValor = '',
+    patronContrasena = '',
+    mostrarValorAcceso = false,
+    descripcion = '',
+    precioRevision = null,
+    montoEstimadoInicial = null,
+    costoTotal = 0,
+    anticipo = 0,
+    anticipoRecibido = null,
     firmaClienteUrl = null,
+    receptorNombre = '',
+    receptorUsuario = '',
+    firmaReceptorUrl = null,
+    condicionesServicio = null,
   } = datos;
 
-  // ── 1. Cargar plantilla ───────────────────────────────────────────────────
-  console.log('[ContratoPDF] templatePath:', TEMPLATE_PATH);
+  const negocio = normalizeNegocio(datos.negocio);
+  const accentColor = hexToRgb(negocio.colorPrimario);
+  const pdfDoc = await PDFDocument.create();
+  const page1 = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  const page2 = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  const fonts = {
+    normal: await pdfDoc.embedFont(StandardFonts.Helvetica),
+    bold: await pdfDoc.embedFont(StandardFonts.HelveticaBold),
+  };
 
-  if (!fs.existsSync(TEMPLATE_PATH)) {
-    throw new Error(`[ContratoPDF] Plantilla oficial no encontrada: ${TEMPLATE_PATH}`);
-  }
-
-  const existingPdfBytes = fs.readFileSync(TEMPLATE_PATH);
-  const pdfDoc = await PDFDocument.load(existingPdfBytes);
-
-  console.log('[ContratoPDF] páginas:', pdfDoc.getPageCount());
-
-  // ── 2. Asegurar exactamente 2 páginas ────────────────────────────────────
-  while (pdfDoc.getPageCount() > 2) {
-    pdfDoc.removePage(2);
-  }
-
-  const pages = pdfDoc.getPages();
-  const page1 = pages[0];
-  const page2 = pages[1];
-
-  // ── 3. Fuentes ────────────────────────────────────────────────────────────
-  const fontNormal = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold   = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const COLOR      = rgb(0.05, 0.05, 0.05);
-
-  // Closure que inyecta fuentes en drawSafeText
   const dt = (page, value, x, y, opts = {}) =>
     drawSafeText(page, value, x, y, {
       ...opts,
-      _font:     fontNormal,
-      _fontBold: fontBold,
-      color:     COLOR,
+      _font: fonts.normal,
+      _fontBold: fonts.bold,
     });
 
-  const fmtQ = (n) => `Q ${Number(n).toFixed(2)}`;
+  const fmtQ = (n) => `Q ${Number(n || 0).toFixed(2)}`;
+  const montoRevision = precioRevision ?? montoEstimadoInicial ?? costoTotal;
+  const montoAnticipoRecibido = anticipoRecibido ?? anticipo;
 
-  // ── 4. Página 1 — cabecera ────────────────────────────────────────────────
-  dt(page1, fecha,        TOP_DATE_X, TOP_DATE_Y, { bold: true, size: FONT_NORMAL });
-  dt(page1, reparacionId, REP_ID_X,   REP_ID_Y,   { bold: true, size: FONT_SMALL  });
+  console.log('[ContratoPDF] generando contrato desde codigo:', reparacionId);
 
-  // ── 5. Página 1 — datos del cliente ──────────────────────────────────────
-  dt(page1, clienteNombre, NOMBRE_X,   NOMBRE_Y,   { size: FONT_NORMAL });
-  dt(page1, clienteTel,    TELEFONO_X, TELEFONO_Y, { size: FONT_NORMAL });
-  dt(page1, fecha,         FECHA_X,    FECHA_Y,    { size: FONT_NORMAL });
+  await drawHeader(pdfDoc, page1, negocio, fonts, accentColor);
 
-  // Marca + Modelo en una sola línea
-  const marcaModelo = [marca, modelo].filter(v => !isEmpty(v)).join(' / ');
-  dt(page1, marcaModelo, MARCA_MODELO_X, MARCA_MODELO_Y, { size: FONT_NORMAL });
+  dt(page1, 'Contrato de recepcion de equipo', MARGIN_X, 646, {
+    bold: true,
+    size: FONT_TITLE,
+    color: COLOR_TEXT,
+  });
+  drawLine(page1, MARGIN_X, 633, PAGE_WIDTH - MARGIN_X, 633, COLOR_LINE);
 
-  // ── 6. Página 1 — descripción del equipo (con wrap) ──────────────────────
+  let y = 604;
+  drawSectionTitle(page1, 'Datos de la reparacion', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawLabelValue(page1, 'Numero de reparacion', reparacionId, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Fecha', fecha, MARGIN_X, y, fonts);
+
+  y -= 8;
+  drawSectionTitle(page1, 'Cliente', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawLabelValue(page1, 'Nombre', clienteNombre, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Telefono', clienteTel, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Email', clienteEmail, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'NIT', clienteNit, MARGIN_X, y, fonts);
+
+  y -= 8;
+  drawSectionTitle(page1, 'Equipo', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawLabelValue(page1, 'Tipo', tipoEquipo, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Marca', marca, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Modelo', modelo, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'Color', color, MARGIN_X, y, fonts);
+  y = drawLabelValue(page1, 'IMEI/serie', imei, MARGIN_X, y, fonts);
+
+  y -= 8;
+  drawSectionTitle(page1, 'Acceso al equipo', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawAccesoEquipo(page1, { acceso, accesoTipo, accesoValor, patronContrasena, mostrarValorAcceso }, MARGIN_X, y, fonts);
+
+  y -= 8;
+  drawSectionTitle(page1, 'Diagnostico inicial / descripcion', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawWrappedText(page1, descripcion, MARGIN_X, y, PAGE_WIDTH - (MARGIN_X * 2), 13, FONT_NORMAL, fonts.normal, COLOR_TEXT);
+
+  y = Math.min(y - 18, 155);
+  drawSectionTitle(page1, 'Recepcion y revision', MARGIN_X, y, fonts, accentColor);
+  y -= 26;
+  y = drawLabelValue(page1, 'Precio de revision / diagnostico', fmtQ(montoRevision), MARGIN_X, y, fonts);
+  if (Number(montoAnticipoRecibido || 0) > 0) {
+    y = drawLabelValue(page1, 'Anticipo recibido', fmtQ(montoAnticipoRecibido), MARGIN_X, y, fonts);
+  }
   drawWrappedText(
-    page1, descripcion,
-    DESCRIPCION_X, DESCRIPCION_Y,
-    DESCRIPCION_MAX_WIDTH, DESCRIPCION_LINE_HEIGHT, DESCRIPCION_FONT_SIZE,
-    fontNormal, COLOR
+    page1,
+    'Nota: El costo final de reparación será informado después del diagnóstico técnico y requerirá autorización del cliente.',
+    MARGIN_X,
+    y,
+    PAGE_WIDTH - (MARGIN_X * 2),
+    12,
+    FONT_SMALL,
+    fonts.normal,
+    COLOR_MUTED
   );
+  drawFooter(page1, 1, fonts);
 
-  // ── 7. Página 2 — costos en cuadros inferiores ───────────────────────────
-  dt(page2, fmtQ(costoTotal), COSTO_X,      COSTO_Y,      { bold: true, size: FONT_NORMAL });
-  dt(page2, fmtQ(anticipo),   ANTICIPO_X,   ANTICIPO_Y,   { size: FONT_NORMAL });
-  dt(page2, fmtQ(saldo),      DIFERENCIA_X, DIFERENCIA_Y, { size: FONT_NORMAL });
+  dt(page2, 'Condiciones del servicio', MARGIN_X, 724, {
+    bold: true,
+    size: FONT_TITLE,
+    color: COLOR_TEXT,
+  });
+  drawLine(page2, MARGIN_X, 711, PAGE_WIDTH - MARGIN_X, 711, COLOR_LINE);
 
-  // ── 8. Página 2 — firma del cliente ──────────────────────────────────────
-  await insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl, fontNormal, COLOR);
+  let conditionY = 674;
+  const condicionesAUsar = (Array.isArray(condicionesServicio) && condicionesServicio.length > 0)
+    ? condicionesServicio
+    : CONDICIONES_SERVICIO;
+  condicionesAUsar.forEach((condicion, index) => {
+    dt(page2, `${index + 1}.`, MARGIN_X, conditionY, {
+      bold: true,
+      size: FONT_NORMAL,
+      color: accentColor,
+    });
+    conditionY = drawWrappedText(
+      page2,
+      condicion,
+      MARGIN_X + 24,
+      conditionY,
+      PAGE_WIDTH - (MARGIN_X * 2) - 24,
+      15,
+      FONT_NORMAL,
+      fonts.normal,
+      COLOR_TEXT
+    ) - 9;
+  });
 
-  // ── 9. Guardar PDF ────────────────────────────────────────────────────────
-  const outputDir  = path.join(CONTRATOS_DIR, reparacionId);
+  drawSectionTitle(page2, 'Firmas de recepcion', MARGIN_X, 286, fonts, accentColor);
+  dt(page2, 'Firma del cliente', 104, 260, {
+    bold: true,
+    size: FONT_NORMAL,
+    color: COLOR_TEXT,
+  });
+  dt(page2, 'Firma de quien recibe', 366, 260, {
+    bold: true,
+    size: FONT_NORMAL,
+    color: COLOR_TEXT,
+  });
+  page2.drawRectangle({
+    x: FIRMA_CLIENTE_X - 12,
+    y: FIRMA_CLIENTE_Y - 8,
+    width: FIRMA_CLIENTE_W + 24,
+    height: FIRMA_CLIENTE_H + 24,
+    borderColor: COLOR_LINE,
+    borderWidth: 1,
+  });
+  page2.drawRectangle({
+    x: FIRMA_RECEPTOR_X - 12,
+    y: FIRMA_RECEPTOR_Y - 8,
+    width: FIRMA_RECEPTOR_W + 24,
+    height: FIRMA_RECEPTOR_H + 24,
+    borderColor: COLOR_LINE,
+    borderWidth: 1,
+  });
+  await insertarFirmaCliente(pdfDoc, page2, firmaClienteUrl);
+  await insertarFirmaReceptor(pdfDoc, page2, firmaReceptorUrl);
+  drawLine(page2, 70, 134, 282, 134, COLOR_TEXT);
+  drawLine(page2, 336, 134, 548, 134, COLOR_TEXT);
+  dt(page2, clienteNombre || 'Cliente', 86, 116, {
+    size: FONT_NORMAL,
+    color: COLOR_TEXT,
+    maxWidth: 180,
+  });
+  dt(page2, 'Nombre y firma del cliente', 108, 101, {
+    size: FONT_SMALL,
+    color: COLOR_MUTED,
+  });
+  dt(page2, `Recibido por: ${receptorNombre || 'Usuario receptor'}`, 336, 116, {
+    size: FONT_NORMAL,
+    color: COLOR_TEXT,
+    maxWidth: 210,
+  });
+  dt(page2, `Usuario: ${receptorUsuario || 'no especificado'}`, 336, 101, {
+    size: FONT_SMALL,
+    color: COLOR_MUTED,
+    maxWidth: 210,
+  });
+  drawFooter(page2, 2, fonts);
+
+  const outputDir = path.join(CONTRATOS_DIR, reparacionId);
   const outputFile = path.join(outputDir, `contrato_reparacion_${reparacionId}.pdf`);
   fs.mkdirSync(outputDir, { recursive: true });
 
@@ -305,7 +876,7 @@ async function generarContrato(datos) {
   fs.writeFileSync(outputFile, pdfBytes);
 
   const relativePath = `/uploads/contratos/${reparacionId}/contrato_reparacion_${reparacionId}.pdf`;
-  console.log(`[ContratoPDF] ✅ PDF guardado: ${outputFile}`);
+  console.log(`[ContratoPDF] PDF guardado: ${outputFile}`);
   return { absolutePath: outputFile, relativePath };
 }
 

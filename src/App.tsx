@@ -4,14 +4,39 @@ import Sidebar from "./components/common/Sidebar";
 import Topbar from "./components/common/Topbar";
 import { ToastProvider } from "./components/ui/Toast";
 import { useIdleLogout } from "./hooks/useIdleLogout";
+import { applyTenantBranding } from "./lib/tenantBranding";
 import LoginPage from "./pages/Login/LoginPage";
 import routes from "./routes";
 import { useAuth } from "./store/useAuth";
+import { useEmpresa } from "./store/useEmpresa";
 import { useSidebar } from "./store/useSidebar";
 
 /** Activa el cierre por inactividad solo cuando hay sesión */
 function IdleLogoutGuard() {
   useIdleLogout();
+  return null;
+}
+
+function TenantBrandingGuard() {
+  const user = useAuth((state) => state.user);
+  const empresa = useEmpresa((state) => state.empresa);
+  const loadEmpresa = useEmpresa((state) => state.loadEmpresa);
+  const clearEmpresa = useEmpresa((state) => state.clearEmpresa);
+
+  useEffect(() => {
+    if (user) {
+      loadEmpresa();
+      return;
+    }
+
+    clearEmpresa();
+    applyTenantBranding(null);
+  }, [user, loadEmpresa, clearEmpresa]);
+
+  useEffect(() => {
+    applyTenantBranding(empresa?.color_principal || empresa?.color_primario);
+  }, [empresa?.color_principal, empresa?.color_primario]);
+
   return null;
 }
 
@@ -25,6 +50,10 @@ export default function App() {
   useEffect(() => {
     initAuth();
   }, [initAuth]);
+
+  useEffect(() => {
+    if (!role) applyTenantBranding(null);
+  }, [role]);
 
   // El login siempre se muestra sin sidebar ni topbar
   if (pathname === "/login" || !role) {
@@ -45,13 +74,14 @@ export default function App() {
     <ToastProvider>
       {/* Guard de inactividad — solo activo con sesión */}
       <IdleLogoutGuard />
+      <TenantBrandingGuard />
       <div className="min-h-screen" style={{ background: "var(--color-bg)" }}>
         <Sidebar />
         <div
             className={`flex flex-col transition-[margin-left] duration-[280ms] ease-[cubic-bezier(.4,0,.2,1)] ${isOpen ? 'md:ml-[264px]' : 'md:ml-[72px]'}`}
           >
           <Topbar />
-          <main className="p-3 sm:p-6">
+          <main className="min-h-[calc(100vh-52px)] p-4 sm:p-6">
             <Routes>
               {routes.filter(r => r.path !== "/login").map((r) => (
                 <Route key={r.path} path={r.path} element={r.element} />

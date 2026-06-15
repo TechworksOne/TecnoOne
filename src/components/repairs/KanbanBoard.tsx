@@ -149,7 +149,7 @@ export default function KanbanBoard({
       {/* Horizontal scroll container */}
       <div
         className="flex gap-3 overflow-x-auto pb-3"
-        style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 transparent' }}
+        style={{ scrollbarWidth: 'thin', scrollbarColor: '#3A3A3A transparent' }}
       >
         {KANBAN_COLUMNS.map(col => (
           <KanbanColumn

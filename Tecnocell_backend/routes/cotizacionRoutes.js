@@ -1,8 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const cotizacionController = require('../controllers/cotizacionController');
+const ventaController = require('../controllers/ventaController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
 /**
  * RUTAS DE COTIZACIONES
@@ -11,6 +13,7 @@ const tenantScope = require('../middleware/tenantScope');
 
 router.use(verifyToken);
 router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
 // Obtener todas las cotizaciones (con filtros opcionales)
 // Query params: ?tipo=VENTA&estado=ENVIADA&cliente_id=1&desde=2025-01-01&hasta=2025-12-31&page=1&limit=20
@@ -26,6 +29,12 @@ router.get('/proximas-vencer', cotizacionController.getCotizacionesProximasVence
 
 // Obtener cotización por ID
 router.get('/:id', cotizacionController.getCotizacionById);
+
+// Convertir cotización de venta en venta real
+router.post('/:id/convertir-venta', (req, res) => {
+  req.params.cotizacionId = req.params.id;
+  return ventaController.createVentaFromQuote(req, res);
+});
 
 // Crear nueva cotización (SIN autenticación para desarrollo)
 router.post('/', cotizacionController.createCotizacion);

@@ -1,5 +1,21 @@
 const db = require('../config/database');
 
+const METODOS_PAGO_PERMITIDOS = new Set(['efectivo', 'tarjeta', 'transferencia']);
+
+function normalizeMetodoPagoPreferido(value) {
+  if (value === undefined || value === null || value === '') {
+    return 'efectivo';
+  }
+
+  if (!METODOS_PAGO_PERMITIDOS.has(value)) {
+    const error = new Error('Método de pago preferido no válido');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return value;
+}
+
 function addTenantCondition(req, conditions, params, alias = 'c') {
   if (!req.tenant?.isSuperadmin) {
     conditions.push(`${alias}.empresa_id = ?`);
@@ -81,22 +97,25 @@ const getAllCustomers = async (req, res) => {
 // Buscar clientes
 const searchCustomers = async (req, res) => {
   try {
-    const { query } = req.query;
-    
-    if (!query) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Se requiere un término de búsqueda' 
-      });
+    const query = String(req.query.query || '').trim();
+
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(rawLimit, 20)
+      : (query ? 20 : 5);
+
+    const conditions = ['c.activo = true'];
+    const params = [];
+
+    if (query) {
+      conditions.push('(c.nombre LIKE ? OR c.apellido LIKE ? OR c.email LIKE ? OR c.telefono LIKE ? OR c.nit LIKE ?)');
+      const like = `%${query}%`;
+      params.push(like, like, like, like, like);
     }
 
-    const conditions = [
-      'c.activo = true',
-      '(c.nombre LIKE ? OR c.apellido LIKE ? OR c.email LIKE ? OR c.telefono LIKE ? OR c.nit LIKE ?)'
-    ];
-    const like = `%${query}%`;
-    const params = [like, like, like, like, like];
     addTenantCondition(req, conditions, params);
+
+    const orderBy = query ? 'c.nombre ASC' : 'c.created_at DESC';
 
     const [customers] = await db.query(
       `SELECT c.*,
@@ -104,8 +123,9 @@ const searchCustomers = async (req, res) => {
         TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS name
        FROM clientes c
        WHERE ${conditions.join(' AND ')}
-       ORDER BY c.nombre ASC`,
-      params
+       ORDER BY ${orderBy}
+       LIMIT ?`,
+      [...params, limit]
     );
 
     res.json({
@@ -175,6 +195,8 @@ const createCustomer = async (req, res) => {
       });
     }
 
+    const metodoPagoPreferido = normalizeMetodoPagoPreferido(metodo_pago_preferido);
+
     const empresaId = req.tenant?.isSuperadmin
       ? (empresa_id !== undefined && empresa_id !== '' ? empresa_id : requireTenantEmpresaId(req))
       : requireTenantEmpresaId(req);
@@ -191,7 +213,7 @@ const createCustomer = async (req, res) => {
         nit || null, 
         email || null, 
         direccion || null,
-        metodo_pago_preferido || 'efectivo',
+        metodoPagoPreferido,
         notas || null
       ]
     );
@@ -209,7 +231,7 @@ const createCustomer = async (req, res) => {
     console.error('❌ Error al crear cliente:', error);
     res.status(error.statusCode || 500).json({ 
       success: false,
-      message: 'Error al crear cliente',
+      message: error.statusCode === 400 ? error.message : 'Error al crear cliente',
       error: error.message
     });
   }
@@ -220,6 +242,7 @@ const updateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
     const { nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas } = req.body;
+    const metodoPagoPreferido = normalizeMetodoPagoPreferido(metodo_pago_preferido);
 
     // Verificar que el cliente existe
     const conditions = ['c.id = ?', 'c.activo = true'];
@@ -242,7 +265,7 @@ const updateCustomer = async (req, res) => {
         nit || null, 
         email || null, 
         direccion || null,
-        metodo_pago_preferido || 'efectivo',
+        metodoPagoPreferido,
         notas || null,
         id
       ];
@@ -266,7 +289,7 @@ const updateCustomer = async (req, res) => {
     console.error('Error al actualizar cliente:', error);
     res.status(error.statusCode || 500).json({ 
       success: false,
-      message: 'Error al actualizar cliente' 
+      message: error.statusCode === 400 ? error.message : 'Error al actualizar cliente' 
     });
   }
 };

@@ -1,6 +1,6 @@
 import { LogOut, Menu, Moon, Sun, User } from "lucide-react";
-import BrandMark from "./BrandMark";
-import { getImageUrl } from "../../utils/getImageUrl";
+import { getSafeImageUrl, getUserInitials } from "../../lib/avatar";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAuth } from "../../store/useAuth";
@@ -11,6 +11,13 @@ export default function Topbar() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { toggle } = useSidebar();
+  const [avatarError, setAvatarError] = useState(false);
+  const avatarUrl = getSafeImageUrl(user?.perfil?.foto_perfil);
+  const userInitials = getUserInitials(user);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.id, user?.perfil?.foto_perfil]);
 
   const handleLogout = () => {
     logout();
@@ -23,7 +30,7 @@ export default function Topbar() {
       style={{
         background:   "var(--color-surface)",
         borderBottom: "1px solid var(--color-border)",
-        boxShadow:    "0 1px 8px rgba(0,0,0,0.07)",
+        boxShadow:    "none",
         transition:   "background 250ms ease, border-color 250ms ease",
         minHeight:    52,
       }}
@@ -34,7 +41,7 @@ export default function Topbar() {
         <button
           onClick={toggle}
           aria-label="Abrir menú"
-          className="md:hidden flex items-center justify-center rounded-xl shrink-0"
+          className="md:hidden flex items-center justify-center rounded-lg shrink-0"
           style={{
             width: 34,
             height: 34,
@@ -45,27 +52,10 @@ export default function Topbar() {
         >
           <Menu size={18} />
         </button>
-        <BrandMark size="sm" />
-
-        <div className="flex flex-col leading-tight">
-          <span
-            className="text-sm font-extrabold tracking-widest"
-            style={{ color: "var(--color-text)", letterSpacing: "0.1em" }}
-          >
-            TecnoOne
-          </span>
-          <span
-            className="text-[9px] font-medium uppercase tracking-widest hidden sm:block"
-            style={{ color: "var(--color-text-sec)" }}
-          >
-            Sistema comercial
-          </span>
-        </div>
-
-        {/* Separador vertical */}
-        <div
-          className="hidden sm:block self-stretch w-px mx-1"
-          style={{ background: "var(--color-border)" }}
+        <img
+          src={theme === "dark" ? "/branding/tecnoone-logo-dark.png" : "/branding/tecnoone-logo-light.png"}
+          alt="TecnoOne"
+          className="h-8 sm:h-9 w-auto object-contain shrink-0"
         />
 
         {/* Hora actual */}
@@ -79,7 +69,7 @@ export default function Topbar() {
         <button
           onClick={toggleTheme}
           title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-          className="rounded-xl transition-all flex items-center justify-center shrink-0"
+          className="rounded-lg transition-all flex items-center justify-center shrink-0"
           style={{
             width: 34,
             height: 34,
@@ -88,7 +78,7 @@ export default function Topbar() {
             color: "var(--color-text-sec)",
           }}
           onMouseEnter={e => {
-            (e.currentTarget as HTMLElement).style.background = "rgba(72,185,230,0.12)";
+            (e.currentTarget as HTMLElement).style.background = "rgba(var(--tenant-primary-rgb),0.10)";
             (e.currentTarget as HTMLElement).style.color      = "var(--color-primary)";
           }}
           onMouseLeave={e => {
@@ -101,20 +91,20 @@ export default function Topbar() {
 
         {/* Información del usuario */}
         <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-xl"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
           style={{
             background: "var(--color-surface-soft)",
             border:     "1px solid var(--color-border)",
           }}
         >
           {/* Avatar: foto de perfil o inicial como fallback */}
-          {user?.perfil?.foto_perfil ? (
+          {avatarUrl && !avatarError ? (
             <img
-              src={getImageUrl(user.perfil.foto_perfil)}
-              alt={user.name}
+              src={avatarUrl}
+              alt={user?.name || user?.username || "Usuario"}
               className="rounded-lg shrink-0 object-cover"
               style={{ width: 26, height: 26 }}
-              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              onError={() => setAvatarError(true)}
             />
           ) : (
             <div
@@ -122,10 +112,10 @@ export default function Topbar() {
               style={{
                 width: 26,
                 height: 26,
-                background: "linear-gradient(135deg, #48B9E6 0%, #2563EB 100%)",
+                background: "linear-gradient(135deg, var(--tenant-primary-color) 0%, var(--tenant-primary-dark) 100%)",
               }}
             >
-              {user?.name?.[0]?.toUpperCase() ?? <User size={13} />}
+              {userInitials || <User size={13} />}
             </div>
           )}
           <div className="text-sm hidden sm:block">
@@ -148,7 +138,7 @@ export default function Topbar() {
         <button
           onClick={handleLogout}
           title="Cerrar sesión"
-          className="rounded-xl transition-all flex items-center gap-1.5 px-3 shrink-0"
+          className="rounded-lg transition-all flex items-center gap-1.5 px-3 shrink-0"
           style={{
             height: 34,
             background: "var(--color-surface-soft)",

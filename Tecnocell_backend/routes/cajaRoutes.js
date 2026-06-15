@@ -3,10 +3,12 @@ const router = express.Router();
 const cajaController = require('../controllers/cajaController');
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
 router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
 const soloAdmin = verifyRole('ADMINISTRADOR', 'admin');
 

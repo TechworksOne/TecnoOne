@@ -130,24 +130,19 @@ export default function SaleNewPage() {
     loadCuentasBancarias();
   }, []);
 
-  // Cargar productos/repuestos cuando se busca
+  // Cargar productos/repuestos cuando se abre el selector o cambia la búsqueda
   useEffect(() => {
-    if (searchTerm.length >= 2) {
-      loadItemsFromInventory();
-    } else {
-      setProductos([]);
-      setRepuestos([]);
-    }
-  }, [searchTerm, tipoItem]);
+    if (!showProductSearch) return;
+    loadItemsFromInventory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showProductSearch, searchTerm, tipoItem]);
 
-  // Cargar clientes cuando se busca
+  // Cargar clientes cuando se abre el selector o cambia la búsqueda
   useEffect(() => {
-    if (searchCliente.length >= 2) {
-      loadClientes();
-    } else {
-      setClientes([]);
-    }
-  }, [searchCliente]);
+    if (!showCustomerPicker) return;
+    loadClientes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCustomerPicker, searchCliente]);
 
   // Recalcular totales cuando cambien items
   useEffect(() => {
@@ -165,13 +160,15 @@ export default function SaleNewPage() {
   const loadClientes = async () => {
     setLoadingClientes(true);
     try {
-      const response = await customerService.searchCustomers(searchCliente);
+      const query = searchCliente.trim();
+      const limit = query ? 20 : 5;
+      const response = await customerService.searchCustomers(query);
       console.log('Response completo:', response);
       
       // El backend devuelve { success: true, data: [...] }
       const clientesData = response.data || response.customers || response || [];
       console.log('Clientes procesados:', clientesData);
-      setClientes(clientesData);
+      setClientes(Array.isArray(clientesData) ? clientesData.slice(0, limit) : []);
     } catch (error) {
       console.error('Error cargando clientes:', error);
       toast.add('Error al cargar clientes', 'error');
@@ -185,26 +182,29 @@ export default function SaleNewPage() {
   const loadItemsFromInventory = async () => {
     setLoadingItems(true);
     try {
+      const query = searchTerm.trim();
+      const limit = query ? 20 : 5;
+
       if (tipoItem === 'PRODUCTO') {
         const response = await productService.getAllProducts({ 
-          search: searchTerm,
+          search: query,
           activo: true,
-          limit: 20 
+          limit 
         });
         console.log('Productos response:', response);
         // Backend devuelve { success: true, data: [...] }
         const productosData = response.data || response.productos || response || [];
         console.log('Productos procesados:', productosData);
-        setProductos(productosData);
+        setProductos(Array.isArray(productosData) ? productosData.slice(0, limit) : []);
       } else {
         const response = await repuestoService.getAllRepuestos({ 
-          searchTerm,
+          searchTerm: query,
           activo: true,
-          limit: 20 
+          limit 
         });
         console.log('Repuestos response:', response);
         // Backend devuelve array directo
-        setRepuestos(Array.isArray(response) ? response : []);
+        setRepuestos(Array.isArray(response) ? response.slice(0, limit) : []);
       }
     } catch (error) {
       console.error('Error cargando items:', error);
@@ -1282,7 +1282,7 @@ export default function SaleNewPage() {
             </div>
           )}
 
-          {!loadingItems && searchTerm.length >= 2 && (
+          {!loadingItems && (
             <div className="max-h-96 overflow-y-auto space-y-2">
               {tipoItem === 'PRODUCTO' && productos.length === 0 && (
                 <div className="text-center py-8 text-gray-500">
@@ -1344,12 +1344,6 @@ export default function SaleNewPage() {
             </div>
           )}
 
-          {!loadingItems && searchTerm.length < 2 && (
-            <div className="text-center py-8 text-gray-400">
-              <Search size={48} className="mx-auto mb-3 opacity-30" />
-              <p>Escribe al menos 2 caracteres para buscar</p>
-            </div>
-          )}
         </div>
       </Modal>
 
@@ -1382,7 +1376,7 @@ export default function SaleNewPage() {
             </div>
           )}
 
-          {!loadingClientes && searchCliente.length >= 2 && (
+          {!loadingClientes && (
             <div className="max-h-96 overflow-y-auto space-y-2">
               {clientes.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
@@ -1425,12 +1419,6 @@ export default function SaleNewPage() {
             </div>
           )}
 
-          {!loadingClientes && searchCliente.length < 2 && (
-            <div className="text-center py-8 text-gray-400">
-              <Search size={48} className="mx-auto mb-3 opacity-30" />
-              <p>Escribe al menos 2 caracteres para buscar</p>
-            </div>
-          )}
         </div>
       </Modal>
     </div>

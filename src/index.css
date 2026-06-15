@@ -6,38 +6,41 @@
 :root {
   --radius: 1rem;
 
-  --color-bg:             #F6FCFF;
+  --color-bg:             #F3F6FA;
   --color-surface:        #FFFFFF;
-  --color-surface-soft:   #F8FDFF;
+  --color-surface-soft:   #F8FAFC;
   --color-sidebar:        #FFFFFF;
-  --color-text:           #14324A;
-  --color-text-sec:       #5E7184;
-  --color-text-muted:     #8AAABB;
-  --color-border:         #D6EEF8;
-  --color-primary:        #48B9E6;
-  --color-primary-dark:   #2EA7D8;
+  --color-text:           #0F172A;
+  --color-text-sec:       #475569;
+  --color-text-muted:     #94A3B8;
+  --color-border:         #E2E8F0;
+  --tenant-primary-color: #0B72B9;
+  --tenant-primary-dark:  #095F9B;
+  --tenant-primary-rgb:   11, 114, 185;
+  --color-primary:        var(--tenant-primary-color);
+  --color-primary-dark:   var(--tenant-primary-dark);
   --color-input-bg:       #FFFFFF;
-  --color-row-hover:      #F6FCFF;
-  --color-active-bg:      rgba(72,185,230,0.22);
-  --color-active-border:  rgba(72,185,230,0.30);
+  --color-row-hover:      #F8FAFC;
+  --color-active-bg:      rgba(var(--tenant-primary-rgb),0.10);
+  --color-active-border:  rgba(var(--tenant-primary-rgb),0.22);
 }
 
 /* ═══ Variables de tema — modo oscuro ════════════════════════════════════════ */
 .dark {
-  --color-bg:             #060B14;
-  --color-surface:        #0D1526;
-  --color-surface-soft:   #0A1220;
-  --color-sidebar:        #08111F;
-  --color-text:           #F8FAFC;
-  --color-text-sec:       #B8C2D1;
-  --color-text-muted:     #7F8A99;
-  --color-border:         rgba(72,185,230,0.16);
-  --color-primary:        #48B9E6;
-  --color-primary-dark:   #2EA7D8;
-  --color-input-bg:       #0A1220;
-  --color-row-hover:      rgba(72,185,230,0.05);
-  --color-active-bg:      rgba(72,185,230,0.18);
-  --color-active-border:  rgba(72,185,230,0.35);
+  --color-bg:             #131314;
+  --color-surface:        #1B1C1F;
+  --color-surface-soft:   #202124;
+  --color-sidebar:        #1F1F1F;
+  --color-text:           #E8EAED;
+  --color-text-sec:       #9AA0A6;
+  --color-text-muted:     #80868B;
+  --color-border:         #303134;
+  --color-primary:        var(--tenant-primary-color);
+  --color-primary-dark:   var(--tenant-primary-dark);
+  --color-input-bg:       #202124;
+  --color-row-hover:      #2A2B2F;
+  --color-active-bg:      rgba(var(--tenant-primary-rgb),0.22);
+  --color-active-border:  rgba(var(--tenant-primary-rgb),0.34);
 }
 
 html,
@@ -57,9 +60,13 @@ body {
 .card {
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 1rem;
+  border-radius: 0.75rem;
   padding: 1rem;
-  box-shadow: 0 1px 6px rgba(20,50,74,0.06);
+  box-shadow: 0 1px 3px rgba(15,23,42,0.06);
+}
+
+.dark .card {
+  box-shadow: none;
 }
 
 /* ── Inputs globales ─────────────────────────────────────────────────────── */
@@ -79,10 +86,14 @@ table td {
 
 /* ─── Sidebar background gradient (light / dark) ───────────────────────── */
 .sidebar-bg {
-  background: linear-gradient(180deg, #EBF6FF 0%, #F8FDFF 100%);
+  background: var(--color-sidebar);
 }
 .dark .sidebar-bg {
-  background: linear-gradient(180deg, #070E1A 0%, #050A13 100%);
+  background: var(--color-sidebar);
+}
+
+.dark header {
+  box-shadow: none !important;
 }
 
 /* ─── Sidebar nav — scrollbar discreto ─────────────────────────────────── */
@@ -91,7 +102,7 @@ table td {
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
-  scrollbar-color: rgba(72, 185, 230, 0.22) transparent;
+  scrollbar-color: rgba(154, 160, 166, 0.22) transparent;
 }
 
 .sidebar-nav::-webkit-scrollbar {
@@ -103,12 +114,12 @@ table td {
 }
 
 .sidebar-nav::-webkit-scrollbar-thumb {
-  background: rgba(72, 185, 230, 0.18);
+  background: #3A3A3A;
   border-radius: 999px;
 }
 
 .sidebar-nav:hover::-webkit-scrollbar-thumb {
-  background: rgba(72, 185, 230, 0.42);
+  background: #4A4A4A;
 }
 
 /* En modo colapsado: ocultar scrollbar visualmente, mantener funcionalidad */
@@ -127,7 +138,7 @@ table td {
 /* ─── Category list scrollbar discreto ─────────────────────────────────── */
 .category-list-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(72, 185, 230, 0.22) transparent;
+  scrollbar-color: #3A3A3A transparent;
 }
 
 .category-list-scroll::-webkit-scrollbar {
@@ -139,12 +150,12 @@ table td {
 }
 
 .category-list-scroll::-webkit-scrollbar-thumb {
-  background: rgba(72, 185, 230, 0.20);
+  background: #3A3A3A;
   border-radius: 999px;
 }
 
 .category-list-scroll:hover::-webkit-scrollbar-thumb {
-  background: rgba(72, 185, 230, 0.45);
+  background: #4A4A4A;
 }
 
 /* ─── Scrollbar global (webkit) ───────────────────────────────────────── */
@@ -154,17 +165,17 @@ table td {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.10);
+  background: transparent;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(56, 189, 248, 0.28);
+  background: #3A3A3A;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(56, 189, 248, 0.55);
+  background: #4A4A4A;
 }
 
 ::-webkit-scrollbar-corner {
@@ -174,7 +185,7 @@ table td {
 /* ─── Clase reutilizable .custom-scrollbar ────────────────────────────── */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(56, 189, 248, 0.45) rgba(15, 23, 42, 0.35);
+  scrollbar-color: #3A3A3A transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -183,20 +194,104 @@ table td {
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.35);
+  background: transparent;
   border-radius: 999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgba(56, 189, 248, 0.60), rgba(14, 116, 144, 0.55));
+  background: #3A3A3A;
   border-radius: 999px;
-  border: 2px solid rgba(15, 23, 42, 0.55);
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(56, 189, 248, 0.85), rgba(14, 116, 144, 0.75));
+  background: #4A4A4A;
+  background-clip: content-box;
 }
 
 .custom-scrollbar::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Dark mode normalization for legacy saturated module classes */
+.dark [class*="dark:bg-blue-950"],
+.dark [class*="dark:bg-blue-900"],
+.dark [class*="dark:bg-indigo-950"],
+.dark [class*="dark:bg-indigo-900"],
+.dark [class*="dark:bg-cyan-950"],
+.dark [class*="dark:bg-cyan-900"],
+.dark [class*="dark:bg-purple-950"],
+.dark [class*="dark:bg-purple-900"],
+.dark [class*="dark:bg-orange-950"],
+.dark [class*="dark:bg-orange-900"],
+.dark [class*="dark:bg-red-950"],
+.dark [class*="dark:bg-red-900"],
+.dark [class*="dark:bg-emerald-950"],
+.dark [class*="dark:bg-emerald-900"],
+.dark [class*="dark:bg-green-950"],
+.dark [class*="dark:bg-green-900"],
+.dark [class*="dark:bg-violet-950"],
+.dark [class*="dark:bg-violet-900"],
+.dark [class*="dark:bg-[#0D1526]"] {
+  background-color: #1B1C1F !important;
+}
+
+.dark [class*="dark:bg-slate-900"],
+.dark [class*="dark:bg-slate-950"] {
+  background-color: #1B1C1F !important;
+}
+
+.dark [class*="dark:bg-slate-800"] {
+  background-color: #202124 !important;
+}
+
+.dark [class*="dark:bg-[#0A1220]"],
+.dark [class*="dark:bg-[#060B14]"] {
+  background-color: #202124 !important;
+}
+
+.dark [class*="dark:hover:bg-blue-950"]:hover,
+.dark [class*="dark:hover:bg-blue-900"]:hover,
+.dark [class*="dark:hover:bg-indigo-950"]:hover,
+.dark [class*="dark:hover:bg-indigo-900"]:hover,
+.dark [class*="dark:hover:bg-cyan-950"]:hover,
+.dark [class*="dark:hover:bg-cyan-900"]:hover,
+.dark [class*="dark:hover:bg-purple-950"]:hover,
+.dark [class*="dark:hover:bg-purple-900"]:hover,
+.dark [class*="dark:hover:bg-orange-950"]:hover,
+.dark [class*="dark:hover:bg-orange-900"]:hover,
+.dark [class*="dark:hover:bg-red-950"]:hover,
+.dark [class*="dark:hover:bg-red-900"]:hover,
+.dark [class*="dark:hover:bg-emerald-950"]:hover,
+.dark [class*="dark:hover:bg-emerald-900"]:hover,
+.dark [class*="dark:hover:bg-green-950"]:hover,
+.dark [class*="dark:hover:bg-green-900"]:hover,
+.dark [class*="dark:hover:bg-violet-950"]:hover,
+.dark [class*="dark:hover:bg-violet-900"]:hover,
+.dark [class*="dark:hover:bg-slate-900"]:hover,
+.dark [class*="dark:hover:bg-slate-950"]:hover,
+.dark [class*="dark:hover:bg-slate-800"]:hover,
+.dark [class*="dark:hover:bg-[#0A1220]"]:hover,
+.dark [class*="dark:hover:bg-[#060B14]"]:hover {
+  background-color: #2A2B2F !important;
+}
+
+.dark [class*="dark:border-blue-"],
+.dark [class*="dark:border-indigo-"],
+.dark [class*="dark:border-cyan-"],
+.dark [class*="dark:border-purple-"],
+.dark [class*="dark:border-orange-"],
+.dark [class*="dark:border-red-"],
+.dark [class*="dark:border-emerald-"],
+.dark [class*="dark:border-green-"],
+.dark [class*="dark:border-violet-"],
+.dark [class*="dark:border-slate-"],
+.dark [class*="dark:border-[rgba(72,185,230"] {
+  border-color: #303134 !important;
+}
+
+.dark [class*="dark:text-purple"],
+.dark [class*="dark:text-violet"] {
+  color: #9AA0A6 !important;
 }

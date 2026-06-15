@@ -15,7 +15,7 @@ export default function Button({
   size?: "sm" | "md" | "lg";
   [k: string]: any;
 }) {
-  const base = "rounded-xl font-medium transition-colors";
+  const base = "rounded-lg font-medium transition-colors focus:outline-none focus:ring-4 focus:ring-[rgba(var(--tenant-primary-rgb),0.16)] disabled:cursor-not-allowed disabled:opacity-60";
   
   const sizeClasses = {
     sm: "px-3 py-1.5 text-sm",
@@ -24,9 +24,9 @@ export default function Button({
   };
   
   const variantClasses = {
-    primary: "bg-primary-500 text-white hover:bg-primary-600",
-    ghost: "bg-transparent border hover:bg-slate-50 dark:hover:bg-slate-800",
-    outline: "bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"
+    primary: "bg-[var(--tenant-primary-color)] text-white shadow-sm hover:bg-[var(--tenant-primary-dark)]",
+    ghost: "bg-transparent border border-transparent text-[var(--color-text-sec)] hover:bg-[var(--color-row-hover)]",
+    outline: "bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] shadow-sm hover:bg-[var(--color-surface-soft)]"
   };
   
   return (

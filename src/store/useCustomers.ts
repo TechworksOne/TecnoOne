@@ -7,7 +7,7 @@ interface CustomerStore {
   customers: Customer[];
   visits: CustomerVisit[];
   isLoading: boolean;
-  loadCustomers: () => Promise<void>;
+  loadCustomers: (params?: { search?: string; limit?: number }) => Promise<void>;
   addCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'updatedAt' | 'totalVisits' | 'customerSince' | 'loyaltyPoints'>) => Promise<void>;
   updateCustomer: (id: string, data: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
@@ -26,10 +26,12 @@ export const useCustomers = create<CustomerStore>((set, get) => ({
   visits: [],
   isLoading: false,
 
-  loadCustomers: async () => {
+  loadCustomers: async (params) => {
     set({ isLoading: true });
     try {
-      const response = await customerService.getAllCustomers();
+      const response = params
+        ? await customerService.searchCustomers(params.search ?? '', params.limit ?? 5)
+        : await customerService.getAllCustomers();
       if (response.success) {
         // Mapear de BD a formato frontend
         const mappedCustomers = response.data.map((c: any) => {

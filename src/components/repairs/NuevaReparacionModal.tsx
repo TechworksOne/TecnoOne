@@ -11,9 +11,9 @@ import Input from '../ui/Input';
 import Select from '../ui/Select';
 import equipoService from '../../services/equipoService';
 import type { EquipoMarca, EquipoModelo, TipoEquipo } from '../../types/equipo';
-import { generarPDFRecepcion } from '../../lib/pdfGenerator';
-import { createReparacion } from '../../services/repairService';
+import { abrirContratoReparacion, createReparacion } from '../../services/repairService';
 import { useAuth } from '../../store/useAuth';
+import { useEmpresa } from '../../store/useEmpresa';
 import PatternLock from './PatternLock';
 import FirmaCanvas from './FirmaCanvas';
 import ConfirmModal from '../ui/ConfirmModal';
@@ -69,6 +69,7 @@ function hasDirtyData(
 // ── Main component ───────────────────────────────────────────────────────────
 export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Props) {
   const { user } = useAuth();
+  const { empresa, loadEmpresa } = useEmpresa();
   const authUserName = user?.username || user?.name || 'Sistema';
   const [currentStep, setCurrentStep] = useState<Step>('cliente');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | undefined>();
@@ -95,6 +96,10 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
   // ── Firma del cliente ──────────────────────────────────────────────────────
   const [firmaBase64, setFirmaBase64] = useState<string | null>(null);
 
+  // ── Datos editables del contrato ───────────────────────────────────────────
+  const [precioRevisionContrato, setPrecioRevisionContrato] = useState<string>('');
+  const [condicionesServicioContrato, setCondicionesServicioContrato] = useState<string>('');
+
   // ── Reset on open ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (isOpen) {
@@ -111,8 +116,25 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
       setPatternArr([]);
       setShowPin(false);
       setFirmaBase64(null);
+      setPrecioRevisionContrato(
+        empresa?.precio_revision_default != null ? String(empresa.precio_revision_default) : ''
+      );
+      setCondicionesServicioContrato(empresa?.condiciones_servicio_contrato || '');
+      loadEmpresa().catch(() => undefined);
     }
-  }, [isOpen]);
+  }, [isOpen, empresa?.precio_revision_default, empresa?.condiciones_servicio_contrato, loadEmpresa]);
+
+  useEffect(() => {
+    if (!isOpen || !empresa) return;
+
+    setPrecioRevisionContrato((prev) =>
+      prev !== '' ? prev : (empresa.precio_revision_default != null ? String(empresa.precio_revision_default) : '')
+    );
+
+    setCondicionesServicioContrato((prev) =>
+      prev !== '' ? prev : (empresa.condiciones_servicio_contrato || '')
+    );
+  }, [isOpen, empresa]);
 
   // ── Load marcas on tipo change ─────────────────────────────────────────────
   useEffect(() => {
@@ -226,35 +248,9 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
   };
 
   // ── PDF ────────────────────────────────────────────────────────────────────
+  // Contrato de recepción se genera desde backend para respetar tenant, logo, firmas y formato oficial.
   const handleGenerarPDF = () => {
-    if (!selectedCustomer) return;
-    const numeroReparacion = `REP${String(Date.now()).slice(-6)}`;
-    const [y, m, d] = fechaRecepcion.split('-');
-    generarPDFRecepcion({
-      numeroReparacion,
-      fecha: `${d}/${m}/${y}`,
-      cliente: {
-        nombre: selectedCustomer.nombre
-          ? `${selectedCustomer.nombre}${selectedCustomer.apellido ? ' ' + selectedCustomer.apellido : ''}`.trim()
-          : `${selectedCustomer.firstName || ''} ${selectedCustomer.lastName || ''}`.trim(),
-        telefono: selectedCustomer.telefono || selectedCustomer.phone || '',
-        email: selectedCustomer.correo || selectedCustomer.email,
-      },
-      equipo: {
-        tipo: equipmentData.tipo,
-        marca: equipmentData.marca,
-        modelo: equipmentData.modelo,
-        color: equipmentData.color,
-        imei: equipmentData.imei,
-        accesoTipo: equipmentData.accesoTipo,
-        accesoValor: equipmentData.accesoTipo === 'patron'
-          ? patternArr.join('-')
-          : equipmentData.accesoTipo === 'pin'
-          ? equipmentData.accesoValor
-          : undefined,
-        diagnostico: equipmentData.diagnostico,
-      },
-    }, false);
+    setErrorMsg('Reparación creada. El contrato se puede abrir desde el listado de reparaciones.');
   };
 
   // ── Submit ─────────────────────────────────────────────────────────────────
@@ -300,6 +296,8 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
         garantiaMeses: 1,
         items: [],
         manoDeObra: 0,
+        precioRevisionContrato: precioRevisionContrato.trim() !== '' ? Number(precioRevisionContrato) : null,
+        condicionesServicioContrato: condicionesServicioContrato.trim() || null,
         fotosFinales: [],
         historialEstados: [{
           id: `hist-${Date.now()}`,
@@ -311,7 +309,14 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
         }],
       };
 
-      await createReparacion({ ...repairData, firma_cliente_base64: firmaBase64 } as any);
+      const created = await createReparacion({ ...repairData, firma_cliente_base64: firmaBase64 } as any);
+      if (created?.id) {
+        try {
+          await abrirContratoReparacion(created.id);
+        } catch (contractError) {
+          console.warn('No se pudo abrir contrato backend:', contractError);
+        }
+      }
       onCreated();
       onClose();
     } catch (err: any) {
@@ -742,6 +747,48 @@ export default function NuevaReparacionModal({ isOpen, onClose, onCreated }: Pro
                     <p className="text-sm text-slate-600 dark:text-slate-300 italic">{equipmentData.diagnostico}</p>
                   </div>
                 )}
+              </div>
+
+              {/* ── Configuración del contrato ───────────────────────────── */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="px-4 py-2.5 bg-blue-50 dark:bg-blue-950/20 border-b border-blue-100 dark:border-blue-900/30">
+                  <p className="text-xs font-bold text-blue-700 dark:text-blue-300">Datos del Contrato</p>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                    Se cargan desde Configuración &gt; Empresa, pero puede modificarlos solo para esta reparación.
+                  </p>
+                </div>
+
+                <div className="p-4 space-y-4">
+                  <div>
+                    <label className={labelCls}>Precio de revisión / diagnóstico</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={precioRevisionContrato}
+                      onChange={(e) => setPrecioRevisionContrato(e.target.value)}
+                      placeholder="Ej. 50.00"
+                      className={inputCls}
+                    />
+                    <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                      Si lo deja vacío, se usará el valor de empresa o el comportamiento actual.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className={labelCls}>Condiciones de servicio del contrato</label>
+                    <textarea
+                      rows={5}
+                      value={condicionesServicioContrato}
+                      onChange={(e) => setCondicionesServicioContrato(e.target.value)}
+                      placeholder="Una condición por línea"
+                      className={`${inputCls} resize-none`}
+                    />
+                    <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                      Si lo deja vacío, se usarán las condiciones configuradas en empresa o las condiciones por defecto.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {/* ── Firma del cliente ───────────────────────────────── */}

@@ -4,9 +4,11 @@ const router = express.Router();
 const flujoController = require('../controllers/flujoReparacionController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
 router.use(verifyToken);
 router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
 // ========== RUTAS DE INGRESO DE EQUIPO (CHECKLIST) ==========
 // Guardar/actualizar checklist de ingreso con fotos

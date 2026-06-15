@@ -24,15 +24,15 @@ function KpiCard({ label, value, sub, icon: Icon, gradient }: {
   gradient: string;
 }) {
   return (
-    <div className={`rounded-2xl p-4 ${gradient}`}>
+    <div className={`rounded-2xl p-4 ${gradient} dark:bg-none dark:bg-[var(--color-surface)] dark:border dark:border-[var(--color-border)]`}>
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-[11px] font-medium text-white/70 uppercase tracking-widest">{label}</p>
-          <p className="text-2xl font-bold text-white mt-1">{value}</p>
-          {sub && <p className="text-[11px] text-white/60 mt-0.5">{sub}</p>}
+          <p className="text-[11px] font-medium text-white/70 dark:text-[var(--color-text-sec)] uppercase tracking-widest">{label}</p>
+          <p className="text-2xl font-bold text-white dark:text-[var(--color-text)] mt-1">{value}</p>
+          {sub && <p className="text-[11px] text-white/60 dark:text-[var(--color-text-muted)] mt-0.5">{sub}</p>}
         </div>
-        <div className="bg-white/20 rounded-xl p-2 shrink-0">
-          <Icon size={18} className="text-white" />
+        <div className="bg-white/20 dark:bg-[rgba(var(--tenant-primary-rgb),0.12)] rounded-xl p-2 shrink-0">
+          <Icon size={18} className="text-white dark:text-[var(--tenant-primary-color)]" />
         </div>
       </div>
     </div>
@@ -62,12 +62,12 @@ function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capi
     : 'text-[#14324A] dark:text-[#F8FAFC]';
 
   const statusCls = noStock
-    ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-300'
+    ? 'bg-red-50 dark:bg-[#202124] dark:border dark:border-red-900/50 text-red-600 dark:text-red-400'
     : lowStock
-    ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-300'
+    ? 'bg-amber-50 dark:bg-[#202124] dark:border dark:border-amber-900/50 text-amber-600 dark:text-amber-400'
     : product.active
-    ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-300'
-    : 'bg-slate-100 dark:bg-[#0A1220] text-slate-400 dark:text-[#7F8A99]';
+    ? 'bg-emerald-50 dark:bg-[#202124] dark:border dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400'
+    : 'bg-slate-100 dark:bg-[#202124] dark:border dark:border-[#303134] text-slate-400 dark:text-[#9AA0A6]';
 
   const statusLabel = noStock ? 'Sin stock' : lowStock ? 'Stock bajo' : product.active ? 'Activo' : 'Inactivo';
   const actionBtn = "p-1.5 rounded-lg transition-colors text-[#5E7184] dark:text-[#B8C2D1] hover:text-[#48B9E6] hover:bg-[rgba(72,185,230,0.10)]";
@@ -75,27 +75,27 @@ function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capi
   return (
     <div>
       {/* ─ Desktop row (md+) ─ */}
-      <div className="hidden md:flex items-center gap-3 px-4 py-3 hover:bg-[#F6FCFF] dark:hover:bg-[#0A1220] transition-colors">
+      <div className="hidden md:flex items-center gap-3 px-4 py-3 hover:bg-[#F6FCFF] dark:hover:bg-[var(--color-row-hover)] transition-colors">
         <img
           src={getImage(product)}
           alt={product.name}
           loading="lazy"
           decoding="async"
-          className="w-11 h-11 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-[#0A1220] border border-slate-100 dark:border-[rgba(72,185,230,0.10)]"
+          className="w-11 h-11 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-[var(--color-surface-soft)] border border-slate-100 dark:border-[var(--color-border)]"
           onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMG; }}
         />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-[#14324A] dark:text-[#F8FAFC] truncate leading-tight">{product.name}</p>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            <span className="text-[10px] font-mono bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-300 border border-sky-100 dark:border-sky-800/40 px-1.5 py-0.5 rounded">{product.sku}</span>
+            <span className="text-[10px] font-mono bg-sky-50 dark:bg-[#202124] text-sky-700 dark:text-[#60A5FA] border border-sky-100 dark:border-[#303134] px-1.5 py-0.5 rounded">{product.sku}</span>
             {product.category && (
-              <span className="text-[10px] bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded font-medium">{capitalize(product.category)}</span>
+              <span className="text-[10px] bg-blue-50 dark:bg-[#202124] text-blue-700 dark:text-[#60A5FA] px-1.5 py-0.5 rounded font-medium">{capitalize(product.category)}</span>
             )}
             {product.subcategory && (
-              <span className="text-[10px] bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 px-1.5 py-0.5 rounded font-medium">{capitalize(product.subcategory)}</span>
+              <span className="text-[10px] bg-violet-50 dark:bg-[#202124] text-violet-700 dark:text-[#9AA0A6] px-1.5 py-0.5 rounded font-medium">{capitalize(product.subcategory)}</span>
             )}
             {product.aplica_serie && (
-              <span className="text-[10px] bg-cyan-50 dark:bg-cyan-950/30 text-cyan-700 dark:text-cyan-300 px-1.5 py-0.5 rounded font-medium">Serie/IMEI</span>
+              <span className="text-[10px] bg-cyan-50 dark:bg-[#202124] text-cyan-700 dark:text-[#60A5FA] px-1.5 py-0.5 rounded font-medium">Serie/IMEI</span>
             )}
           </div>
         </div>
@@ -124,11 +124,11 @@ function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capi
       </div>
 
       {/* ─ Mobile card (< md) ─ */}
-      <div className="md:hidden flex items-start gap-3 px-4 py-3 hover:bg-[#F6FCFF] dark:hover:bg-[#0A1220] transition-colors">
+      <div className="md:hidden flex items-start gap-3 px-4 py-3 hover:bg-[#F6FCFF] dark:hover:bg-[var(--color-row-hover)] transition-colors">
         <img
           src={getImage(product)}
           alt={product.name}
-          className="w-12 h-12 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-[#0A1220] border border-slate-100 dark:border-[rgba(72,185,230,0.10)]"
+          className="w-12 h-12 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-[var(--color-surface-soft)] border border-slate-100 dark:border-[var(--color-border)]"
           onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMG; }}
         />
         <div className="flex-1 min-w-0">
@@ -137,9 +137,9 @@ function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capi
             <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold ${statusCls}`}>{statusLabel}</span>
           </div>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            <span className="text-[10px] font-mono bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-300 border border-sky-100 dark:border-sky-800/40 px-1.5 py-0.5 rounded">{product.sku}</span>
+            <span className="text-[10px] font-mono bg-sky-50 dark:bg-[#202124] text-sky-700 dark:text-[#60A5FA] border border-sky-100 dark:border-[#303134] px-1.5 py-0.5 rounded">{product.sku}</span>
             {product.category && (
-              <span className="text-[10px] bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded font-medium">{capitalize(product.category)}</span>
+              <span className="text-[10px] bg-blue-50 dark:bg-[#202124] text-blue-700 dark:text-[#60A5FA] px-1.5 py-0.5 rounded font-medium">{capitalize(product.category)}</span>
             )}
           </div>
           <div className="flex items-center justify-between mt-2">
@@ -566,7 +566,7 @@ export default function ProductsPage() {
           </Button>
           <Button
             onClick={handleOpenNewProductModal}
-            className="bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] hover:opacity-90 text-white font-semibold rounded-xl text-sm px-4 py-2 shadow-sm"
+            className="bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] dark:bg-none dark:bg-[#2563EB] hover:opacity-90 dark:hover:bg-[#1D4ED8] text-white font-semibold rounded-xl text-sm px-4 py-2 shadow-sm"
           >
             <Plus size={15} className="mr-1.5" />
             Nuevo Producto
@@ -610,7 +610,7 @@ export default function ProductsPage() {
       <StockAlertsWidget />
 
       {/* ── Toolbar ─────────────────────────────────────────────────── */}
-      <div className="bg-white dark:bg-[#0D1526] rounded-2xl border border-slate-100 dark:border-[rgba(72,185,230,0.16)] px-4 py-3 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+      <div className="bg-white dark:bg-[var(--color-surface)] rounded-2xl border border-slate-100 dark:border-[var(--color-border)] px-4 py-3 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         <div className="relative flex-1 min-w-0">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7F8A99] pointer-events-none" />
           <Input
@@ -618,13 +618,13 @@ export default function ProductsPage() {
             placeholder="Buscar por nombre, SKU o categoría..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className={`pl-9 py-2 text-sm rounded-xl border bg-[#F8FDFF] dark:bg-[#060B14] text-[#14324A] dark:text-[#F8FAFC] placeholder:text-[#7F8A99] focus:border-[#48B9E6] outline-none w-full transition-colors ${isSearching ? 'border-[#48B9E6] dark:border-[#48B9E6]' : 'border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)]'}`}
+            className={`pl-9 py-2 text-sm rounded-xl border bg-[#F8FDFF] dark:bg-[var(--color-input-bg)] text-[#14324A] dark:text-[var(--color-text)] placeholder:text-[#7F8A99] focus:border-[var(--tenant-primary-color)] outline-none w-full transition-colors ${isSearching ? 'border-[#48B9E6] dark:border-[var(--tenant-primary-color)]' : 'border-[#D6EEF8] dark:border-[var(--color-border)]'}`}
           />
         </div>
         <Select
           value={categoryFilter}
           onChange={(e) => { setCategoryFilter(e.target.value); setSubcategoryFilter(""); setDebouncedSearch(searchTerm); }}
-          className="text-sm rounded-xl border border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] bg-[#F8FDFF] dark:bg-[#060B14] text-[#14324A] dark:text-[#F8FAFC] py-2 min-w-0 sm:w-44"
+          className="text-sm rounded-xl border border-[#D6EEF8] dark:border-[var(--color-border)] bg-[#F8FDFF] dark:bg-[var(--color-input-bg)] text-[#14324A] dark:text-[var(--color-text)] py-2 min-w-0 sm:w-44"
         >
           <option value="">Todas las categorías</option>
           {categories.map((cat) => (
@@ -635,7 +635,7 @@ export default function ProductsPage() {
           <Select
             value={subcategoryFilter}
             onChange={(e) => setSubcategoryFilter(e.target.value)}
-            className="text-sm rounded-xl border border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] bg-[#F8FDFF] dark:bg-[#060B14] text-[#14324A] dark:text-[#F8FAFC] py-2 min-w-0 sm:w-44"
+            className="text-sm rounded-xl border border-[#D6EEF8] dark:border-[var(--color-border)] bg-[#F8FDFF] dark:bg-[var(--color-input-bg)] text-[#14324A] dark:text-[var(--color-text)] py-2 min-w-0 sm:w-44"
           >
             <option value="">Todas las subcategorías</option>
             {getSubcategories(categoryFilter).map((sub) => (
@@ -658,9 +658,9 @@ export default function ProductsPage() {
       </div>
 
       {/* ── Product List ─────────────────────────────────────────────── */}
-      <div className="bg-white dark:bg-[#0D1526] rounded-2xl border border-slate-100 dark:border-[rgba(72,185,230,0.16)] overflow-hidden shadow-sm dark:shadow-none">
+      <div className="bg-white dark:bg-[var(--color-surface)] rounded-2xl border border-slate-100 dark:border-[var(--color-border)] overflow-hidden shadow-sm dark:shadow-none">
         {/* Table header */}
-        <div className="hidden md:flex items-center gap-3 px-4 py-2 bg-[#F8FDFF] dark:bg-[#0A1220] border-b border-slate-100 dark:border-[rgba(72,185,230,0.16)]">
+        <div className="hidden md:flex items-center gap-3 px-4 py-2 bg-[#F8FDFF] dark:bg-[var(--color-surface-soft)] border-b border-slate-100 dark:border-[var(--color-border)]">
           <div className="w-11 shrink-0" />
           <p className="flex-1 text-[11px] font-semibold text-[#5E7184] dark:text-[#B8C2D1] uppercase tracking-widest">Producto</p>
           <p className="w-20 text-right text-[11px] font-semibold text-[#5E7184] dark:text-[#B8C2D1] uppercase tracking-widest shrink-0">Stock</p>
@@ -697,7 +697,7 @@ export default function ProductsPage() {
               {hasFilters ? 'Ajusta los filtros o la búsqueda' : 'Comienza agregando tu primer producto'}
             </p>
             {!hasFilters && (
-              <Button onClick={handleOpenNewProductModal} className="bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] hover:opacity-90 text-white text-sm rounded-xl px-4 py-2">
+              <Button onClick={handleOpenNewProductModal} className="bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] dark:bg-none dark:bg-[#2563EB] hover:opacity-90 dark:hover:bg-[#1D4ED8] text-white text-sm rounded-xl px-4 py-2">
                 <Plus size={14} className="mr-1.5" />
                 Agregar Producto
               </Button>
@@ -708,7 +708,7 @@ export default function ProductsPage() {
 
       {/* ── Pagination ───────────────────────────────────────────────── */}
       {pagination.totalPages > 1 && (
-        <div className="bg-white dark:bg-[#0D1526] rounded-2xl border border-slate-100 dark:border-[rgba(72,185,230,0.16)] px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="bg-white dark:bg-[var(--color-surface)] rounded-2xl border border-slate-100 dark:border-[var(--color-border)] px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-xs text-[#5E7184] dark:text-[#B8C2D1]">
             Mostrando <span className="font-semibold text-[#14324A] dark:text-[#F8FAFC]">{products.length}</span> de{' '}
             <span className="font-semibold text-[#14324A] dark:text-[#F8FAFC]">{pagination.total}</span> productos
@@ -939,7 +939,7 @@ export default function ProductsPage() {
               <Button
                 onClick={handleSaveProduct}
                 disabled={!productForm.name || !productForm.category}
-                className="text-sm bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] hover:brightness-110 text-white font-semibold rounded-xl px-5 py-2 shadow-lg shadow-sky-900/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:brightness-100"
+                className="text-sm bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] dark:bg-none dark:bg-[#2563EB] hover:brightness-110 dark:hover:bg-[#1D4ED8] text-white font-semibold rounded-xl px-5 py-2 shadow-lg shadow-sky-900/20 dark:shadow-none disabled:opacity-50 disabled:cursor-not-allowed disabled:brightness-100"
               >
                 {editingProduct ? "Actualizar" : "Crear Producto"}
               </Button>
@@ -1023,7 +1023,7 @@ export default function ProductsPage() {
                 Cancelar edición
               </Button>
             )}
-            <Button onClick={handleAddCategory} className="text-sm bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] hover:opacity-90 text-white font-semibold rounded-xl px-5 py-2 shadow-sm">
+            <Button onClick={handleAddCategory} className="text-sm bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] dark:bg-none dark:bg-[#2563EB] hover:opacity-90 dark:hover:bg-[#1D4ED8] text-white font-semibold rounded-xl px-5 py-2 shadow-sm">
               {newCategoryForm.isEditing ? "Actualizar" : "Agregar"}
             </Button>
           </div>
@@ -1041,7 +1041,7 @@ export default function ProductsPage() {
                     </div>
                     <div className="flex gap-0.5">
                       <button onClick={() => handleEditCategory(category.nombre, category.id)} className="p-1.5 rounded-lg text-sky-600 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/30 transition-colors"><Pencil size={13} /></button>
-                      <button onClick={() => handleDeleteCategory(category.id, category.nombre)} className="p-1.5 rounded-lg text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"><Trash2 size={13} /></button>
+                      <button onClick={() => handleDeleteCategory(category.id, category.nombre)} className="p-1.5 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-[#202124] transition-colors"><Trash2 size={13} /></button>
                     </div>
                   </div>
                   {categoriesData.subcategories?.filter((sub: any) => sub.categoria_id === category.id).map((sub: any) => (
@@ -1052,7 +1052,7 @@ export default function ProductsPage() {
                       </div>
                       <div className="flex gap-0.5">
                         <button onClick={() => handleEditSubcategory(category.nombre, sub.nombre, sub.id)} className="p-1.5 rounded-lg text-sky-600 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/30 transition-colors"><Pencil size={11} /></button>
-                        <button onClick={() => handleDeleteSubcategory(sub.id, sub.nombre)} className="p-1.5 rounded-lg text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"><Trash2 size={11} /></button>
+                        <button onClick={() => handleDeleteSubcategory(sub.id, sub.nombre)} className="p-1.5 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-[#202124] transition-colors"><Trash2 size={11} /></button>
                       </div>
                     </div>
                   ))}
@@ -1225,13 +1225,13 @@ export default function ProductsPage() {
               <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest">Acciones</p>
               <button
                 onClick={handleToggleProductStatus}
-                className={`w-full text-left text-sm font-medium px-4 py-2.5 rounded-xl transition-colors ${selectedProduct.active ? 'text-orange-600 hover:bg-orange-50' : 'text-emerald-600 hover:bg-emerald-50'}`}
+                className={`w-full text-left text-sm font-medium px-4 py-2.5 rounded-xl transition-colors ${selectedProduct.active ? 'text-orange-600 dark:text-amber-400 hover:bg-orange-50 dark:hover:bg-[#202124]' : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-[#202124]'}`}
               >
                 {selectedProduct.active ? '⏸ Desactivar producto' : '▶ Activar producto'}
               </button>
               <button
                 onClick={handleDeleteProduct}
-                className="w-full text-left text-sm font-medium px-4 py-2.5 rounded-xl text-red-600 hover:bg-red-50 transition-colors"
+                className="w-full text-left text-sm font-medium px-4 py-2.5 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-[#202124] transition-colors"
               >
                 🗑 Eliminar producto
               </button>

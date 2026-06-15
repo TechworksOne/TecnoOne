@@ -1,6 +1,6 @@
 import axios from 'axios';
 import API_URL from './config';
-import { getImageUrl } from '../utils/getImageUrl';
+import { getSafeImageUrl } from '../lib/avatar';
 
 const api = axios.create({ baseURL: API_URL });
 
@@ -62,8 +62,7 @@ export interface UpdateUsuarioPayload {
 }
 
 export function fotoUrl(fotoPerfil: string | null | undefined): string | null {
-  if (!fotoPerfil) return null;
-  return getImageUrl(fotoPerfil) || null;
+  return getSafeImageUrl(fotoPerfil);
 }
 
 export const adminUsuarioService = {

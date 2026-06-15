@@ -22,6 +22,7 @@ dist/
 *.bak_*
 *.corrupt_*
 *.sql
+!Tecnocell_backend/scripts/migration_empresas_config_saas_sprint_1_9_12.sql
 backups_codigo/
 backups_pre_pull_*
 docker-compose.override.yml

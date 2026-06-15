@@ -89,15 +89,15 @@ function KpiCard({ label, value, sub, icon: Icon, gradient }: {
   gradient: string;
 }) {
   return (
-    <div className={`rounded-2xl p-4 ${gradient}`}>
+    <div className={`rounded-2xl p-4 ${gradient} dark:bg-none dark:bg-[var(--color-surface)] dark:border dark:border-[var(--color-border)]`}>
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-[11px] font-medium text-white/70 uppercase tracking-widest">{label}</p>
-          <p className="text-2xl font-bold text-white mt-1">{value}</p>
-          {sub && <p className="text-[11px] text-white/60 mt-0.5">{sub}</p>}
+          <p className="text-[11px] font-medium text-white/70 dark:text-[var(--color-text-sec)] uppercase tracking-widest">{label}</p>
+          <p className="text-2xl font-bold text-white dark:text-[var(--color-text)] mt-1">{value}</p>
+          {sub && <p className="text-[11px] text-white/60 dark:text-[var(--color-text-muted)] mt-0.5">{sub}</p>}
         </div>
-        <div className="bg-white/20 rounded-xl p-2 shrink-0">
-          <Icon size={18} className="text-white" />
+        <div className="bg-white/20 dark:bg-[rgba(var(--tenant-primary-rgb),0.12)] rounded-xl p-2 shrink-0">
+          <Icon size={18} className="text-white dark:text-[var(--tenant-primary-color)]" />
         </div>
       </div>
     </div>
@@ -118,12 +118,12 @@ const getTipoIcon = (tipo: string) => {
 
 const getCondicionBadge = (condicion: string) => {
   const map: Record<string, string> = {
-    'Original': 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300',
-    'OEM':      'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300',
-    'Genérico': 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300',
-    'Usado':    'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300',
+    'Original': 'bg-emerald-50 dark:bg-[#202124] dark:border dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-400',
+    'OEM':      'bg-blue-50 dark:bg-[#202124] dark:border dark:border-blue-900/50 text-blue-700 dark:text-blue-400',
+    'Genérico': 'bg-amber-50 dark:bg-[#202124] dark:border dark:border-amber-900/50 text-amber-700 dark:text-amber-400',
+    'Usado':    'bg-slate-100 dark:bg-[#202124] dark:border dark:border-[#303134] text-slate-600 dark:text-[#9AA0A6]',
   };
-  return map[condicion] || 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400';
+  return map[condicion] || 'bg-slate-100 dark:bg-[#202124] dark:border dark:border-[#303134] text-slate-500 dark:text-[#9AA0A6]';
 };
 
 const actionBtn = "p-1.5 rounded-lg transition-colors text-[#5E7184] dark:text-[#B8C2D1] hover:text-[#48B9E6] hover:bg-[rgba(72,185,230,0.10)]";
@@ -148,11 +148,11 @@ function RepuestoRow({ repuesto, onView, onEdit, onToggle, onKardex }: {
   return (
     <>
       {/* ── Desktop row ────────────────────────────────────────────────── */}
-      <div className="hidden md:flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-[#0A1220] transition-colors border-b border-slate-100 dark:border-[rgba(72,185,230,0.08)] last:border-0">
+      <div className="hidden md:flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-[var(--color-row-hover)] transition-colors border-b border-slate-100 dark:border-[var(--color-border)] last:border-0">
         <img
           src={img}
           alt={repuesto.nombre}
-          className="w-11 h-11 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-[rgba(72,185,230,0.12)]"
+          className="w-11 h-11 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-[var(--color-surface-soft)] border border-slate-200 dark:border-[var(--color-border)]"
           onError={(e) => { e.currentTarget.src = REPUESTO_PLACEHOLDER; }}
         />
         <div className="flex-1 min-w-0">
@@ -162,7 +162,7 @@ function RepuestoRow({ repuesto, onView, onEdit, onToggle, onKardex }: {
           </div>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             {(repuesto.sku || repuesto.codigo) && (
-              <span className="text-[10px] font-mono text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/30 px-1.5 py-0.5 rounded">{repuesto.sku || repuesto.codigo}</span>
+              <span className="text-[10px] font-mono text-sky-700 dark:text-[#60A5FA] bg-sky-50 dark:bg-[#202124] border dark:border-[#303134] px-1.5 py-0.5 rounded">{repuesto.sku || repuesto.codigo}</span>
             )}
             <span className="text-[10px] font-medium text-[#5E7184] dark:text-[#B8C2D1]">{repuesto.marca}</span>
             {repuesto.linea && <span className="text-[10px] text-[#7F8A99] dark:text-[#7F8A99]">· {repuesto.linea}</span>}
@@ -183,13 +183,13 @@ function RepuestoRow({ repuesto, onView, onEdit, onToggle, onKardex }: {
           )}
         </div>
         <div className="hidden lg:flex items-center justify-center w-20 shrink-0">
-          {noStock && <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400">Sin stock</span>}
-          {!noStock && lowStock && <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-orange-50 dark:bg-orange-950/30 text-orange-600 dark:text-orange-400">Stock bajo</span>}
+          {noStock && <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-red-50 dark:bg-[#202124] dark:border dark:border-red-900/50 text-red-600 dark:text-red-400">Sin stock</span>}
+          {!noStock && lowStock && <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-orange-50 dark:bg-[#202124] dark:border dark:border-amber-900/50 text-orange-600 dark:text-amber-400">Stock bajo</span>}
           {!noStock && !lowStock && (
             <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
               repuesto.activo
-                ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                ? 'bg-emerald-50 dark:bg-[#202124] dark:border dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400'
+                : 'bg-slate-100 dark:bg-[#202124] dark:border dark:border-[#303134] text-slate-500 dark:text-[#9AA0A6]'
             }`}>{repuesto.activo ? 'Activo' : 'Inactivo'}</span>
           )}
         </div>
@@ -205,31 +205,31 @@ function RepuestoRow({ repuesto, onView, onEdit, onToggle, onKardex }: {
       </div>
 
       {/* ── Mobile card ────────────────────────────────────────────────── */}
-      <div className="md:hidden p-4 border-b border-[#D6EEF8] dark:border-[rgba(72,185,230,0.10)] last:border-0">
+      <div className="md:hidden p-4 border-b border-[#D6EEF8] dark:border-[var(--color-border)] last:border-0">
         <div className="flex items-start gap-3">
           <img
             src={img}
             alt={repuesto.nombre}
-            className="w-12 h-12 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-[rgba(72,185,230,0.12)]"
+            className="w-12 h-12 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-[var(--color-surface-soft)] border border-slate-200 dark:border-[var(--color-border)]"
             onError={(e) => { e.currentTarget.src = REPUESTO_PLACEHOLDER; }}
           />
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <p className="text-sm font-semibold text-[#14324A] dark:text-[#F8FAFC] leading-tight">{repuesto.nombre}</p>
               {noStock
-                ? <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400">Sin stock</span>
+                ? <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 bg-red-50 dark:bg-[#202124] dark:border dark:border-red-900/50 text-red-600 dark:text-red-400">Sin stock</span>
                 : lowStock
-                ? <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 bg-orange-50 dark:bg-orange-950/30 text-orange-600 dark:text-orange-400">Stock bajo</span>
+                ? <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 bg-orange-50 dark:bg-[#202124] dark:border dark:border-amber-900/50 text-orange-600 dark:text-amber-400">Stock bajo</span>
                 : <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 ${
                     repuesto.activo
-                      ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                      ? 'bg-emerald-50 dark:bg-[#202124] dark:border dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-slate-100 dark:bg-[#202124] dark:border dark:border-[#303134] text-slate-500 dark:text-[#9AA0A6]'
                   }`}>{repuesto.activo ? 'Activo' : 'Inactivo'}</span>
               }
             </div>
             <div className="flex flex-wrap gap-1 mt-1">
               {(repuesto.sku || repuesto.codigo) && (
-                <span className="text-[10px] font-mono text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/30 px-1.5 py-0.5 rounded">{repuesto.sku || repuesto.codigo}</span>
+                <span className="text-[10px] font-mono text-sky-700 dark:text-[#60A5FA] bg-sky-50 dark:bg-[#202124] border dark:border-[#303134] px-1.5 py-0.5 rounded">{repuesto.sku || repuesto.codigo}</span>
               )}
               <span className="text-[10px] font-medium text-[#5E7184] dark:text-[#B8C2D1]">{repuesto.marca}</span>
               {repuesto.linea && <span className="text-[10px] text-[#7F8A99]">· {repuesto.linea}</span>}
@@ -407,7 +407,7 @@ export function RepuestosPage() {
         </div>
         <Button
           onClick={openNewModal}
-          className="bg-gradient-to-r from-[#48B9E6] to-[#2EA7D8] hover:from-[#2EA7D8] hover:to-[#2563EB] text-white font-semibold rounded-xl text-sm px-4 py-2 shadow-sm shrink-0 transition-all"
+          className="bg-gradient-to-r from-[#48B9E6] to-[#2EA7D8] dark:bg-none dark:bg-[#2563EB] hover:from-[#2EA7D8] hover:to-[#2563EB] dark:hover:bg-[#1D4ED8] text-white font-semibold rounded-xl text-sm px-4 py-2 shadow-sm shrink-0 transition-all"
         >
           <Plus size={15} className="mr-1.5" />
           Nuevo Repuesto
@@ -423,26 +423,26 @@ export function RepuestosPage() {
       </div>
 
       {/* ── Toolbar ─────────────────────────────────────────────────── */}
-      <div className="bg-white dark:bg-[#0D1526] rounded-2xl border border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] px-4 py-3 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+      <div className="bg-white dark:bg-[var(--color-surface)] rounded-2xl border border-[#D6EEF8] dark:border-[var(--color-border)] px-4 py-3 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         <div className="relative flex-1 min-w-0">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7F8A99] pointer-events-none" />
           <Input
             placeholder="Buscar por nombre, SKU, marca, modelo..."
             value={searchTerm}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
-            className="pl-9 py-2 text-sm rounded-xl border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] bg-[#F8FDFF] dark:bg-[#060B14] text-[#14324A] dark:text-[#F8FAFC] placeholder:text-[#7F8A99] w-full focus:ring-[#48B9E6]"
+            className="pl-9 py-2 text-sm rounded-xl border-[#D6EEF8] dark:border-[var(--color-border)] bg-[#F8FDFF] dark:bg-[var(--color-input-bg)] text-[#14324A] dark:text-[var(--color-text)] placeholder:text-[#7F8A99] w-full focus:ring-[var(--tenant-primary-color)]"
           />
         </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter} className="text-sm rounded-xl border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] bg-white dark:bg-[#0D1526] text-[#14324A] dark:text-[#F8FAFC] py-2 sm:w-40 shrink-0">
+        <Select value={categoryFilter} onValueChange={setCategoryFilter} className="text-sm rounded-xl border-[#D6EEF8] dark:border-[var(--color-border)] bg-white dark:bg-[var(--color-input-bg)] text-[#14324A] dark:text-[var(--color-text)] py-2 sm:w-40 shrink-0">
           <option value="all">Todos los tipos</option>
           {TIPOS_REPUESTO.map(t => <option key={t} value={t}>{t}</option>)}
         </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter} className="text-sm rounded-xl border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] bg-white dark:bg-[#0D1526] text-[#14324A] dark:text-[#F8FAFC] py-2 sm:w-36 shrink-0">
+        <Select value={statusFilter} onValueChange={setStatusFilter} className="text-sm rounded-xl border-[#D6EEF8] dark:border-[var(--color-border)] bg-white dark:bg-[var(--color-input-bg)] text-[#14324A] dark:text-[var(--color-text)] py-2 sm:w-36 shrink-0">
           <option value="all">Todos los estados</option>
           <option value="active">Activos</option>
           <option value="inactive">Inactivos</option>
         </Select>
-        <Select value={stockFilter} onValueChange={setStockFilter} className="text-sm rounded-xl border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] bg-white dark:bg-[#0D1526] text-[#14324A] dark:text-[#F8FAFC] py-2 sm:w-36 shrink-0">
+        <Select value={stockFilter} onValueChange={setStockFilter} className="text-sm rounded-xl border-[#D6EEF8] dark:border-[var(--color-border)] bg-white dark:bg-[var(--color-input-bg)] text-[#14324A] dark:text-[var(--color-text)] py-2 sm:w-36 shrink-0">
           <option value="all">Todo el stock</option>
           <option value="available">Disponible</option>
           <option value="low">Stock bajo</option>
@@ -459,9 +459,9 @@ export function RepuestosPage() {
       </div>
 
       {/* ── List ────────────────────────────────────────────────────── */}
-      <div className="bg-white dark:bg-[#0D1526] rounded-2xl border border-[#D6EEF8] dark:border-[rgba(72,185,230,0.16)] overflow-hidden">
+      <div className="bg-white dark:bg-[var(--color-surface)] rounded-2xl border border-[#D6EEF8] dark:border-[var(--color-border)] overflow-hidden">
         {/* Table header — only on desktop */}
-        <div className="hidden md:flex items-center gap-3 px-4 py-2.5 bg-[#F8FDFF] dark:bg-[#0A1220] border-b border-[#D6EEF8] dark:border-[rgba(72,185,230,0.12)]">
+        <div className="hidden md:flex items-center gap-3 px-4 py-2.5 bg-[#F8FDFF] dark:bg-[var(--color-surface-soft)] border-b border-[#D6EEF8] dark:border-[var(--color-border)]">
           <div className="w-11 shrink-0" />
           <p className="flex-1 text-[11px] font-semibold text-[#5E7184] dark:text-[#B8C2D1] uppercase tracking-widest">Repuesto</p>
           <p className="w-20 text-right text-[11px] font-semibold text-[#5E7184] dark:text-[#B8C2D1] uppercase tracking-widest shrink-0">Stock</p>
@@ -490,13 +490,13 @@ export function RepuestosPage() {
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="bg-[#F8FDFF] dark:bg-[#0A1220] rounded-2xl p-4 mb-3">
+            <div className="bg-[#F8FDFF] dark:bg-[var(--color-surface-soft)] rounded-2xl p-4 mb-3">
               <Wrench size={28} className="text-[#48B9E6]" />
             </div>
             <p className="text-sm font-semibold text-[#14324A] dark:text-[#F8FAFC]">{hasFilters ? 'Sin resultados' : 'No hay repuestos'}</p>
             <p className="text-xs text-[#5E7184] dark:text-[#B8C2D1] mt-1 mb-4">{hasFilters ? 'Ajusta los filtros' : 'Comienza agregando tu primer repuesto'}</p>
             {!hasFilters && (
-              <Button onClick={openNewModal} className="bg-gradient-to-r from-[#48B9E6] to-[#2EA7D8] text-white text-sm rounded-xl px-4 py-2">
+              <Button onClick={openNewModal} className="bg-gradient-to-r from-[#48B9E6] to-[#2EA7D8] dark:bg-none dark:bg-[#2563EB] dark:hover:bg-[#1D4ED8] text-white text-sm rounded-xl px-4 py-2">
                 <Plus size={14} className="mr-1.5" />
                 Agregar Repuesto
               </Button>
@@ -615,21 +615,21 @@ export function RepuestosPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 {showCost && (
-                <div className="bg-blue-50 dark:bg-blue-950/20 rounded-xl p-3">
+                <div className="bg-blue-50 dark:bg-[#202124] dark:border dark:border-[#303134] rounded-xl p-3">
                   <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-widest">Precio Costo</p>
                   <p className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-0.5">{fmtQ(selectedRepuesto.precioCosto)}</p>
                 </div>
                 )}
-                <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-xl p-3">
+                <div className="bg-emerald-50 dark:bg-[#202124] dark:border dark:border-[#303134] rounded-xl p-3">
                   <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-widest">Precio Venta</p>
                   <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">{fmtQ(selectedRepuesto.precio)}</p>
                 </div>
               </div>
 
               {showCost && toNum(selectedRepuesto.precioCosto) > 0 && toNum(selectedRepuesto.precio) > 0 && (
-                <div className="bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 rounded-xl px-3 py-2 flex items-center justify-between">
-                  <span className="text-[11px] font-medium text-violet-600 dark:text-violet-400">Margen</span>
-                  <span className="text-sm font-bold text-violet-700 dark:text-violet-300">
+                <div className="bg-violet-50 dark:bg-[#202124] border border-violet-200 dark:border-[#303134] rounded-xl px-3 py-2 flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-violet-600 dark:text-[#9AA0A6]">Margen</span>
+                  <span className="text-sm font-bold text-violet-700 dark:text-[var(--color-text)]">
                     {fmtQ(toNum(selectedRepuesto.precio) - toNum(selectedRepuesto.precioCosto))}
                     <span className="font-normal text-[11px] ml-1">
                       ({(((toNum(selectedRepuesto.precio) - toNum(selectedRepuesto.precioCosto)) / toNum(selectedRepuesto.precioCosto)) * 100).toFixed(1)}%)
@@ -669,14 +669,14 @@ export function RepuestosPage() {
                   Editar
                 </Button>
                 <Button variant="ghost" onClick={() => handleToggleActive(selectedRepuesto)}
-                  className={`text-sm border rounded-xl px-4 py-2 ${selectedRepuesto.activo ? 'border-orange-200 text-orange-600 hover:bg-orange-50' : 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'}`}>
+                  className={`text-sm border rounded-xl px-4 py-2 ${selectedRepuesto.activo ? 'border-orange-200 dark:border-amber-900/50 text-orange-600 dark:text-amber-400 hover:bg-orange-50 dark:hover:bg-[#202124]' : 'border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-[#202124]'}`}>
                   {selectedRepuesto.activo ? 'Desactivar' : 'Activar'}
                 </Button>
                 <Button variant="ghost" onClick={() => { setShowDetailModal(false); handleDuplicateRepuesto(selectedRepuesto); }} className="text-sm border border-slate-200 rounded-xl px-4 py-2">
                   <Copy size={13} className="mr-1.5" />
                   Duplicar
                 </Button>
-                <Button variant="ghost" onClick={() => { setShowDetailModal(false); handleDeleteRepuesto(selectedRepuesto.id); }} className="text-sm border border-red-200 text-red-600 hover:bg-red-50 rounded-xl px-4 py-2">
+                <Button variant="ghost" onClick={() => { setShowDetailModal(false); handleDeleteRepuesto(selectedRepuesto.id); }} className="text-sm border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-[#202124] rounded-xl px-4 py-2">
                   <Trash2 size={13} className="mr-1.5" />
                   Eliminar
                 </Button>
@@ -747,9 +747,9 @@ export function RepuestosPage() {
                       </td>
                       <td className="py-2 px-3">
                         <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                          isEntrada ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300' :
-                          isSalida ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300' :
-                          'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
+                          isEntrada ? 'bg-emerald-50 dark:bg-[#202124] dark:border dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-400' :
+                          isSalida ? 'bg-red-50 dark:bg-[#202124] dark:border dark:border-red-900/50 text-red-700 dark:text-red-400' :
+                          'bg-blue-50 dark:bg-[#202124] dark:border dark:border-blue-900/50 text-blue-700 dark:text-blue-400'
                         }`}>{mov.tipo_movimiento}</span>
                       </td>
                       <td className={`py-2 px-3 text-right text-[12px] font-bold ${isEntrada ? 'text-emerald-600 dark:text-emerald-400' : isSalida ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`}>

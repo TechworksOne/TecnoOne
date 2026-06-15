@@ -3,10 +3,12 @@ const router = express.Router();
 const ventaController = require('../controllers/ventaController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
 // Todas las rutas de ventas requieren autenticación y tenant scope
 router.use(verifyToken);
 router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
 // Rutas de ventas
 router.post('/', ventaController.createVenta);

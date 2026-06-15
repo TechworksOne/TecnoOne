@@ -16,16 +16,22 @@ function KpiCard({
   icon: React.ComponentType<{ size?: number; className?: string }>;
   gradient: string;
 }) {
+  const accent = gradient.includes('emerald')
+    ? 'dark:text-emerald-300'
+    : gradient.includes('violet') || gradient.includes('purple')
+      ? 'dark:text-[#9AA0A6]'
+      : 'dark:text-blue-300';
+
   return (
-    <div className={`rounded-2xl p-4 ${gradient}`}>
+    <div className={`rounded-2xl p-4 ${gradient} dark:bg-none dark:bg-[#1B1C1F] dark:border dark:border-[#303134]`}>
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-[11px] font-medium text-white/70 uppercase tracking-widest">{label}</p>
-          <p className="text-2xl font-bold text-white mt-1">{value}</p>
-          {sub && <p className="text-[11px] text-white/60 mt-0.5">{sub}</p>}
+          <p className="text-[11px] font-medium text-white/70 dark:text-[#9AA0A6] uppercase tracking-widest">{label}</p>
+          <p className="text-2xl font-bold text-white dark:text-[#E8EAED] mt-1">{value}</p>
+          {sub && <p className="text-[11px] text-white/60 dark:text-[#9AA0A6] mt-0.5">{sub}</p>}
         </div>
-        <div className="bg-white/15 rounded-xl p-2.5 shrink-0">
-          <Icon size={20} className="text-white" />
+        <div className="bg-white/15 dark:bg-[#202124] rounded-xl p-2.5 shrink-0">
+          <Icon size={20} className={`text-white ${accent}`} />
         </div>
       </div>
     </div>
