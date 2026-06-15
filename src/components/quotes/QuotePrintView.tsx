@@ -1,41 +1,113 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Quote } from '../../types/quote';
 import { formatMoney, formatDate } from '../../lib/format';
+import { useEmpresa } from '../../store/useEmpresa';
+import { getImageUrl } from '../../utils/getImageUrl';
 
 interface QuotePrintViewProps {
   quote: Quote;
 }
 
 export default function QuotePrintView({ quote }: QuotePrintViewProps) {
+  const { empresa, loadEmpresa } = useEmpresa();
   const vigenciaHasta = new Date(quote.createdAt);
   vigenciaHasta.setDate(vigenciaHasta.getDate() + quote.vigenciaDias);
+  const empresaNombre =
+    empresa?.nombre_comercial ||
+    empresa?.nombre ||
+    empresa?.razon_social ||
+    'TecnoOne';
+
+  const razonSocial =
+    empresa?.razon_social && empresa.razon_social !== empresaNombre
+      ? empresa.razon_social
+      : '';
+
+  const empresaCorreo = empresa?.correo || empresa?.email || '';
+  const empresaTelefono = empresa?.telefono || '';
+  const empresaDireccion = empresa?.direccion || '';
+  const empresaNit = empresa?.nit || '';
+  const logoUrl = empresa?.logo_url ? getImageUrl(empresa.logo_url) : '';
+
+  useEffect(() => {
+    loadEmpresa();
+  }, [loadEmpresa]);
+
+  const renderCompanyBrand = () => (
+    <div className="print-brand">
+      {logoUrl ? (
+        <img src={logoUrl} alt={empresaNombre} className="print-brand-logo" />
+      ) : (
+        <div className="print-logo">{empresaNombre}</div>
+      )}
+      {razonSocial && <div className="print-brand-subtitle">{razonSocial}</div>}
+    </div>
+  );
+
+  const renderCompanyInfo = (extra?: React.ReactNode) => (
+    <div className="print-company-info">
+      <div className="font-semibold">{empresaNombre}</div>
+      {empresaDireccion && <div>{empresaDireccion}</div>}
+      {empresaTelefono && <div>Tel: {empresaTelefono}</div>}
+      {empresaCorreo && <div>{empresaCorreo}</div>}
+      {empresaNit && <div className="mt-2 font-bold text-lg">NIT: {empresaNit}</div>}
+      {extra}
+    </div>
+  );
 
   return (
     <div className="print-view">
       <style>{`
         @media print {
-          body * {
-            visibility: hidden;
+          @page {
+            margin: 8mm;
+            size: letter;
           }
-          .print-view, .print-view * {
-            visibility: visible;
+
+          html,
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
-          .print-view {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-          }
-          .no-print {
+
+          .no-print,
+          .no-print * {
             display: none !important;
           }
-          .page-break {
-            page-break-after: always;
-            break-after: page;
+
+          .print-view {
+            display: block !important;
+            position: static !important;
+            width: auto !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #111827 !important;
+            box-shadow: none !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
-          @page {
-            margin: 2cm;
-            size: letter;
+
+          .page-break {
+            page-break-before: always;
+            break-before: page;
+          }
+
+          .print-items-table th {
+            background: #2563eb !important;
+            color: #ffffff !important;
+          }
+
+          .print-header,
+          .print-info-section,
+          .print-totals,
+          .print-footer,
+          .print-observaciones {
+            background: #ffffff !important;
           }
         }
 
@@ -45,15 +117,19 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
           color: #1a1a1a;
           max-width: 21cm;
           margin: 0 auto;
-          padding: 1.5cm;
+          padding: 0.65cm 0.9cm;
+          font-size: 12px;
+          line-height: 1.25;
         }
 
         .print-header {
+          page-break-inside: avoid;
+          break-inside: avoid;
           display: flex;
           justify-content: space-between;
           align-items: start;
-          margin-bottom: 2rem;
-          padding-bottom: 1rem;
+          margin-bottom: 0.9rem;
+          padding-bottom: 0.55rem;
           border-bottom: 3px solid #2563eb;
         }
 
@@ -63,6 +139,21 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
           color: #2563eb;
         }
 
+        .print-brand-logo {
+          display: block;
+          max-width: 180px;
+          max-height: 70px;
+          width: auto;
+          height: auto;
+          object-fit: contain;
+        }
+
+        .print-brand-subtitle {
+          font-size: 0.85rem;
+          color: #4b5563;
+          margin-top: 0.25rem;
+        }
+
         .print-company-info {
           text-align: right;
           font-size: 0.85rem;
@@ -70,6 +161,8 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
         }
 
         .print-title {
+          page-break-inside: avoid;
+          break-inside: avoid;
           text-align: center;
           font-size: 1.5rem;
           font-weight: bold;
@@ -78,15 +171,17 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
         }
 
         .print-info-grid {
+          page-break-inside: avoid;
+          break-inside: avoid;
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 2rem;
-          margin-bottom: 2rem;
+          margin-bottom: 0.9rem;
         }
 
         .print-info-section {
-          background: #f8f9fa;
-          padding: 1rem;
+          background: #ffffff;
+          padding: 0.45rem;
           border-radius: 0.5rem;
         }
 
@@ -119,20 +214,20 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
         .print-items-table th {
           background: #2563eb;
           color: white;
-          padding: 0.75rem;
+          padding: 0.42rem 0.5rem;
           text-align: left;
           font-size: 0.85rem;
           font-weight: 600;
         }
 
         .print-items-table td {
-          padding: 0.75rem;
+          padding: 0.42rem 0.5rem;
           border-bottom: 1px solid #e5e7eb;
           font-size: 0.9rem;
         }
 
         .print-items-table tbody tr:hover {
-          background: #f8f9fa;
+          background: #ffffff;
         }
 
         .print-source-badge {
@@ -144,12 +239,12 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
         }
 
         .badge-producto {
-          background: #dbeafe;
+          background: #ffffff;
           color: #1e40af;
         }
 
         .badge-repuesto {
-          background: #fce7f3;
+          background: #ffffff;
           color: #be185d;
         }
 
@@ -168,7 +263,7 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
 
         .print-total-row.final {
           border-top: 2px solid #2563eb;
-          padding-top: 1rem;
+          padding-top: 0.4rem;
           margin-top: 0.5rem;
           font-size: 1.2rem;
           font-weight: bold;
@@ -177,15 +272,17 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
 
         .print-observaciones {
           margin: 2rem 0;
-          padding: 1rem;
-          background: #fffbeb;
+          padding: 0.45rem;
+          background: #ffffff;
           border-left: 4px solid #f59e0b;
           border-radius: 0.5rem;
         }
 
         .print-footer {
-          margin-top: 3rem;
-          padding-top: 1rem;
+          page-break-inside: avoid;
+          break-inside: avoid;
+          margin-top: 0.6rem;
+          padding-top: 0.4rem;
           border-top: 1px solid #e5e7eb;
           text-align: center;
           font-size: 0.85rem;
@@ -194,26 +291,26 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
 
         /* Contrato */
         .contract-page {
-          margin-top: 2rem;
+          margin-top: 1rem;
         }
 
         .contract-title {
           text-align: center;
           font-size: 1.3rem;
           font-weight: bold;
-          margin-bottom: 1.5rem;
+          margin-bottom: 0.85rem;
           color: #1f2937;
           text-transform: uppercase;
         }
 
         .contract-section {
-          margin-bottom: 1.5rem;
+          margin-bottom: 0.85rem;
         }
 
         .contract-section-title {
           font-weight: bold;
           color: #2563eb;
-          margin-bottom: 0.75rem;
+          margin-bottom: 0.45rem;
           font-size: 1rem;
         }
 
@@ -237,7 +334,7 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
         .contract-costs {
           margin: 2rem 0;
           border: 2px solid #2563eb;
-          padding: 1rem;
+          padding: 0.45rem;
           border-radius: 0.5rem;
         }
 
@@ -259,7 +356,7 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 3rem;
-          margin-top: 3rem;
+          margin-top: 0.6rem;
         }
 
         .signature-box {
@@ -269,7 +366,7 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
         .signature-line {
           border-top: 2px solid #1f2937;
           padding-top: 0.5rem;
-          margin-top: 3rem;
+          margin-top: 0.6rem;
           font-weight: 600;
         }
 
@@ -284,17 +381,8 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
       <div>
         {/* Header */}
         <div className="print-header">
-          <div>
-            <div className="print-logo">EMPRENDE360</div>
-            <div className="text-sm text-gray-600 mt-1">TecnoOne - Soluciones Tecnológicas</div>
-          </div>
-          <div className="print-company-info">
-            <div className="font-semibold">TecnoOne</div>
-            <div>Ciudad de Guatemala</div>
-            <div>Tel: (502) 2222-3333</div>
-            <div>info@emprende360.com</div>
-            <div className="mt-2 font-bold text-lg">NIT: 12345678-9</div>
-          </div>
+          {renderCompanyBrand()}
+          {renderCompanyInfo()}
         </div>
 
         {/* Título */}
@@ -431,14 +519,11 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
       {quote.tipo === 'REPARACION' && (
         <div className="page-break contract-page">
           <div className="print-header">
-            <div>
-              <div className="print-logo">EMPRENDE360</div>
-              <div className="text-sm text-gray-600 mt-1">TecnoOne - Soluciones Tecnológicas</div>
-            </div>
-            <div className="print-company-info">
-              <div className="font-semibold">Cotización: {quote.numero}</div>
+            {renderCompanyBrand()}
+            {renderCompanyInfo(<>
+              <div className="mt-2 font-semibold">Cotizacion: {quote.numero}</div>
               <div>Fecha: {formatDate(quote.createdAt)}</div>
-            </div>
+            </>)}
           </div>
 
           <div className="contract-title">
@@ -448,7 +533,7 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
           <div className="contract-section">
             <div className="contract-section-title">1. Objeto del Contrato</div>
             <div className="contract-text">
-              Por medio del presente documento, el TALLER (TecnoOne) se compromete a realizar 
+              Por medio del presente documento, el TALLER ({empresaNombre}) se compromete a realizar 
               los servicios de reparación detallados en la cotización {quote.numero} al equipo propiedad del 
               CLIENTE ({quote.cliente.name}), bajo los términos y condiciones establecidos a continuación.
             </div>
@@ -530,7 +615,7 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
               <div className="signature-line">
                 Firma del Taller
               </div>
-              <div className="signature-label">TecnoOne</div>
+              <div className="signature-label">{empresaNombre}</div>
               <div className="signature-label text-xs mt-2">Nombre y Sello</div>
             </div>
             <div className="signature-box">
@@ -543,7 +628,8 @@ export default function QuotePrintView({ quote }: QuotePrintViewProps) {
           </div>
 
           <div className="print-footer mt-8">
-            <p className="text-xs">Ciudad de Guatemala, {formatDate(new Date())}</p>
+            {empresa?.direccion && <p className="text-xs">{empresa.direccion}</p>}
+            <p className="text-xs">{formatDate(new Date())}</p>
           </div>
         </div>
       )}

@@ -97,22 +97,25 @@ const getAllCustomers = async (req, res) => {
 // Buscar clientes
 const searchCustomers = async (req, res) => {
   try {
-    const { query } = req.query;
-    
-    if (!query) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Se requiere un término de búsqueda' 
-      });
+    const query = String(req.query.query || '').trim();
+
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(rawLimit, 20)
+      : (query ? 20 : 5);
+
+    const conditions = ['c.activo = true'];
+    const params = [];
+
+    if (query) {
+      conditions.push('(c.nombre LIKE ? OR c.apellido LIKE ? OR c.email LIKE ? OR c.telefono LIKE ? OR c.nit LIKE ?)');
+      const like = `%${query}%`;
+      params.push(like, like, like, like, like);
     }
 
-    const conditions = [
-      'c.activo = true',
-      '(c.nombre LIKE ? OR c.apellido LIKE ? OR c.email LIKE ? OR c.telefono LIKE ? OR c.nit LIKE ?)'
-    ];
-    const like = `%${query}%`;
-    const params = [like, like, like, like, like];
     addTenantCondition(req, conditions, params);
+
+    const orderBy = query ? 'c.nombre ASC' : 'c.created_at DESC';
 
     const [customers] = await db.query(
       `SELECT c.*,
@@ -120,8 +123,9 @@ const searchCustomers = async (req, res) => {
         TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS name
        FROM clientes c
        WHERE ${conditions.join(' AND ')}
-       ORDER BY c.nombre ASC`,
-      params
+       ORDER BY ${orderBy}
+       LIMIT ?`,
+      [...params, limit]
     );
 
     res.json({

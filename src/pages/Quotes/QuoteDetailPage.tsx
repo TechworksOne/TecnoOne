@@ -97,9 +97,53 @@ export default function QuoteDetailPage() {
 
   const handlePrint = () => {
     setShowPrintView(true);
+
     setTimeout(() => {
-      window.print();
-    }, 100);
+      const printNode = document.querySelector('.print-view') as HTMLElement | null;
+
+      if (!printNode) {
+        window.print();
+        setShowPrintView(false);
+        return;
+      }
+
+      const printWindow = window.open('', '_blank', 'width=900,height=700');
+
+      if (!printWindow) {
+        window.print();
+        setShowPrintView(false);
+        return;
+      }
+
+      printWindow.document.open();
+      printWindow.document.write(`
+        <!doctype html>
+        <html lang="es">
+          <head>
+            <meta charset="UTF-8" />
+            <title>Cotización ${quote.numero}</title>
+          </head>
+          <body>
+            ${printNode.outerHTML}
+            <script>
+              window.onload = function () {
+                setTimeout(function () {
+                  window.focus();
+                  window.print();
+                }, 500);
+              };
+
+              window.onafterprint = function () {
+                window.close();
+              };
+            <\/script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+
+      setShowPrintView(false);
+    }, 300);
   };
 
   const handleConvertToSale = () => {
@@ -169,21 +213,23 @@ export default function QuoteDetailPage() {
   vigenciaHasta.setDate(vigenciaHasta.getDate() + quote.vigenciaDias);
   const isVigente = new Date() <= vigenciaHasta;
 
+  if (showPrintView) {
+    return (
+      <div className="quote-print-overlay bg-white min-h-0">
+        <div className="no-print p-4 border-b flex justify-between items-center bg-white">
+          <h2 className="text-lg font-bold">Vista de Impresión</h2>
+          <Button variant="ghost" onClick={() => setShowPrintView(false)}>
+            <X size={20} />
+            Cerrar
+          </Button>
+        </div>
+        <QuotePrintView quote={quote} />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {showPrintView && (
-        <div className="fixed inset-0 bg-white dark:bg-slate-950 z-50 overflow-auto">
-          <div className="no-print p-4 border-b flex justify-between items-center">
-            <h2 className="text-lg font-bold">Vista de Impresión</h2>
-            <Button variant="ghost" onClick={() => setShowPrintView(false)}>
-              <X size={20} />
-              Cerrar
-            </Button>
-          </div>
-          <QuotePrintView quote={quote} />
-        </div>
-      )}
-
       {/* Header */}
       <div className="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 px-6 py-4">
         <div className="max-w-7xl mx-auto">
@@ -385,8 +431,24 @@ export default function QuoteDetailPage() {
         )}
 
         {activeTab === 'imprimir' && (
-          <Card className="p-6">
-            <QuotePrintView quote={quote} />
+          <Card className="p-6 no-print">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
+                  Vista previa de impresión
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-slate-400">
+                  Usa el botón Imprimir para generar una sola copia limpia.
+                </p>
+              </div>
+              <Button variant="ghost" onClick={handlePrint}>
+                <Printer size={16} />
+                Imprimir
+              </Button>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white overflow-hidden">
+            </div>
           </Card>
         )}
       </div>

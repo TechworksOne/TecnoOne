@@ -63,10 +63,11 @@ export default function QuoteFormPage() {
   const [showManualItemForm, setShowManualItemForm] = useState(false);
   const [searchCliente, setSearchCliente] = useState('');
 
-  // Cargar clientes al montar el componente
+  // Cargar clientes al montar el componente o cambiar la busqueda
   useEffect(() => {
-    loadCustomers();
-  }, [loadCustomers]);
+    const query = searchCliente.trim();
+    loadCustomers({ search: query, limit: query ? 20 : 5 });
+  }, [searchCliente, loadCustomers]);
 
   // Cargar cotización si estamos editando
   useEffect(() => {
@@ -105,8 +106,8 @@ export default function QuoteFormPage() {
   }, [id, navigate, toast]);
 
   // Filtrar clientes
-  const filteredCustomers = customers.filter(c => {
-    if (searchCliente === '') return true; // Mostrar todos si no hay búsqueda
+  const filteredCustomersBase = customers.filter(c => {
+    if (searchCliente === '') return true;
     
     const searchLower = searchCliente.toLowerCase();
     const nombreCompleto = `${c.firstName} ${c.lastName}`.toLowerCase();
@@ -119,6 +120,10 @@ export default function QuoteFormPage() {
            nit.includes(searchCliente) ||
            email.includes(searchLower);
   });
+
+  const filteredCustomers = searchCliente.trim()
+    ? filteredCustomersBase
+    : filteredCustomersBase.slice(0, 5);
 
   // Calcular subtotal
   const calcSubtotal = () => {

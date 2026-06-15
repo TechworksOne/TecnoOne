@@ -37,8 +37,10 @@ export const getAllCustomers = async (params?: { search?: string; limit?: number
 };
 
 // Buscar clientes
-export const searchCustomers = async (query: string) => {
-  const response = await api.get('/customers/search', { params: { query } });
+export const searchCustomers = async (query: string, limit = 5) => {
+  const response = await api.get('/customers/search', {
+    params: { query, limit }
+  });
   return response.data;
 };
 

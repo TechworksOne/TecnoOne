@@ -170,28 +170,32 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
 
   // ── Search products / repuestos ──────────────────────────────────────────
   useEffect(() => {
-    if (searchTerm.length >= 2) loadItemsFromInventory();
-    else { setProductos([]); setRepuestos([]); }
+    if (!showProductSearch) return;
+    loadItemsFromInventory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, tipoItem]);
+  }, [showProductSearch, searchTerm, tipoItem]);
 
   // ── Search clients ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (searchCliente.length >= 2) loadClientes();
-    else setClientes([]);
+    if (!showCustomerPicker) return;
+    loadClientes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchCliente]);
+  }, [showCustomerPicker, searchCliente]);
 
   // ── Loaders ──────────────────────────────────────────────────────────────
   const loadItemsFromInventory = async () => {
     setLoadingItems(true);
     try {
+      const query = searchTerm.trim();
+      const limit = query ? 20 : 5;
+
       if (tipoItem === 'PRODUCTO') {
-        const res = await productService.getAllProducts({ search: searchTerm, activo: true, limit: 20 });
-        setProductos(res.data || res.productos || res || []);
+        const res = await productService.getAllProducts({ search: query, activo: true, limit });
+        const data = res.data || res.productos || res || [];
+        setProductos(Array.isArray(data) ? data.slice(0, limit) : []);
       } else {
-        const res = await repuestoService.getAllRepuestos({ searchTerm, activo: true, limit: 20 });
-        setRepuestos(Array.isArray(res) ? res : []);
+        const res = await repuestoService.getAllRepuestos({ searchTerm: query, activo: true, limit });
+        setRepuestos(Array.isArray(res) ? res.slice(0, limit) : []);
       }
     } catch { toast.add('Error al cargar items', 'error'); }
     finally { setLoadingItems(false); }
@@ -200,8 +204,11 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
   const loadClientes = async () => {
     setLoadingClientes(true);
     try {
-      const res = await customerService.searchCustomers(searchCliente);
-      setClientes(res.data || res.customers || res || []);
+      const query = searchCliente.trim();
+      const limit = query ? 20 : 5;
+      const res = await customerService.searchCustomers(query);
+      const data = res.data || res.customers || res || [];
+      setClientes(Array.isArray(data) ? data.slice(0, limit) : []);
     } catch { toast.add('Error al cargar clientes', 'error'); setClientes([]); }
     finally { setLoadingClientes(false); }
   };
@@ -830,7 +837,7 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
 
           {loadingItems && <p className="text-center py-6 text-sm text-[var(--color-text-muted)]">Buscando…</p>}
 
-          {!loadingItems && searchTerm.length >= 2 && (
+          {!loadingItems && (
             <div className="max-h-80 overflow-y-auto space-y-1.5">
               {tipoItem === 'PRODUCTO' && productos.length === 0 && (
                 <p className="text-center py-6 text-sm text-[var(--color-text-muted)]">No se encontraron productos</p>
@@ -873,12 +880,6 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
             </div>
           )}
 
-          {!loadingItems && searchTerm.length < 2 && (
-            <div className="text-center py-6 text-[var(--color-text-muted)]">
-              <Search size={36} className="mx-auto mb-2 opacity-30" />
-              <p className="text-sm">Escribe al menos 2 caracteres para buscar</p>
-            </div>
-          )}
         </div>
       </Modal>
 
@@ -892,7 +893,7 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
 
           {loadingClientes && <p className="text-center py-6 text-sm text-[var(--color-text-muted)]">Buscando clientes…</p>}
 
-          {!loadingClientes && searchCliente.length >= 2 && (
+          {!loadingClientes && (
             <div className="max-h-80 overflow-y-auto space-y-1.5">
               {clientes.length === 0 ? (
                 <div className="text-center py-6 text-[var(--color-text-muted)]">
@@ -918,12 +919,6 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
             </div>
           )}
 
-          {!loadingClientes && searchCliente.length < 2 && (
-            <div className="text-center py-6 text-[var(--color-text-muted)]">
-              <Search size={36} className="mx-auto mb-2 opacity-30" />
-              <p className="text-sm">Escribe al menos 2 caracteres para buscar</p>
-            </div>
-          )}
         </div>
       </Modal>
 
