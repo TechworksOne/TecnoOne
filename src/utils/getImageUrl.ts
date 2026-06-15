@@ -45,14 +45,16 @@ export const getImageUrl = (imagePath?: string | null): string => {
     return addUploadsCacheVersion(cleanPath);
   }
 
-  // Ruta ya incluye /uploads/ al inicio → anteponer API_BASE_URL (servidor base)
+  // Ruta ya incluye /uploads/ al inicio → usar base pública de uploads.
+  // No usar API_BASE_URL aquí porque normalmente incluye /api
+  // y eso produciría /api/uploads/... en vez de /uploads/...
   if (cleanPath.startsWith('/uploads/')) {
-    return addUploadsCacheVersion(`${API_BASE_URL}${cleanPath}`);
+    return addUploadsCacheVersion(`${UPLOADS_BASE_URL}${cleanPath.slice('/uploads'.length)}`);
   }
 
   // Ruta empieza con uploads/ (sin barra inicial)
   if (cleanPath.startsWith('uploads/')) {
-    return addUploadsCacheVersion(`${API_BASE_URL}/${cleanPath}`);
+    return addUploadsCacheVersion(`${UPLOADS_BASE_URL}/${cleanPath.slice('uploads/'.length)}`);
   }
 
   // Ruta relativa con barra inicial pero sin /uploads/ → unir con UPLOADS_BASE_URL

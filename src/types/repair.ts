@@ -50,6 +50,7 @@ export interface RepairReception {
 
   montoAnticipo?: number;
   metodoAnticipo?: 'efectivo' | 'transferencia' | 'tarjeta' | 'tarjeta_bac' | 'tarjeta_neonet' | 'tarjeta_otra';
+  cuentaBancariaId?: number | null;
   comprobanteTransferencia?: string;
 }
 

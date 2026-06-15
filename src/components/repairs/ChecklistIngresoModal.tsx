@@ -13,7 +13,6 @@ interface ChecksGenerales {
   bateriaOk: boolean;
   cargaOk: boolean;
 }
-interface CuentaBancaria { id: number; nombre: string; numero_cuenta: string; tipo_cuenta: string; }
 
 export interface ChecklistIngresoModalProps {
   isOpen: boolean;
@@ -148,15 +147,6 @@ export default function ChecklistIngresoModal({
   const [checksComputadora,  setChecksComputadora]  = useState<CheckItem[]>(CHECKS_COMPUTADORA_DEFAULT);
   const [observaciones,      setObservaciones]      = useState('');
 
-  // Anticipo
-  const [dejoAnticipo,       setDejoAnticipo]       = useState(false);
-  const [montoAnticipo,      setMontoAnticipo]      = useState('');
-  const [metodoAnticipo,     setMetodoAnticipo]     = useState<'efectivo' | 'transferencia' | 'tarjeta_bac' | 'tarjeta_neonet'>('efectivo');
-  const [cuentaBancariaId,   setCuentaBancariaId]   = useState('');
-  const [cuentasBancarias,   setCuentasBancarias]   = useState<CuentaBancaria[]>([]);
-  const [anticipoConfirmado, setAnticipoConfirmado] = useState(false);
-  const [interesAnticipo,    setInteresAnticipo]    = useState(0); // % recargo tarjeta (solo display)
-
   const bodyScrollLock = useRef(false);
 
   // ── Reset state when modal opens/closes ───────────────────────────────────
@@ -172,12 +162,6 @@ export default function ChecklistIngresoModal({
       setChecksTablet(CHECKS_TABLET_DEFAULT);
       setChecksComputadora(CHECKS_COMPUTADORA_DEFAULT);
       setObservaciones('');
-      setDejoAnticipo(false);
-      setMontoAnticipo('');
-      setMetodoAnticipo('efectivo');
-      setCuentaBancariaId('');
-      setAnticipoConfirmado(false);
-      setInteresAnticipo(0);
       return;
     }
 
@@ -185,10 +169,9 @@ export default function ChecklistIngresoModal({
     document.body.style.overflow = 'hidden';
     bodyScrollLock.current = true;
 
-    // Load existing checklist and bank accounts
+    // Load existing checklist
     if (repair) {
       loadChecklistExistente(repair.id);
-      loadBancos();
     }
 
     return () => {
@@ -238,30 +221,12 @@ export default function ChecklistIngresoModal({
           setChecksComputadora(prev => prev.map(it => ({ ...it, checked: c.computadora_checks[it.id] ?? it.checked })));
         }
         setObservaciones(c.observaciones || '');
-        if (c.monto_anticipo && c.monto_anticipo > 0) {
-          setDejoAnticipo(true);
-          setMontoAnticipo((c.monto_anticipo / 100).toFixed(2));
-          setMetodoAnticipo(c.metodo_anticipo || 'efectivo');
-          if (c.cuenta_bancaria_anticipo_id) setCuentaBancariaId(String(c.cuenta_bancaria_anticipo_id));
-        }
-        setAnticipoConfirmado(c.anticipo_confirmado || false);
       }
     } catch {
       // no checklist yet — that's fine
     } finally {
       setLoadingChecklist(false);
     }
-  };
-
-  const loadBancos = async () => {
-    try {
-      const token = sessionStorage.getItem('token');
-      const res = await axios.get(`${API_URL}/caja/bancos`, {
-        headers: { Authorization: `Bearer ${token}` },
-        validateStatus: s => s < 500,
-      });
-      if (res.data.success) setCuentasBancarias(res.data.data);
-    } catch { /* non-critical */ }
   };
 
   // ── Dirty tracking ────────────────────────────────────────────────────────
@@ -302,16 +267,6 @@ export default function ChecklistIngresoModal({
       setErrorMsg('No se puede guardar el checklist para una reparación cancelada o anulada.');
       return;
     }
-    if (dejoAnticipo && (!montoAnticipo || parseFloat(montoAnticipo) <= 0)) {
-      setErrorMsg('Ingresa el monto del anticipo.');
-      return;
-    }
-    if (dejoAnticipo && metodoAnticipo === 'transferencia' && !cuentaBancariaId) {
-      setErrorMsg('Selecciona una cuenta bancaria para el anticipo por transferencia.');
-      return;
-    }
-    // tarjeta_bac / tarjeta_neonet: el backend busca la cuenta automáticamente, sin recargo.
-
     setSaving(true);
     try {
       const token = sessionStorage.getItem('token');
@@ -336,12 +291,6 @@ export default function ChecklistIngresoModal({
           observaciones,
           fotosChecklist: [],
           realizadoPor: 'Usuario',
-          dejoAnticipo,
-          montoAnticipo: dejoAnticipo ? Math.round(parseFloat(montoAnticipo) * 100) : 0,
-          metodoAnticipo: dejoAnticipo ? metodoAnticipo : null,
-          // cuentaBancariaId solo aplica para transferencia; tarjeta BAC/Neonet se resuelve en backend
-      cuentaBancariaId: dejoAnticipo && metodoAnticipo === 'transferencia'
-            ? parseInt(cuentaBancariaId) : null,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -349,12 +298,7 @@ export default function ChecklistIngresoModal({
       setIsDirty(false);
       onCompleted();
     } catch (err: any) {
-      if (err.response?.status === 409) {
-        setErrorMsg('No se puede modificar el anticipo: ya fue confirmado en Caja/Bancos.');
-        setAnticipoConfirmado(true);
-      } else {
-        setErrorMsg(err.response?.data?.message || 'Error al guardar el checklist. Intenta de nuevo.');
-      }
+      setErrorMsg(err.response?.data?.message || 'Error al guardar el checklist. Intenta de nuevo.');
     } finally {
       setSaving(false);
     }
@@ -602,146 +546,6 @@ export default function ChecklistIngresoModal({
                 </div>
               </section>
 
-              {/* ── 5. ANTICIPO ───────────────────────────────────────────── */}
-              <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800">
-                  <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">Anticipo del Cliente</h3>
-                </div>
-                <div className="p-4 space-y-4">
-                  {anticipoConfirmado && (
-                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-xs font-medium">
-                      <AlertCircle size={14} className="shrink-0" />
-                      El anticipo ya fue confirmado en Caja/Bancos y no puede modificarse.
-                    </div>
-                  )}
-                  <label className="flex items-center gap-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={dejoAnticipo}
-                      disabled={anticipoConfirmado || isCancelled}
-                      onChange={e => {
-                        setDejoAnticipo(e.target.checked);
-                        if (!e.target.checked) { setMontoAnticipo(''); setCuentaBancariaId(''); }
-                        markDirty();
-                      }}
-                      className="w-4 h-4 rounded accent-blue-600 disabled:opacity-50"
-                    />
-                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                      ¿El cliente dejó anticipo?
-                    </span>
-                  </label>
-                  {dejoAnticipo && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">
-                          Monto (Q)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={montoAnticipo}
-                          disabled={anticipoConfirmado}
-                          onChange={e => { setMontoAnticipo(e.target.value); markDirty(); }}
-                          placeholder="0.00"
-                          className={inputCls}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">
-                          Método de pago
-                        </label>
-                        <select
-                          value={metodoAnticipo}
-                          disabled={anticipoConfirmado}
-                          onChange={e => {
-                            const v = e.target.value as 'efectivo' | 'transferencia' | 'tarjeta_bac' | 'tarjeta_neonet';
-                            setMetodoAnticipo(v);
-                            setCuentaBancariaId('');
-                            if (v !== 'tarjeta_bac' && v !== 'tarjeta_neonet') setInteresAnticipo(0);
-                            markDirty();
-                          }}
-                          className={inputCls}
-                        >
-                          <option value="efectivo">Efectivo</option>
-                          <option value="transferencia">Transferencia</option>
-                          <option value="tarjeta_bac">Tarjeta BAC</option>
-                          <option value="tarjeta_neonet">Tarjeta Neonet</option>
-                        </select>
-                      </div>
-
-                      {/* ── Recargo tarjeta ── */}
-                      {(metodoAnticipo === 'tarjeta_bac' || metodoAnticipo === 'tarjeta_neonet') && (
-                        <>
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">
-                              % Recargo tarjeta
-                            </label>
-                            <div className="relative">
-                              <input
-                                type="number"
-                                step="0.1"
-                                min="0"
-                                max="20"
-                                value={interesAnticipo}
-                                disabled={anticipoConfirmado}
-                                onChange={e => { setInteresAnticipo(Number(e.target.value)); markDirty(); }}
-                                placeholder="0.0"
-                                className={inputCls + ' pr-8'}
-                              />
-                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-semibold pointer-events-none">%</span>
-                            </div>
-                          </div>
-
-                          {interesAnticipo > 0 && parseFloat(montoAnticipo) > 0 && (
-                            <div className="sm:col-span-2 flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800">
-                              <div className="text-xs text-orange-700 dark:text-orange-300">
-                                <p className="font-semibold">Total a cobrar al cliente</p>
-                                <p className="opacity-75">Q{parseFloat(montoAnticipo).toFixed(2)} base + {interesAnticipo}% recargo POS</p>
-                              </div>
-                              <p className="text-xl font-bold text-orange-700 dark:text-orange-300 whitespace-nowrap">
-                                Q{(parseFloat(montoAnticipo) * (1 + interesAnticipo / 100)).toFixed(2)}
-                              </p>
-                            </div>
-                          )}
-                        </>
-                      )}
-
-                      {metodoAnticipo === 'transferencia' && (
-                        <div className="sm:col-span-2">
-                          <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">
-                            Cuenta bancaria <span className="text-red-500">*</span>
-                          </label>
-                          <select
-                            value={cuentaBancariaId}
-                            disabled={anticipoConfirmado}
-                            onChange={e => { setCuentaBancariaId(e.target.value); markDirty(); }}
-                            className={inputCls}
-                          >
-                            <option value="">-- Selecciona una cuenta --</option>
-                            {cuentasBancarias.map(c => (
-                              <option key={c.id} value={String(c.id)}>
-                                {c.nombre} — {c.tipo_cuenta} ({c.numero_cuenta})
-                              </option>
-                            ))}
-                          </select>
-                          {cuentasBancarias.length === 0 && (
-                            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-                              No hay cuentas bancarias registradas.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                      {!anticipoConfirmado && (
-                        <p className="sm:col-span-2 text-xs text-slate-400 dark:text-slate-500">
-                          El anticipo se registrará como <strong>PENDIENTE</strong>. Confírmalo desde{' '}
-                          <a href="/caja-bancos" className="text-blue-600 dark:text-blue-400 underline">Caja / Bancos</a>.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </section>
             </>
           )}
         </div>
