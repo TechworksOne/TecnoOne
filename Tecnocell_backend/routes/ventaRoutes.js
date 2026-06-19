@@ -11,6 +11,11 @@ router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
 // Rutas de ventas
+router.post(
+  '/comprobantes',
+  ventaController.uploadComprobante.single('comprobante'),
+  ventaController.subirComprobante
+);
 router.post('/', ventaController.createVenta);
 router.post('/from-quote/:cotizacionId', ventaController.createVentaFromQuote);
 router.get('/', ventaController.getAllVentas);

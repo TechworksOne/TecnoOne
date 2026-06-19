@@ -336,9 +336,18 @@ export default function UsersPage() {
               <div>
                 <label className="block text-sm font-medium mb-2 text-slate-700">Teléfono</label>
                 <Input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={15}
                   value={userForm.phone}
-                  onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
-                  placeholder="+502 5555-1234"
+                  onChange={(e) =>
+                    setUserForm({
+                      ...userForm,
+                      phone: e.target.value.replace(/\D/g, '').slice(0, 15),
+                    })
+                  }
+                  placeholder="50255551234"
                   className="border-2 border-indigo-200 focus:border-indigo-500 rounded-xl shadow-sm"
                 />
               </div>

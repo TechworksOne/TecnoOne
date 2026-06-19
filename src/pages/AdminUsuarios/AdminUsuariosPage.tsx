@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Shield, UserPlus, Search, Edit2, Power, Key, X, Check,
+  Shield, UserPlus, Search, Edit2, Power, Key, X, Check, Trash2,
   Users, UserCheck, Wrench, ShoppingCart, ChevronDown, Eye, EyeOff,
   AlertTriangle, Camera, Tag, Loader2, RefreshCw,
 } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
   type UpdateUsuarioPayload,
 } from '../../services/adminUsuarioService';
 import { getInitialsFromName } from '../../lib/avatar';
+import { useAuth } from '../../store/useAuth';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -377,9 +378,15 @@ function ModalUsuario({
             <div>
               <label className={labelCls}>Telefono</label>
               <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={15}
                 value={form.telefono}
-                onChange={e => set('telefono', e.target.value)}
-                placeholder="Ej: 5555-1234"
+                onChange={e =>
+                  set('telefono', e.target.value.replace(/\D/g, '').slice(0, 15))
+                }
+                placeholder="Ej: 55551234"
                 className={inputCls}
                 style={inputStyle}
               />
@@ -830,6 +837,9 @@ function ModalRoles({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AdminUsuariosPage() {
+  const currentUser = useAuth(state => state.user);
+  const currentUserId = currentUser?.id ?? null;
+
   const [usuarios, setUsuarios] = useState<UsuarioListItem[]>([]);
   const [roles, setRoles] = useState<RolItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -847,6 +857,7 @@ export default function AdminUsuariosPage() {
   }>({ open: false, usuario: null });
   const [modalRoles, setModalRoles] = useState(false);
   const [confirmToggle, setConfirmToggle] = useState<UsuarioListItem | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<UsuarioListItem | null>(null);
   const [toastMsg, setToastMsg] = useState('');
 
   const showToast = (msg: string) => {
@@ -889,6 +900,21 @@ export default function AdminUsuariosPage() {
       );
     }
     setConfirmToggle(null);
+  };
+
+  const handleDeleteUsuario = async (u: UsuarioListItem) => {
+    try {
+      await adminUsuarioService.deleteUsuario(u.id);
+      showToast(`${u.nombres} eliminado`);
+      await loadData();
+    } catch (e: unknown) {
+      showToast(
+        (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          'Error al eliminar usuario',
+      );
+    } finally {
+      setConfirmDelete(null);
+    }
   };
 
   const total    = usuarios.length;
@@ -1155,17 +1181,29 @@ export default function AdminUsuariosPage() {
                           >
                             <Key size={15} />
                           </button>
-                          <button
-                            onClick={() => setConfirmToggle(u)}
-                            title={u.active ? 'Desactivar' : 'Activar'}
-                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                              u.active
-                                ? 'text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-500/10'
-                                : 'text-[var(--color-text-muted)] hover:text-emerald-500 hover:bg-emerald-500/10'
-                            }`}
-                          >
-                            <Power size={15} />
-                          </button>
+                          {u.id !== currentUserId && (
+                            <>
+                              <button
+                                onClick={() => setConfirmToggle(u)}
+                                title={u.active ? 'Desactivar' : 'Activar'}
+                                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                  u.active
+                                    ? 'text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-500/10'
+                                    : 'text-[var(--color-text-muted)] hover:text-emerald-500 hover:bg-emerald-500/10'
+                                }`}
+                              >
+                                <Power size={15} />
+                              </button>
+
+                              <button
+                                onClick={() => setConfirmDelete(u)}
+                                title="Eliminar usuario"
+                                className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-red-600 hover:bg-red-500/10 transition-colors cursor-pointer"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1230,16 +1268,27 @@ export default function AdminUsuariosPage() {
                     >
                       Contrasena
                     </button>
-                    <button
-                      onClick={() => setConfirmToggle(u)}
-                      className={`flex-1 py-2 text-xs rounded-lg border font-semibold transition-colors cursor-pointer ${
-                        u.active
-                          ? 'text-red-500 hover:bg-red-500/10 border-red-300 dark:border-red-700/40'
-                          : 'text-emerald-500 hover:bg-emerald-500/10 border-emerald-300 dark:border-emerald-700/40'
-                      }`}
-                    >
-                      {u.active ? 'Desactivar' : 'Activar'}
-                    </button>
+                    {u.id !== currentUserId && (
+                      <>
+                        <button
+                          onClick={() => setConfirmToggle(u)}
+                          className={`flex-1 py-2 text-xs rounded-lg border font-semibold transition-colors cursor-pointer ${
+                            u.active
+                              ? 'text-red-500 hover:bg-red-500/10 border-red-300 dark:border-red-700/40'
+                              : 'text-emerald-500 hover:bg-emerald-500/10 border-emerald-300 dark:border-emerald-700/40'
+                          }`}
+                        >
+                          {u.active ? 'Desactivar' : 'Activar'}
+                        </button>
+
+                        <button
+                          onClick={() => setConfirmDelete(u)}
+                          className="flex-1 py-2 text-xs rounded-lg border font-semibold text-red-600 hover:bg-red-500/10 border-red-300 dark:border-red-700/40 transition-colors cursor-pointer"
+                        >
+                          Eliminar
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1291,6 +1340,14 @@ export default function AdminUsuariosPage() {
           }
           onConfirm={() => handleToggleEstado(confirmToggle)}
           onCancel={() => setConfirmToggle(null)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Eliminar permanentemente a ${confirmDelete.nombres}? Esta accion no se puede deshacer.`}
+          onConfirm={() => handleDeleteUsuario(confirmDelete)}
+          onCancel={() => setConfirmDelete(null)}
         />
       )}
     </div>

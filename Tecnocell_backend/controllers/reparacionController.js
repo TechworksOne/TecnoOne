@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { imageFileFilter, getSafeImageExtension, sanitizeBaseName } = require('../utils/uploadSecurity');
+const { validatePhone } = require('../utils/phoneValidation');
 const cajaController = require('./cajaController');
 const contratoService = require('../services/contratoService');
 
@@ -440,6 +441,20 @@ exports.createReparacion = async (req, res) => {
       // Fotos de recepción (URLs temporales o IDs si ya se subieron)
       fotosRecepcion = []
     } = req.body;
+
+    const telefonoValidado = validatePhone(clienteTelefono, {
+      label: 'El teléfono del cliente',
+    });
+
+    if (!telefonoValidado.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const clienteTelefonoNormalizado = telefonoValidado.value;
     
     // Generar ID único
     const repairId = `REP${Date.now()}`;
@@ -484,7 +499,7 @@ exports.createReparacion = async (req, res) => {
         created_by
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        repairId, empresaId, clienteId || null, clienteNombre, clienteTelefono, clienteEmail,
+        repairId, empresaId, clienteId || null, clienteNombre, clienteTelefonoNormalizado, clienteEmail,
         tipoEquipo, marca, modelo, color, imeiSerie, patronContrasena,
         acceso_tipo, acceso_valor,
         estadoFisico, diagnosticoInicial,
@@ -799,7 +814,7 @@ exports.createReparacion = async (req, res) => {
         fecha:         fechaFormateada,
         negocio:       negocioContrato,
         clienteNombre,
-        clienteTel:    clienteTelefono,
+        clienteTel:    clienteTelefonoNormalizado,
         clienteEmail: clienteContratoEmail,
         clienteNit:   clienteContratoNit,
         tipoEquipo,
@@ -1508,7 +1523,7 @@ exports.updatePrioridad = async (req, res) => {
 
     const prioridadAnterior = rep.prioridad;
     await connection.query(
-      `UPDATE reparaciones SET prioridad = ?, updated_by = ? WHERE id = ?${tenant.sql}`,
+      `UPDATE reparaciones r SET prioridad = ?, updated_by = ? WHERE r.id = ?${tenant.sql}`,
       [prioridad, usuario, id, ...tenant.params]
     );
 

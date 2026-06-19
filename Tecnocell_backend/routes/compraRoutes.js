@@ -11,13 +11,19 @@ router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
+// Fuentes financieras disponibles para registrar compras
+router.get('/fuentes-pago', compraController.getFuentesPago);
+
 // Rutas de compras de PRODUCTOS
 router.post('/productos', compraController.createCompraProductos);
 
 // Rutas de compras de REPUESTOS
 router.post('/repuestos', compraController.createCompraRepuestos);
 
-// Rutas generales (ambos tipos)
+// Compra atómica de productos, repuestos o ambos
+router.post('/', compraController.createCompra);
+
+// Rutas generales
 router.get('/', compraController.getAllCompras);
 
 // Rutas de series

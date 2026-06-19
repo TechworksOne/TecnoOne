@@ -569,30 +569,30 @@ function ModalAsignarTecnicoRepairs({
   const inputCls = 'w-full px-3 py-2 text-sm rounded-xl border bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40';
 
   const handleSave = async () => {
-    if (!selectedId) { setError('Selecciona un t\u00e9cnico'); return; }
+    if (!selectedId) { setError('Selecciona un técnico'); return; }
     try {
       setSaving(true); setError('');
       await asignarTecnico(repair.id, { tecnico_id: selectedId as number });
       onSuccess(); onClose();
     } catch (e: any) {
-      setError(e?.response?.data?.message || 'Error al asignar t\u00e9cnico');
+      setError(e?.response?.data?.message || 'Error al asignar técnico');
     } finally { setSaving(false); }
   };
 
   return (
-    <Modal open onClose={onClose} title={`Asignar T\u00e9cnico \u2014 ${repair.id}`}>
+    <Modal open onClose={onClose} title={`Asignar Técnico — ${repair.id}`}>
       <div className="space-y-4 text-sm">
         <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 space-y-1">
           <p className="text-xs text-slate-500 dark:text-slate-400">Cliente: <span className="font-semibold text-slate-800 dark:text-slate-200">{repair.clienteNombre}</span></p>
           <p className="text-xs text-slate-500 dark:text-slate-400">Equipo: <span className="text-slate-700 dark:text-slate-300">{[repair.recepcion.marca, repair.recepcion.modelo].filter(Boolean).join(' ')}</span></p>
         </div>
         <div>
-          <label className="block text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">T\u00e9cnico a asignar</label>
+          <label className="block text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">Técnico a asignar</label>
           <select className={inputCls} value={selectedId} onChange={e => { setSelectedId(e.target.value ? Number(e.target.value) : ''); setError(''); }}>
-            <option value="">\u2014 Seleccionar t\u00e9cnico \u2014</option>
+            <option value="">— Seleccionar técnico —</option>
             {tecnicos.map(t => (
               <option key={t.id} value={t.id}>
-                {(t.nombre_completo?.trim() && t.nombre_completo !== ' ') ? t.nombre_completo : t.username}{t.id === currentUserId ? ' (yo)' : ''} \u2014 {t.roles.join(', ')}
+                {(t.nombre_completo?.trim() && t.nombre_completo !== ' ') ? t.nombre_completo : t.username}{t.id === currentUserId ? ' (yo)' : ''} — {t.roles.join(', ')}
               </option>
             ))}
           </select>
@@ -606,7 +606,7 @@ function ModalAsignarTecnicoRepairs({
           <button onClick={onClose} className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Cancelar</button>
           <button onClick={handleSave} disabled={saving || !selectedId} className="px-4 py-2 text-xs font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-1.5">
             {saving ? <RefreshCw size={12} className="animate-spin" /> : <Check size={12} />}
-            {saving ? 'Asignando\u2026' : 'Asignar'}
+            {saving ? 'Asignando…' : 'Asignar'}
           </button>
         </div>
       </div>
@@ -819,7 +819,7 @@ function RepairCard({
           )}
           {userIsAdmin && !isCancelled && (
             <button onClick={() => onAssignTech(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800">
-              <UserCheck size={12} /> {repair.tecnicoAsignadoId ? 'T\u00e9cnico' : 'Asignar'}
+              <UserCheck size={12} /> {repair.tecnicoAsignadoId ? 'Técnico' : 'Asignar'}
             </button>
           )}
         </div>

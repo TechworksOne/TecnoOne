@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
+const { validatePhone } = require('../utils/phoneValidation');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 
@@ -161,6 +162,23 @@ exports.createUsuario = async (req, res) => {
   try {
     const { username, email, password, nombres, apellidos, telefono, dpi, direccion, roles, empresa_id } = req.body;
 
+    if (req.file) tempFilePath = req.file.path;
+
+    const telefonoValidado = validatePhone(telefono);
+    if (!telefonoValidado.ok) {
+      if (tempFilePath) {
+        try { fs.unlinkSync(tempFilePath); } catch (_) {}
+        tempFilePath = null;
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const telefonoNormalizado = telefonoValidado.value;
+
     if (!password) return res.status(400).json({ success: false, message: 'La contraseña es requerida' });
     if (!nombres) return res.status(400).json({ success: false, message: 'El nombre es requerido' });
     if (!username && !email) return res.status(400).json({ success: false, message: 'Se requiere usuario o email' });
@@ -194,7 +212,7 @@ exports.createUsuario = async (req, res) => {
     const [result] = await db.query(
       `INSERT INTO users (username, email, password, name, telefono, role, empresa_id, active)
        VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
-      [username || null, email || null, hashedPassword, nombres + (apellidos ? ' ' + apellidos : ''), telefono || null, legacyRole, empresaId]
+      [username || null, email || null, hashedPassword, nombres + (apellidos ? ' ' + apellidos : ''), telefonoNormalizado || null, legacyRole, empresaId]
     );
     const userId = result.insertId;
 
@@ -209,7 +227,7 @@ exports.createUsuario = async (req, res) => {
     await db.query(
       `INSERT INTO user_profiles (user_id, nombres, apellidos, telefono, dpi, direccion, foto_perfil)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [userId, nombres, apellidos || null, telefono || null, dpi || null, direccion || null, fotoPerfil]
+      [userId, nombres, apellidos || null, telefonoNormalizado || null, dpi || null, direccion || null, fotoPerfil]
     );
 
     // Insertar roles
@@ -234,6 +252,23 @@ exports.updateUsuario = async (req, res) => {
   try {
     const { id } = req.params;
     const { username, email, nombres, apellidos, telefono, dpi, direccion, roles, active } = req.body;
+
+    if (req.file) tempFilePath = req.file.path;
+
+    const telefonoValidado = validatePhone(telefono);
+    if (!telefonoValidado.ok) {
+      if (tempFilePath) {
+        try { fs.unlinkSync(tempFilePath); } catch (_) {}
+        tempFilePath = null;
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const telefonoNormalizado = telefonoValidado.value;
 
     const existingScope = scopedUserExistsQuery(req, id);
     const [[existing]] = await db.query(existingScope.query, existingScope.params);
@@ -266,7 +301,7 @@ exports.updateUsuario = async (req, res) => {
       userFields.push('name = ?');
       userParams.push(nombres + (apellidos ? ' ' + apellidos : ''));
     }
-    if (telefono !== undefined) { userFields.push('telefono = ?'); userParams.push(telefono || null); }
+    if (telefono !== undefined) { userFields.push('telefono = ?'); userParams.push(telefonoNormalizado); }
     if (active !== undefined) { userFields.push('active = ?'); userParams.push(active === true || active === 'true' || active === 1 ? 1 : 0); }
 
     if (rolesArray.length) {
@@ -291,7 +326,7 @@ exports.updateUsuario = async (req, res) => {
     const profileParams = [];
     if (nombres !== undefined) { profileFields.push('nombres = ?'); profileParams.push(nombres); }
     if (apellidos !== undefined) { profileFields.push('apellidos = ?'); profileParams.push(apellidos || null); }
-    if (telefono !== undefined) { profileFields.push('telefono = ?'); profileParams.push(telefono || null); }
+    if (telefono !== undefined) { profileFields.push('telefono = ?'); profileParams.push(telefonoNormalizado); }
     if (dpi !== undefined) { profileFields.push('dpi = ?'); profileParams.push(dpi || null); }
     if (direccion !== undefined) { profileFields.push('direccion = ?'); profileParams.push(direccion || null); }
     if (fotoPerfil !== undefined) { profileFields.push('foto_perfil = ?'); profileParams.push(fotoPerfil); }
@@ -324,44 +359,240 @@ exports.updateUsuario = async (req, res) => {
 exports.toggleEstado = async (req, res) => {
   try {
     const { id } = req.params;
-    const userScope = scopedUserExistsQuery(req, id, 'basic');
-    const [[user]] = await db.query(userScope.query, userScope.params);
-    if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+    const targetId = Number(id);
+    const currentUserId = Number(req.user?.id);
 
-    // Verificar: no desactivar al único admin activo
-    if (user.active && user.role === 'admin') {
-      const adminCountParams = ['admin', id];
-      let adminCountQuery = 'SELECT COUNT(*) as cnt FROM users WHERE role = ? AND active = 1 AND id != ?';
-      if (!req.tenant?.isSuperadmin) {
-        adminCountQuery += ' AND empresa_id = ?';
-        adminCountParams.push(req.tenant.empresa_id);
-      }
-      const [[adminCount]] = await db.query(adminCountQuery, adminCountParams);
-      if (adminCount.cnt === 0) {
-        return res.status(400).json({ success: false, message: 'No se puede desactivar al único administrador activo' });
-      }
+    if (currentUserId === targetId) {
+      return res.status(400).json({
+        success: false,
+        message: 'No puedes cambiar el estado de tu propia cuenta'
+      });
     }
 
-    // No permitir que el usuario se desactive a sí mismo si es el único admin
-    if (req.user && req.user.id === Number(id) && user.role === 'admin') {
-      const adminCountParams = ['admin', id];
-      let adminCountQuery = 'SELECT COUNT(*) as cnt FROM users WHERE role = ? AND active = 1 AND id != ?';
-      if (!req.tenant?.isSuperadmin) {
-        adminCountQuery += ' AND empresa_id = ?';
-        adminCountParams.push(req.tenant.empresa_id);
+    const params = [targetId];
+    let query = `
+      SELECT
+        u.id,
+        u.active,
+        u.role,
+        u.empresa_id,
+        EXISTS (
+          SELECT 1
+          FROM user_roles ur
+          INNER JOIN roles r ON r.id = ur.role_id
+          WHERE ur.user_id = u.id
+            AND UPPER(r.nombre) = 'ADMINISTRADOR'
+        ) AS has_admin_role
+      FROM users u
+      WHERE u.id = ?
+    `;
+
+    if (!req.tenant?.isSuperadmin) {
+      query += ' AND u.empresa_id = ?';
+      params.push(req.tenant.empresa_id);
+    }
+
+    const [[user]] = await db.query(query, params);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    const isAdmin =
+      user.role === 'admin' ||
+      Boolean(user.has_admin_role);
+
+    if (user.active && isAdmin) {
+      const adminParams = [targetId];
+      let adminQuery = `
+        SELECT COUNT(DISTINCT u.id) AS cnt
+        FROM users u
+        LEFT JOIN user_roles ur ON ur.user_id = u.id
+        LEFT JOIN roles r ON r.id = ur.role_id
+        WHERE u.active = 1
+          AND u.id != ?
+          AND (
+            u.role = 'admin'
+            OR UPPER(r.nombre) = 'ADMINISTRADOR'
+          )
+      `;
+
+      if (user.empresa_id === null) {
+        adminQuery += ' AND u.empresa_id IS NULL';
+      } else {
+        adminQuery += ' AND u.empresa_id = ?';
+        adminParams.push(user.empresa_id);
       }
-      const [[adminCount]] = await db.query(adminCountQuery, adminCountParams);
-      if (adminCount.cnt === 0) {
-        return res.status(400).json({ success: false, message: 'No puedes desactivarte a ti mismo si eres el único administrador' });
+
+      const [[adminCount]] = await db.query(adminQuery, adminParams);
+
+      if (Number(adminCount.cnt) === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No se puede desactivar al único administrador activo de la empresa'
+        });
       }
     }
 
     const newActive = user.active ? 0 : 1;
-    await db.query('UPDATE users SET active = ? WHERE id = ?', [newActive, id]);
-    res.json({ success: true, message: newActive ? 'Usuario activado' : 'Usuario desactivado', data: { active: Boolean(newActive) } });
+
+    const updateParams = [newActive, targetId];
+    let updateQuery = 'UPDATE users SET active = ? WHERE id = ?';
+
+    if (!req.tenant?.isSuperadmin) {
+      updateQuery += ' AND empresa_id = ?';
+      updateParams.push(req.tenant.empresa_id);
+    }
+
+    await db.query(updateQuery, updateParams);
+
+    res.json({
+      success: true,
+      message: newActive ? 'Usuario activado' : 'Usuario desactivado',
+      data: { active: Boolean(newActive) }
+    });
   } catch (error) {
     console.error('toggleEstado error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// ── DELETE /api/admin/usuarios/:id ────────────────────────────────────────
+exports.deleteUsuario = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const targetId = Number(id);
+    const currentUserId = Number(req.user?.id);
+
+    if (currentUserId === targetId) {
+      return res.status(400).json({
+        success: false,
+        message: 'No puedes eliminar tu propia cuenta'
+      });
+    }
+
+    const params = [targetId];
+    let query = `
+      SELECT
+        u.id,
+        u.active,
+        u.role,
+        u.empresa_id,
+        EXISTS (
+          SELECT 1
+          FROM user_roles ur
+          INNER JOIN roles r ON r.id = ur.role_id
+          WHERE ur.user_id = u.id
+            AND UPPER(r.nombre) = 'ADMINISTRADOR'
+        ) AS has_admin_role
+      FROM users u
+      WHERE u.id = ?
+    `;
+
+    if (!req.tenant?.isSuperadmin) {
+      query += ' AND u.empresa_id = ?';
+      params.push(req.tenant.empresa_id);
+    }
+
+    const [[user]] = await db.query(query, params);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    const isAdmin =
+      user.role === 'admin' ||
+      Boolean(user.has_admin_role);
+
+    if (user.active && isAdmin) {
+      const adminParams = [targetId];
+      let adminQuery = `
+        SELECT COUNT(DISTINCT u.id) AS cnt
+        FROM users u
+        LEFT JOIN user_roles ur ON ur.user_id = u.id
+        LEFT JOIN roles r ON r.id = ur.role_id
+        WHERE u.active = 1
+          AND u.id != ?
+          AND (
+            u.role = 'admin'
+            OR UPPER(r.nombre) = 'ADMINISTRADOR'
+          )
+      `;
+
+      if (user.empresa_id === null) {
+        adminQuery += ' AND u.empresa_id IS NULL';
+      } else {
+        adminQuery += ' AND u.empresa_id = ?';
+        adminParams.push(user.empresa_id);
+      }
+
+      const [[adminCount]] = await db.query(adminQuery, adminParams);
+
+      if (Number(adminCount.cnt) === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No se puede eliminar al único administrador activo de la empresa'
+        });
+      }
+    }
+
+    const deleteParams = [targetId];
+    let deleteQuery = 'DELETE FROM users WHERE id = ?';
+
+    if (!req.tenant?.isSuperadmin) {
+      deleteQuery += ' AND empresa_id = ?';
+      deleteParams.push(req.tenant.empresa_id);
+    }
+
+    const [result] = await db.query(deleteQuery, deleteParams);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    const userUploadDir = path.join(
+      UPLOADS_BASE,
+      'usuarios',
+      String(targetId)
+    );
+
+    try {
+      fs.rmSync(userUploadDir, {
+        recursive: true,
+        force: true
+      });
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      message: 'Usuario eliminado exitosamente'
+    });
+  } catch (error) {
+    console.error('deleteUsuario error:', error);
+
+    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(409).json({
+        success: false,
+        message: 'Este usuario tiene registros relacionados y no puede eliminarse'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
 };
 

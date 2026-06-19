@@ -20,6 +20,7 @@ export interface SaleItem {
   cantidad: number;
   precioUnit: number;
   subtotal: number;
+  stockDisponible?: number;
 }
 
 export interface Payment {

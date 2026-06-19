@@ -14,6 +14,7 @@ router.post('/usuarios', tenantScope, ctrl.upload.single('foto_perfil'), ctrl.cr
 router.put('/usuarios/:id', tenantScope, ctrl.upload.single('foto_perfil'), ctrl.updateUsuario);
 router.patch('/usuarios/:id/estado', tenantScope, ctrl.toggleEstado);
 router.patch('/usuarios/:id/password', tenantScope, ctrl.changePassword);
+router.delete('/usuarios/:id', tenantScope, ctrl.deleteUsuario);
 
 // ── Roles ─────────────────────────────────────────────────────────────────
 router.get('/roles', ctrl.getRoles);

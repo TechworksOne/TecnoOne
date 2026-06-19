@@ -291,22 +291,99 @@ exports.registrarAjuste = async (req, res) => {
 
 // ── POST /api/tarjetas-credito/movimiento-compra (interno) ────────────────
 // Usado por compraController cuando metodo_pago = 'tarjeta_credito'
-exports.registrarCompra = async (connection, tarjetaId, montoCentavos, compraId, descripcion, userId, empresaId = null) => {
+exports.registrarCompra = async (
+  connection,
+  tarjetaId,
+  montoCentavos,
+  compraId,
+  descripcion,
+  userId,
+  empresaId = null
+) => {
   const empresaIdFinanciera = Number(empresaId);
+  const monto = Number(montoCentavos);
+
   if (!Number.isInteger(empresaIdFinanciera) || empresaIdFinanciera <= 0) {
-    throw new Error('empresaId requerido');
+    const error = new Error('empresaId requerido');
+    error.statusCode = 403;
+    throw error;
   }
+
+  if (!Number.isInteger(monto) || monto <= 0) {
+    const error = new Error('El monto de la compra debe ser mayor que cero');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Bloquea la tarjeta durante la validación para evitar dos compras
+  // simultáneas usando el mismo crédito disponible.
   const [tarjetas] = await connection.query(
-    'SELECT id FROM tarjetas_credito WHERE id = ? AND empresa_id = ? AND activo = 1 LIMIT 1',
+    `SELECT id, banco, alias, ultimos4, limite_credito
+     FROM tarjetas_credito
+     WHERE id = ? AND empresa_id = ? AND activo = 1
+     LIMIT 1
+     FOR UPDATE`,
     [tarjetaId, empresaIdFinanciera]
   );
+
   if (!tarjetas.length) {
-    throw new Error('Tarjeta no encontrada o inactiva para la empresa');
+    const error = new Error('Tarjeta no encontrada o inactiva para la empresa');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const tarjeta = tarjetas[0];
+
+  const [[saldoRow]] = await connection.query(
+    `SELECT COALESCE(
+       SUM(
+         CASE
+           WHEN tipo IN ('compra', 'interes') THEN monto
+           WHEN tipo IN ('pago', 'anulacion') THEN -monto
+           WHEN tipo = 'ajuste' THEN monto
+           ELSE 0
+         END
+       ),
+       0
+     ) AS saldo_centavos
+     FROM tarjeta_credito_movimientos
+     WHERE tarjeta_id = ? AND empresa_id = ?`,
+    [tarjetaId, empresaIdFinanciera]
+  );
+
+  const limiteCentavos = Number(tarjeta.limite_credito || 0);
+  const saldoCentavos = Number(saldoRow.saldo_centavos || 0);
+  const disponibleCentavos = Math.max(0, limiteCentavos - saldoCentavos);
+
+  if (monto > disponibleCentavos) {
+    const error = new Error(
+      `Crédito insuficiente en ${tarjeta.alias || tarjeta.banco} ****${tarjeta.ultimos4}. ` +
+      `Disponible: Q${(disponibleCentavos / 100).toFixed(2)}`
+    );
+    error.statusCode = 409;
+    throw error;
   }
 
   await connection.query(
-    `INSERT INTO tarjeta_credito_movimientos (empresa_id, tarjeta_id, tipo, monto, descripcion, referencia_tipo, referencia_id, fecha_movimiento, created_by)
+    `INSERT INTO tarjeta_credito_movimientos
+      (empresa_id, tarjeta_id, tipo, monto, descripcion,
+       referencia_tipo, referencia_id, fecha_movimiento, created_by)
      VALUES (?, ?, 'compra', ?, ?, 'compra', ?, NOW(), ?)`,
-    [empresaIdFinanciera, tarjetaId, montoCentavos, descripcion || 'Compra pagada con tarjeta de crédito', compraId, userId]
+    [
+      empresaIdFinanciera,
+      tarjetaId,
+      monto,
+      descripcion || 'Compra pagada con tarjeta de crédito',
+      compraId,
+      userId || null
+    ]
   );
+
+  return {
+    tarjeta,
+    limite_centavos: limiteCentavos,
+    saldo_anterior_centavos: saldoCentavos,
+    disponible_anterior_centavos: disponibleCentavos,
+    disponible_nuevo_centavos: disponibleCentavos - monto
+  };
 };

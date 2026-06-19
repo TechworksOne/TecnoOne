@@ -459,11 +459,18 @@ export default function CustomerPicker({
                   Teléfono
                 </label>
                 <Input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={15}
                   value={newCustomerForm.phone}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
-                    setNewCustomerForm({ ...newCustomerForm, phone: e.target.value })
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setNewCustomerForm({
+                      ...newCustomerForm,
+                      phone: e.target.value.replace(/\D/g, '').slice(0, 15),
+                    })
                   }
-                  placeholder="5555-1234"
+                  placeholder="55551234"
                   className="w-full"
                 />
               </div>

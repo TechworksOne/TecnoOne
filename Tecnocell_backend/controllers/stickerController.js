@@ -350,19 +350,25 @@ function generarCodigos(config) {
 async function ensureLoteTables() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS sticker_lotes (
-      id            INT AUTO_INCREMENT PRIMARY KEY,
-      codigo_lote   VARCHAR(80)  UNIQUE NOT NULL,
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      empresa_id      INT NOT NULL,
+      codigo_lote     VARCHAR(80) NOT NULL,
       tipo_generacion VARCHAR(30) NOT NULL,
-      estructura    VARCHAR(255),
-      prefijo       VARCHAR(80),
-      cantidad      INT          NOT NULL DEFAULT 0,
-      numero_inicial INT         DEFAULT 1,
-      digitos       INT          DEFAULT 4,
-      dias_garantia INT          DEFAULT 0,
-      tipo_garantia VARCHAR(80),
-      notas         TEXT,
-      creado_por    INT,
-      created_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+      estructura      VARCHAR(255),
+      prefijo         VARCHAR(80),
+      cantidad        INT NOT NULL DEFAULT 0,
+      numero_inicial  INT DEFAULT 1,
+      digitos         INT DEFAULT 4,
+      dias_garantia   INT DEFAULT 0,
+      tipo_garantia   VARCHAR(80),
+      notas           TEXT,
+      creado_por      INT,
+      created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_sticker_lotes_empresa_codigo
+        (empresa_id, codigo_lote),
+      KEY idx_sticker_lotes_empresa_id (empresa_id),
+      CONSTRAINT fk_sticker_lotes_empresa
+        FOREIGN KEY (empresa_id) REFERENCES empresas(id)
     )
   `);
 
@@ -384,6 +390,14 @@ exports.previewLote = async (req, res) => {
   try {
     const config = req.body;
     const { cantidad } = config;
+    const empresaId = await getEmpresaIdForLote(db, req, config);
+
+    if (!empresaId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Empresa requerida para generar la vista previa'
+      });
+    }
 
     if (!cantidad || Number(cantidad) <= 0) {
       return res.status(400).json({ success: false, message: 'La cantidad debe ser mayor a 0' });
@@ -402,13 +416,16 @@ exports.previewLote = async (req, res) => {
     if (codes.length > 0) {
       const ph = codes.map(() => '?').join(',');
       const [existing] = await db.query(
-        `SELECT numero_sticker FROM stickers_garantia WHERE numero_sticker IN (${ph})`,
-        codes,
+        `SELECT numero_sticker
+         FROM stickers_garantia
+         WHERE empresa_id = ?
+           AND numero_sticker IN (${ph})`,
+        [empresaId, ...codes],
       );
       if (existing.length > 0) {
         return res.status(409).json({
           success: false,
-          message: 'Algunos códigos ya existen en la base de datos',
+          message: 'Algunos códigos ya están registrados para esta empresa',
           duplicados: existing.map((r) => r.numero_sticker),
         });
       }
@@ -460,14 +477,17 @@ exports.createLote = async (req, res) => {
     if (codes.length > 0) {
       const ph = codes.map(() => '?').join(',');
       const [existing] = await connection.query(
-        `SELECT numero_sticker FROM stickers_garantia WHERE numero_sticker IN (${ph})`,
-        codes,
+        `SELECT numero_sticker
+         FROM stickers_garantia
+         WHERE empresa_id = ?
+           AND numero_sticker IN (${ph})`,
+        [empresaId, ...codes],
       );
       if (existing.length > 0) {
         await connection.rollback();
         return res.status(409).json({
           success: false,
-          message: 'Algunos códigos ya existen en la base de datos',
+          message: 'Algunos códigos ya están registrados para esta empresa',
           duplicados: existing.map((r) => r.numero_sticker),
         });
       }
@@ -523,7 +543,19 @@ exports.createLote = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al crear lote:', error);
-    res.status(500).json({ success: false, message: 'Error al crear el lote', error: error.message });
+
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        success: false,
+        message: 'Uno o más códigos ya están registrados para esta empresa'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Error al crear el lote',
+      error: error.message
+    });
   } finally {
     connection.release();
   }

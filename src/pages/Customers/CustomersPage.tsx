@@ -59,6 +59,7 @@ export default function CustomersPage() {
   } = useCustomers();
 
   const toast = useToast();
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false);
 
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -112,18 +113,74 @@ export default function CustomersPage() {
   };
 
   const validateForm = () => {
-    if (!currentCustomer.firstName.trim()) { toast.add("El nombre es requerido", "error"); return false; }
-    if (!currentCustomer.lastName.trim()) { toast.add("El apellido es requerido", "error"); return false; }
-    if (!currentCustomer.phone.trim()) { toast.add("El teléfono es requerido", "error"); return false; }
-    if (currentCustomer.phone.replace(/\D/g,'').length < 8) { toast.add("El teléfono debe tener al menos 8 dígitos", "error"); return false; }
-    if (currentCustomer.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(currentCustomer.email)) { toast.add("Email inválido", "error"); return false; }
+    if (!currentCustomer.firstName.trim()) {
+      toast.add("El nombre es requerido", "error");
+      return false;
+    }
+
+    if (!currentCustomer.lastName.trim()) {
+      toast.add("El apellido es requerido", "error");
+      return false;
+    }
+
+    if (!currentCustomer.phone.trim()) {
+      toast.add("El teléfono es requerido", "error");
+      return false;
+    }
+
+    const unsafePattern =
+      /<\s*\/?\s*[a-z][^>]*>|javascript\s*:|on[a-z]+\s*=/i;
+
+    const fieldsToValidate = [
+      ["Nombre", currentCustomer.firstName],
+      ["Apellido", currentCustomer.lastName],
+      ["Teléfono", currentCustomer.phone],
+      ["NIT", currentCustomer.nit],
+      ["Correo electrónico", currentCustomer.email],
+      ["Dirección", currentCustomer.address],
+      ["Notas", currentCustomer.notes],
+    ] as const;
+
+    const invalidField = fieldsToValidate.find(
+      ([, value]) => value && unsafePattern.test(value)
+    );
+
+    if (invalidField) {
+      toast.add(
+        `El campo "${invalidField[0]}" contiene código o etiquetas no permitidas.`,
+        "error"
+      );
+      return false;
+    }
+
+    if (!/^\d{8,15}$/.test(currentCustomer.phone)) {
+      toast.add(
+        "El teléfono debe contener únicamente números y tener entre 8 y 15 dígitos.",
+        "error"
+      );
+      return false;
+    }
+
+    if (
+      currentCustomer.email &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(currentCustomer.email)
+    ) {
+      toast.add("El correo electrónico no tiene un formato válido", "error");
+      return false;
+    }
+
     return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isSavingCustomer) return;
     if (!validateForm()) return;
+
     try {
+      setIsSavingCustomer(true);
+
       if (editingCustomer) {
         await updateCustomer(editingCustomer.id, currentCustomer);
         toast.add("Cliente actualizado exitosamente");
@@ -131,10 +188,25 @@ export default function CustomersPage() {
         await addCustomer(currentCustomer);
         toast.add("Cliente registrado exitosamente");
       }
+
       resetForm();
       setIsFormOpen(false);
     } catch (error: any) {
-      toast.add(error.message || "Error al guardar el cliente", "error");
+      const serverMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error;
+
+      const status = error?.response?.status;
+
+      const message =
+        serverMessage ||
+        (status === 403
+          ? "No se pudo guardar el cliente porque uno de los campos contiene contenido no permitido."
+          : error?.message || "Error al guardar el cliente");
+
+      toast.add(message, "error");
+    } finally {
+      setIsSavingCustomer(false);
     }
   };
 
@@ -510,9 +582,19 @@ export default function CustomersPage() {
                     <div className="space-y-1.5">
                       <label className="text-[11px] font-semibold text-[#5E7184] dark:text-[#B8C2D1] uppercase tracking-widest">Teléfono <span className="text-red-400">*</span></label>
                       <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={15}
                         value={currentCustomer.phone}
-                        onChange={(e) => setCurrentCustomer({ ...currentCustomer, phone: e.target.value })}
-                        placeholder="5551-2345"
+                        onChange={(e) =>
+                          setCurrentCustomer({
+                            ...currentCustomer,
+                            phone: e.target.value.replace(/\D/g, "").slice(0, 15),
+                          })
+                        }
+                        placeholder="55512345"
+                        autoComplete="tel"
                         className="w-full h-12 rounded-2xl px-4 bg-[#F8FDFF] dark:bg-[#060B14] text-[#14324A] dark:text-[#F8FAFC] placeholder:text-[#7F8A99] border border-[#D6EEF8] dark:border-[rgba(72,185,230,0.18)] focus:border-[#48B9E6] focus:ring-2 focus:ring-[#48B9E6]/20 outline-none text-sm transition-all"
                       />
                     </div>
@@ -603,10 +685,14 @@ export default function CustomersPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!canSubmit}
+                  disabled={!canSubmit || isSavingCustomer}
                   className="sm:w-auto w-full px-6 py-2.5 rounded-2xl bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] hover:brightness-110 text-white text-sm font-semibold disabled:opacity-50 transition-all"
                 >
-                  {editingCustomer ? "Actualizar Cliente" : "Registrar Cliente"}
+                  {isSavingCustomer
+                    ? "Guardando..."
+                    : editingCustomer
+                      ? "Actualizar Cliente"
+                      : "Registrar Cliente"}
                 </button>
               </div>
             </form>

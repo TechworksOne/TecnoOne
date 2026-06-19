@@ -112,6 +112,10 @@ export const adminUsuarioService = {
     return data.data;
   },
 
+  async deleteUsuario(id: number): Promise<void> {
+    await api.delete(`/admin/usuarios/${id}`);
+  },
+
   async changePassword(id: number, password: string): Promise<void> {
     await api.patch(`/admin/usuarios/${id}/password`, { password });
   },

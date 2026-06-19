@@ -443,11 +443,11 @@ export default function QuoteFormPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
       {/* Print View */}
       {showPrintView && formState.cliente && (
-        <div className="fixed inset-0 bg-white dark:bg-slate-950 z-50 overflow-auto">
-          <div className="no-print p-4 border-b flex justify-between items-center">
+        <div className="fixed inset-0 z-50 overflow-auto bg-[var(--color-bg)] text-[var(--color-text)]">
+          <div className="no-print flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <h2 className="text-lg font-bold">Vista de Impresión</h2>
             <Button variant="ghost" onClick={() => setShowPrintView(false)}>
               <X size={20} />
@@ -476,7 +476,7 @@ export default function QuoteFormPage() {
       )}
 
       {/* Header */}
-      <div className="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 px-6 py-4">
+      <div className="border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-4">
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -506,21 +506,23 @@ export default function QuoteFormPage() {
                   <div
                     className={`w-12 h-12 rounded-full flex items-center justify-center font-bold transition-all ${
                       currentStep >= step.num
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-200 text-gray-500'
+                        ? 'bg-[var(--color-primary)] text-white'
+                        : 'border border-[var(--color-border)] bg-[var(--color-surface-soft)] text-[var(--color-text-muted)]'
                     }`}
                   >
                     <step.icon size={20} />
                   </div>
                   <div>
-                    <p className="text-sm text-gray-500">Paso {step.num}</p>
+                    <p className="text-sm text-[var(--color-text-muted)]">Paso {step.num}</p>
                     <p className="font-semibold">{step.label}</p>
                   </div>
                 </div>
                 {index < 2 && (
                   <div
                     className={`flex-1 h-1 mx-4 rounded transition-all ${
-                      currentStep > step.num ? 'bg-blue-600' : 'bg-gray-200'
+                      currentStep > step.num
+                        ? 'bg-[var(--color-primary)]'
+                        : 'bg-[var(--color-border)]'
                     }`}
                   />
                 )}
@@ -533,20 +535,20 @@ export default function QuoteFormPage() {
         {currentStep === 1 && (
           <Card className="p-6">
             <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-              <User size={24} className="text-blue-600" />
+              <User size={24} className="text-[var(--color-primary)]" />
               Datos del Cliente
             </h3>
 
             <div className="space-y-6">
               {/* Cliente seleccionado */}
               {formState.cliente ? (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-soft)] p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-semibold text-lg">{formState.cliente.name}</p>
-                      <p className="text-gray-600 dark:text-slate-400">{formState.cliente.phone}</p>
+                      <p className="text-lg font-semibold text-[var(--color-text)]">{formState.cliente.name}</p>
+                      <p className="text-[var(--color-text-muted)]">{formState.cliente.phone}</p>
                       {formState.cliente.email && (
-                        <p className="text-gray-600 dark:text-slate-400 text-sm">{formState.cliente.email}</p>
+                        <p className="text-sm text-[var(--color-text-muted)]">{formState.cliente.email}</p>
                       )}
                     </div>
                     <Button
@@ -559,7 +561,7 @@ export default function QuoteFormPage() {
                 </div>
               ) : (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-2 block text-sm font-medium text-[var(--color-text-sec)]">
                     Seleccionar cliente registrado <span className="text-red-500">*</span>
                   </label>
                   <Input
@@ -570,21 +572,21 @@ export default function QuoteFormPage() {
                   />
                   
                   {isLoadingCustomers ? (
-                    <div className="text-center py-4 text-gray-500">
+                    <div className="py-4 text-center text-[var(--color-text-muted)]">
                       Cargando clientes...
                     </div>
                   ) : filteredCustomers.length > 0 ? (
-                    <div className="border rounded-lg max-h-60 overflow-y-auto">
+                    <div className="max-h-60 overflow-y-auto rounded-xl border border-[var(--color-border)]">
                       {filteredCustomers.map((customer) => (
                         <div
                           key={customer.id}
                           onClick={() => handleSelectCliente(customer)}
-                          className="p-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0"
+                          className="cursor-pointer border-b border-[var(--color-border)] p-3 transition-colors last:border-b-0 hover:bg-[var(--color-row-hover)]"
                         >
                           <p className="font-medium">
                             {customer.nombre_completo || `${customer.firstName} ${customer.lastName}`.trim()}
                           </p>
-                          <div className="flex gap-4 text-sm text-gray-600">
+                          <div className="flex gap-4 text-sm text-[var(--color-text-muted)]">
                             <span>📱 {customer.phone || 'Sin teléfono'}</span>
                             {customer.nit && <span>🆔 {customer.nit}</span>}
                             {customer.email && <span>📧 {customer.email}</span>}
@@ -593,7 +595,7 @@ export default function QuoteFormPage() {
                       ))}
                     </div>
                   ) : (
-                    <div className="text-center py-4 text-gray-500 border rounded-lg">
+                    <div className="rounded-xl border border-[var(--color-border)] py-4 text-center text-[var(--color-text-muted)]">
                       {searchCliente ? 'No se encontraron clientes con ese criterio' : 'No hay clientes registrados'}
                     </div>
                   )}

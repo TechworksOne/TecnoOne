@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
+const { validatePhone } = require('../utils/phoneValidation');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 const MONEDAS_PERMITIDAS = {
@@ -170,6 +171,19 @@ const updateEmpresaMe = async (req, res) => {
       condiciones_servicio_contrato,
     } = req.body || {};
 
+    const telefonoValidado = validatePhone(telefono, {
+      label: 'El teléfono de la empresa',
+    });
+
+    if (!telefonoValidado.ok) {
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const telefonoNormalizado = telefonoValidado.value;
+
     const updates = [];
     const params = [];
     const correoValue = correo !== undefined ? correo : email;
@@ -182,7 +196,7 @@ const updateEmpresaMe = async (req, res) => {
       nombre_comercial: nombre_comercial === undefined ? undefined : normalizeText(nombre_comercial),
       razon_social: razon_social === undefined ? undefined : normalizeText(razon_social),
       nit: nit === undefined ? undefined : normalizeText(nit),
-      telefono: telefono === undefined ? undefined : normalizeText(telefono),
+      telefono: telefono === undefined ? undefined : telefonoNormalizado,
       email: correoValue === undefined ? undefined : normalizeText(correoValue),
       correo: correoValue === undefined ? undefined : normalizeText(correoValue),
       direccion: direccion === undefined ? undefined : normalizeText(direccion),

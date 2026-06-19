@@ -227,7 +227,7 @@ export default function QuoteDetailPage() {
   };
 
   const handleEdit = () => {
-    navigate(`/cotizaciones/editar/${quote.id}`);
+    navigate(`/cotizaciones/${quote.id}/editar`);
   };
 
   const handleStatusChange = (newStatus: 'ABIERTA' | 'CERRADA' | 'PERDIDA') => {
@@ -255,9 +255,9 @@ export default function QuoteDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
       {/* Header */}
-      <div className="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 px-6 py-4">
+      <div className="border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-4">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -318,7 +318,7 @@ export default function QuoteDetailPage() {
         <Card className="p-6 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div>
-              <label className="text-sm font-medium text-gray-500 block mb-1">Estado</label>
+              <label className="mb-1 block text-sm font-medium text-[var(--color-text-muted)]">Estado</label>
               <Select
                 value={quote.estado}
                 onChange={(e) => handleStatusChange(e.target.value as any)}
@@ -332,32 +332,32 @@ export default function QuoteDetailPage() {
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-500 block mb-1">Tipo</label>
+              <label className="mb-1 block text-sm font-medium text-[var(--color-text-muted)]">Tipo</label>
               <Badge color={quote.tipo === 'VENTA' ? 'blue' : 'purple'}>
                 {quote.tipo}
               </Badge>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-500 block mb-1">Vigencia</label>
+              <label className="mb-1 block text-sm font-medium text-[var(--color-text-muted)]">Vigencia</label>
               <Badge color={isVigente ? 'green' : 'red'}>
                 {isVigente ? `Válida hasta ${formatDate(vigenciaHasta)}` : 'Vencida'}
               </Badge>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-500 block mb-1">Total</label>
-              <p className="text-3xl font-bold text-blue-600">{formatMoney(quote.total)}</p>
+              <label className="mb-1 block text-sm font-medium text-[var(--color-text-muted)]">Total</label>
+              <p className="text-3xl font-bold text-[var(--color-primary)]">{formatMoney(quote.total)}</p>
             </div>
           </div>
         </Card>
 
         {/* Tabs */}
-        <div className="flex gap-4 mb-6 border-b">
+        <div className="mb-6 flex gap-4 border-b border-[var(--color-border)]">
           <button
             onClick={() => setActiveTab('resumen')}
             className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-              activeTab === 'resumen' 
-                ? 'border-blue-600 text-blue-600' 
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+              activeTab === 'resumen'
+                ? 'border-[var(--color-primary)] text-[var(--color-primary)]'
+                : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
             }`}
           >
             Resumen
@@ -365,9 +365,9 @@ export default function QuoteDetailPage() {
           <button
             onClick={() => setActiveTab('imprimir')}
             className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-              activeTab === 'imprimir' 
-                ? 'border-blue-600 text-blue-600' 
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+              activeTab === 'imprimir'
+                ? 'border-[var(--color-primary)] text-[var(--color-primary)]'
+                : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
             }`}
           >
             Vista Previa
@@ -380,9 +380,9 @@ export default function QuoteDetailPage() {
             {/* Items */}
             <Card className="p-6">
               <h3 className="text-lg font-semibold mb-4">Items de la Cotización</h3>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto rounded-xl border border-[var(--color-border)]">
                 <table className="w-full">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-[var(--color-surface-soft)] text-[var(--color-text-sec)]">
                     <tr>
                       <th className="text-left p-3">Cant.</th>
                       <th className="text-left p-3">Descripción</th>
@@ -391,13 +391,13 @@ export default function QuoteDetailPage() {
                       <th className="text-right p-3">Subtotal</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
+                  <tbody className="divide-y divide-[var(--color-border)]">
                     {quote.items.map((item, index) => (
-                      <tr key={index}>
+                      <tr key={index} className="transition-colors hover:bg-[var(--color-row-hover)]">
                         <td className="p-3">{item.cantidad}</td>
                         <td className="p-3">
                           <div className="font-medium">{item.nombre}</div>
-                          {item.notas && <div className="text-sm text-gray-500">{item.notas}</div>}
+                          {item.notas && <div className="text-sm text-[var(--color-text-muted)]">{item.notas}</div>}
                         </td>
                         <td className="p-3">
                           <Badge color={item.source === 'PRODUCTO' ? 'blue' : 'pink'}>
@@ -430,7 +430,7 @@ export default function QuoteDetailPage() {
                       <span className="font-semibold">{formatMoney(quote.impuestos)}</span>
                     </div>
                   )}
-                  <div className="flex justify-between text-xl font-bold text-blue-600 pt-2 border-t">
+                  <div className="flex justify-between border-t border-[var(--color-border)] pt-2 text-xl font-bold text-[var(--color-primary)]">
                     <span>TOTAL:</span>
                     <span>{formatMoney(quote.total)}</span>
                   </div>
@@ -442,7 +442,7 @@ export default function QuoteDetailPage() {
             {quote.observaciones && (
               <Card className="p-6">
                 <h3 className="text-lg font-semibold mb-2">Observaciones</h3>
-                <p className="text-gray-700 dark:text-slate-300">{quote.observaciones}</p>
+                <p className="text-[var(--color-text-sec)]">{quote.observaciones}</p>
               </Card>
             )}
 
@@ -451,7 +451,7 @@ export default function QuoteDetailPage() {
               <Button
                 variant="ghost"
                 onClick={() => setShowDeleteDialog(true)}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                className="text-red-500 hover:bg-red-500/10 hover:text-red-600"
               >
                 <Trash2 size={16} />
                 Eliminar Cotización
@@ -464,10 +464,10 @@ export default function QuoteDetailPage() {
           <Card className="p-6 no-print">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
+                <h3 className="text-lg font-semibold text-[var(--color-text)]">
                   Vista previa de impresión
                 </h3>
-                <p className="text-sm text-gray-600 dark:text-slate-400">
+                <p className="text-sm text-[var(--color-text-muted)]">
                   Usa el botón Imprimir para generar una sola copia limpia.
                 </p>
               </div>
@@ -477,7 +477,7 @@ export default function QuoteDetailPage() {
               </Button>
             </div>
 
-            <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white overflow-hidden">
+            <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-soft)]">
             </div>
           </Card>
         )}

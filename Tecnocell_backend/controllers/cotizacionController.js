@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { parsePagination } = require('../utils/pagination');
+const { validatePhone } = require('../utils/phoneValidation');
 
 /**
  * CONTROLADOR DE COTIZACIONES
@@ -78,6 +79,19 @@ const createCotizacion = async (req, res) => {
       notas_internas
     } = req.body;
 
+    const telefonoValidado = validatePhone(cliente_telefono, {
+      label: 'El teléfono del cliente',
+    });
+
+    if (!telefonoValidado.ok) {
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const clienteTelefonoNormalizado = telefonoValidado.value;
+
     if (!cliente_id || !cliente_nombre) {
       return res.status(400).json({
         success: false,
@@ -123,7 +137,7 @@ const createCotizacion = async (req, res) => {
       empresaId,
       cliente_id,
       cliente_nombre,
-      cliente_telefono || null,
+      clienteTelefonoNormalizado,
       cliente_email || null,
       cliente_nit || null,
       cliente_direccion || null,
@@ -319,6 +333,24 @@ const updateCotizacion = async (req, res) => {
       });
     }
 
+    const telefonoFinal =
+      cliente_telefono !== undefined
+        ? cliente_telefono
+        : existing[0].cliente_telefono;
+
+    const telefonoValidado = validatePhone(telefonoFinal, {
+      label: 'El teléfono del cliente',
+    });
+
+    if (!telefonoValidado.ok) {
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const clienteTelefonoNormalizado = telefonoValidado.value;
+
     const empresaId = existing[0].empresa_id ?? requireTenantEmpresaId(req);
     const clienteFinal = cliente_id !== undefined ? cliente_id : existing[0].cliente_id;
     const clienteValido = await validateClienteForCotizacion(clienteFinal, empresaId);
@@ -359,7 +391,7 @@ const updateCotizacion = async (req, res) => {
     const values = [
       clienteFinal,
       cliente_nombre || existing[0].cliente_nombre,
-      cliente_telefono !== undefined ? cliente_telefono : existing[0].cliente_telefono,
+      clienteTelefonoNormalizado,
       cliente_email !== undefined ? cliente_email : existing[0].cliente_email,
       cliente_nit !== undefined ? cliente_nit : existing[0].cliente_nit,
       cliente_direccion !== undefined ? cliente_direccion : existing[0].cliente_direccion,

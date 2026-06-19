@@ -154,7 +154,7 @@ export default function Sidebar() {
                 {empresaName}
               </p>
               <p style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.08em", color: "var(--color-text-muted)", textTransform: "uppercase" }}>
-                TecnoOne SaaS
+                TecnoOne
               </p>
             </div>
           </div>
