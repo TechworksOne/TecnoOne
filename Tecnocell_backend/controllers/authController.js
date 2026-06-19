@@ -185,12 +185,35 @@ const updateMePerfil = async (req, res) => {
     console.log('[updateMePerfil] body keys:', Object.keys(req.body));
     console.log('[updateMePerfil] firma recibida:', req.body.firma ? `[data URL, length=${req.body.firma.length}]` : req.body.firma);
     const { telefono, direccion, nombres, apellidos, firma } = req.body;
+
+    const telefonoFueEnviado = telefono !== undefined;
+    let telefonoNormalizado = null;
+
+    if (telefonoFueEnviado) {
+      if (typeof telefono !== 'string') {
+        return res.status(400).json({
+          message: 'El teléfono debe contener únicamente números.',
+        });
+      }
+
+      telefonoNormalizado = telefono.trim();
+
+      if (telefonoNormalizado && !/^\d{8,15}$/.test(telefonoNormalizado)) {
+        return res.status(400).json({
+          message: 'El teléfono debe contener entre 8 y 15 dígitos.',
+        });
+      }
+    }
+
     const updateFields = [];
     const updateValues = [];
 
     if (nombres !== undefined) { updateFields.push('nombres = ?'); updateValues.push(nombres || null); }
     if (apellidos !== undefined) { updateFields.push('apellidos = ?'); updateValues.push(apellidos || null); }
-    if (telefono !== undefined) { updateFields.push('telefono = ?'); updateValues.push(telefono || null); }
+    if (telefonoFueEnviado) {
+      updateFields.push('telefono = ?');
+      updateValues.push(telefonoNormalizado || null);
+    }
     if (direccion !== undefined) { updateFields.push('direccion = ?'); updateValues.push(direccion || null); }
     if (firma !== undefined) { updateFields.push('firma = ?'); updateValues.push(firma || null); }
     if (req.file) {

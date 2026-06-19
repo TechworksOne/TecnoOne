@@ -271,13 +271,22 @@ function ModalEditar({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
     setError('');
+
+    const telefono = form.telefono.trim();
+
+    if (telefono && !/^\d{8,15}$/.test(telefono)) {
+      setError('El teléfono debe contener entre 8 y 15 dígitos.');
+      return;
+    }
+
+    setSaving(true);
+
     try {
       const fd = new FormData();
       fd.append('nombres', form.nombres);
       fd.append('apellidos', form.apellidos);
-      fd.append('telefono', form.telefono);
+      fd.append('telefono', telefono);
       fd.append('direccion', form.direccion);
       if (form.foto) fd.append('foto_perfil', form.foto);
       // Always send firma so it is not overwritten with NULL
@@ -408,14 +417,26 @@ function ModalEditar({
                 />
               </div>
               <div>
-                <label className={labelCls}>Telefono</label>
+                <label className={labelCls}>Teléfono</label>
                 <input
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  maxLength={15}
                   value={form.telefono}
-                  onChange={e => set('telefono', e.target.value)}
-                  placeholder="Ej: 5555-1234"
+                  onChange={e =>
+                    set(
+                      'telefono',
+                      e.target.value.replace(/\D/g, '').slice(0, 15)
+                    )
+                  }
+                  placeholder="Ej: 55551234"
                   className={inputCls}
                   style={inputStyle}
                 />
+                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                  Solo números, entre 8 y 15 dígitos. {form.telefono.length}/15
+                </p>
               </div>
               <div>
                 <label className={labelCls}>Email</label>
