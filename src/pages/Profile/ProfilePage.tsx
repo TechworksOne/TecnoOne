@@ -635,14 +635,18 @@ export default function ProfilePage() {
       >
         {/* Compact profile banner */}
         <div
-          className="relative overflow-hidden px-5 py-6 sm:px-7 sm:py-7"
-          style={{
-            background:
-              'linear-gradient(115deg, #111827 0%, #172554 48%, #0f172a 100%)',
-          }}
+          className="relative overflow-hidden bg-[linear-gradient(115deg,#EAF4FF_0%,#DCEBFF_48%,#F8FBFF_100%)] px-5 py-6 dark:bg-[linear-gradient(115deg,#111827_0%,#172554_48%,#0f172a_100%)] sm:px-7 sm:py-7"
         >
           <div
-            className="pointer-events-none absolute inset-0"
+            className="pointer-events-none absolute inset-0 dark:hidden"
+            style={{
+              backgroundImage:
+                'linear-gradient(rgba(37,99,235,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(37,99,235,0.035) 1px, transparent 1px), radial-gradient(circle at 18% 20%, rgba(56,189,248,0.09), transparent 32%)',
+              backgroundSize: '32px 32px, 32px 32px, 100% 100%',
+            }}
+          />
+          <div
+            className="pointer-events-none absolute inset-0 hidden dark:block"
             style={{
               backgroundImage:
                 'linear-gradient(rgba(125,211,252,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(125,211,252,0.045) 1px, transparent 1px), radial-gradient(circle at 18% 20%, rgba(56,189,248,0.16), transparent 32%)',
@@ -653,24 +657,23 @@ export default function ProfilePage() {
           {/* Avatar + info + edit button */}
           <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
             <div
-              className="w-fit shrink-0 rounded-2xl p-1"
+              className="w-fit shrink-0 rounded-2xl bg-white/70 p-1 dark:bg-slate-900/70"
               style={{
-                background: 'rgba(15, 23, 42, 0.72)',
                 boxShadow: '0 0 28px rgba(56, 189, 248, 0.22)',
               }}
             >
               <AvatarImage
                 src={avatarSrc}
                 name={displayName}
-                className="h-20 w-20 rounded-xl object-cover text-2xl ring-1 ring-cyan-200/35 sm:h-24 sm:w-24"
+                className="h-20 w-20 rounded-xl object-cover text-2xl ring-1 ring-sky-300/45 dark:ring-cyan-200/35 sm:h-24 sm:w-24"
               />
             </div>
 
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-xl font-extrabold leading-tight text-white sm:text-2xl">
+              <h1 className="truncate text-xl font-extrabold leading-tight text-slate-900 dark:text-white sm:text-2xl">
                 {displayName}
               </h1>
-              <p className="mt-1 truncate text-sm text-slate-300">
+              <p className="mt-1 truncate text-sm text-slate-600 dark:text-slate-300">
                 @{profile.username}
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
@@ -678,13 +681,13 @@ export default function ProfilePage() {
                   profile.roles.map(r => (
                     <span
                       key={r}
-                      className="rounded-full border border-sky-300/20 bg-sky-300/10 px-2.5 py-1 text-[11px] font-semibold text-sky-100"
+                      className="rounded-full border border-sky-600/15 bg-white/55 px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-100"
                     >
                       {r}
                     </span>
                   ))
                 ) : (
-                  <span className="text-xs text-slate-400">Sin roles asignados</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Sin roles asignados</span>
                 )}
               </div>
             </div>
