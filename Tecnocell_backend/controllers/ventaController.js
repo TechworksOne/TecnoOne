@@ -9,6 +9,7 @@ const {
   getSafeImageExtension,
 } = require('../utils/uploadSecurity');
 const { validatePhone } = require('../utils/phoneValidation');
+const auditoriaService = require('../services/auditoriaService');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -353,6 +354,15 @@ exports.createVenta = async (req, res) => {
 
     await connection.commit();
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'CREAR',
+      entidad: 'VENTA',
+      entidadId: result.insertId,
+      descripcion: `Venta ${result.insertId} creada para ${cliente_nombre}`,
+      datosNuevos: { ...req.body, id: result.insertId },
+    });
     return res.status(201).json(venta);
   } catch (error) {
     if (connection) {
@@ -603,6 +613,15 @@ exports.createVentaFromQuote = async (req, res) => {
     const venta = parseVentaJSON(newVenta[0]);
 
     await connection.commit();
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'CREAR',
+      entidad: 'VENTA',
+      entidadId: venta.id,
+      descripcion: `Venta ${venta.id} creada desde cotización ${cotizacionId}`,
+      datosNuevos: venta,
+    });
     res.status(201).json(venta);
   } catch (error) {
     if (connection) {
@@ -860,6 +879,16 @@ exports.registrarPago = async (req, res) => {
     );
     const venta = parseVentaJSON(ventasUpdated[0]);
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'REGISTRAR_PAGO',
+      entidad: 'VENTA',
+      entidadId: id,
+      descripcion: `Pago registrado en venta ${id}`,
+      datosAnteriores: { monto_pagado: ventaActual.monto_pagado },
+      datosNuevos: { monto, metodo: metodoNormalizado, referencia, comprobanteUrl },
+    });
     res.json(venta);
   } catch (error) {
     console.error('Error al registrar pago:', error);
@@ -983,6 +1012,16 @@ exports.anularVenta = async (req, res) => {
 
     const venta = parseVentaJSON(ventasUpdated[0]);
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'ANULAR',
+      entidad: 'VENTA',
+      entidadId: id,
+      descripcion: `Venta ${id} anulada`,
+      datosAnteriores: ventaActual,
+      datosNuevos: { estado: 'ANULADA', motivo },
+    });
     res.json(venta);
   } catch (error) {
     if (connection) {

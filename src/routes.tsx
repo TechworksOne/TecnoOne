@@ -30,6 +30,7 @@ import CajaBancosPage from "./pages/CajaBancos/CajaBancosPage";
 import DeudoresPage from "./pages/Deudores/DeudoresPage";
 import OrdenesTrabajoPage from "./pages/OrdenesTrabajo/OrdenesTrabajoPage";
 import EmpresaPage from "./pages/Configuracion/EmpresaPage";
+import AuditoriaPage from "./pages/Auditoria/AuditoriaPage";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import { ROLES } from "./lib/permissions";
 
@@ -80,6 +81,7 @@ const routes = [
   { path: "/admin-usuarios", element: PR(ADMIN,        <AdminUsuariosPage />) },
   { path: "/configuracion/empresa", element: PR(ADMIN, <EmpresaPage />) },
   { path: "/reportes",       element: PR(ADMIN,        <ReportesPage />) },
+  { path: "/auditoria",      element: PR(ADMIN,        <AuditoriaPage />) },
   { path: "/usuarios",       element: PR(ADMIN,        <UsersPage />) },
 
   // ── Sin restricción de rol (solo autenticación) ────────────────────────────

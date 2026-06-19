@@ -3,6 +3,19 @@ const db = require('../config/database');
 const { parsePagination } = require('../utils/pagination');
 const { validatePhone } = require('../utils/phoneValidation');
 const tarjetaCtrl = require('./tarjetaCreditoController');
+const auditoriaService = require('../services/auditoriaService');
+
+async function auditarCompra(req, empresaId, compraId, numeroCompra, total, tipo, body) {
+  await auditoriaService.registrar({
+    req,
+    empresaId,
+    accion: 'CREAR',
+    entidad: 'COMPRA',
+    entidadId: compraId,
+    descripcion: `Compra ${numeroCompra} creada`,
+    datosNuevos: { ...body, id: compraId, numero_compra: numeroCompra, total, tipo },
+  });
+}
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -594,6 +607,7 @@ exports.createCompraProductos = async (req, res) => {
 
     await connection.commit();
 
+    await auditarCompra(req, empresaId, compraId, numero_compra, total, 'PRODUCTO', req.body);
     res.status(201).json({
       success: true,
       message: 'Compra de productos registrada exitosamente',
@@ -750,6 +764,7 @@ exports.createCompraRepuestos = async (req, res) => {
 
     await connection.commit();
 
+    await auditarCompra(req, empresaId, compraId, numero_compra, total, 'REPUESTO', req.body);
     res.status(201).json({
       success: true,
       message: 'Compra de repuestos registrada exitosamente',
@@ -999,6 +1014,7 @@ exports.createCompra = async (req, res) => {
 
     await connection.commit();
 
+    await auditarCompra(req, empresaId, compraId, numero_compra, total, tipoCompra, req.body);
     res.status(201).json({
       success: true,
       message: 'Compra registrada exitosamente',

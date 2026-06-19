@@ -48,6 +48,7 @@ const agendaRoutes = require('./routes/agendaRoutes');
 const otRoutes = require('./routes/otRoutes');
 const tarjetaCreditoRoutes = require('./routes/tarjetaCreditoRoutes');
 const empresaRoutes = require('./routes/empresaRoutes');
+const auditoriaRoutes = require('./routes/auditoriaRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -74,6 +75,7 @@ app.use('/api/agenda', agendaRoutes);
 app.use('/api/ot', otRoutes);
 app.use('/api/tarjetas-credito', tarjetaCreditoRoutes);
 app.use('/api/empresa', empresaRoutes);
+app.use('/api/auditoria', auditoriaRoutes);
 // app.use('/api/dashboard', dashboardRoutes);
 app.use('/api', marcaLineaRoutes);
 

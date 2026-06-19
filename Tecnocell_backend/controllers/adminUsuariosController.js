@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
 const { validatePhone } = require('../utils/phoneValidation');
+const auditoriaService = require('../services/auditoriaService');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 
@@ -238,6 +239,15 @@ exports.createUsuario = async (req, res) => {
       }
     }
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'CREAR',
+      entidad: 'USUARIO',
+      entidadId: userId,
+      descripcion: `Usuario ${username || email || userId} creado`,
+      datosNuevos: { username, email, nombres, apellidos, telefono: telefonoNormalizado, dpi, direccion, roles: rolesArray },
+    });
     res.status(201).json({ success: true, message: 'Usuario creado exitosamente', data: { id: userId } });
   } catch (error) {
     if (tempFilePath) try { fs.unlinkSync(tempFilePath); } catch (_) {}
@@ -347,6 +357,26 @@ exports.updateUsuario = async (req, res) => {
       }
     }
 
+    await auditoriaService.registrar({
+      req,
+      empresaId: req.tenant?.empresa_id,
+      accion: 'EDITAR',
+      entidad: 'USUARIO',
+      entidadId: id,
+      descripcion: `Usuario ${username || id} actualizado`,
+      datosNuevos: req.body,
+    });
+    if (rolesArray.length) {
+      await auditoriaService.registrar({
+        req,
+        empresaId: req.tenant?.empresa_id,
+        accion: 'CAMBIAR_ROLES',
+        entidad: 'USUARIO',
+        entidadId: id,
+        descripcion: `Roles del usuario ${username || id} actualizados`,
+        datosNuevos: { roles: rolesArray },
+      });
+    }
     res.json({ success: true, message: 'Usuario actualizado exitosamente' });
   } catch (error) {
     if (tempFilePath) try { fs.unlinkSync(tempFilePath); } catch (_) {}
@@ -449,6 +479,16 @@ exports.toggleEstado = async (req, res) => {
 
     await db.query(updateQuery, updateParams);
 
+    await auditoriaService.registrar({
+      req,
+      empresaId: user.empresa_id,
+      accion: newActive ? 'ACTIVAR' : 'DESACTIVAR',
+      entidad: 'USUARIO',
+      entidadId: targetId,
+      descripcion: `Usuario ${targetId} ${newActive ? 'activado' : 'desactivado'}`,
+      datosAnteriores: { active: Boolean(user.active) },
+      datosNuevos: { active: Boolean(newActive) },
+    });
     res.json({
       success: true,
       message: newActive ? 'Usuario activado' : 'Usuario desactivado',
@@ -575,6 +615,15 @@ exports.deleteUsuario = async (req, res) => {
       });
     } catch (_) {}
 
+    await auditoriaService.registrar({
+      req,
+      empresaId: user.empresa_id,
+      accion: 'ELIMINAR',
+      entidad: 'USUARIO',
+      entidadId: targetId,
+      descripcion: `Usuario ${targetId} eliminado`,
+      datosAnteriores: user,
+    });
     res.json({
       success: true,
       message: 'Usuario eliminado exitosamente'

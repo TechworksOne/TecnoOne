@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
 const { validatePhone } = require('../utils/phoneValidation');
+const auditoriaService = require('../services/auditoriaService');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 const MONEDAS_PERMITIDAS = {
@@ -273,6 +274,15 @@ const updateEmpresaMe = async (req, res) => {
 
     const [[empresa]] = await db.query(buildEmpresaSelect(), [empresaId]);
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'EDITAR',
+      entidad: 'EMPRESA',
+      entidadId: empresaId,
+      descripcion: 'Configuración de empresa actualizada',
+      datosNuevos: allowedFields,
+    });
     return res.json({
       success: true,
       message: 'Empresa actualizada correctamente',

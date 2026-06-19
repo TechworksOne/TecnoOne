@@ -8,6 +8,7 @@ const { imageFileFilter, getSafeImageExtension, sanitizeBaseName } = require('..
 const { validatePhone } = require('../utils/phoneValidation');
 const cajaController = require('./cajaController');
 const contratoService = require('../services/contratoService');
+const auditoriaService = require('../services/auditoriaService');
 
 // Métodos de pago válidos (igual que ventas)
 const VALID_METODOS_PAGO_REP = ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA_BAC', 'TARJETA_NEONET', 'TARJETA_OTRA'];
@@ -850,6 +851,15 @@ exports.createReparacion = async (req, res) => {
       console.error('⚠️ Error generando contrato PDF:', pdfErr.message);
     }
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'CREAR',
+      entidad: 'REPARACION',
+      entidadId: repairId,
+      descripcion: `Reparación ${repairId} creada para ${clienteNombre}`,
+      datosNuevos: req.body,
+    });
     res.status(201).json({
       success: true,
       message: 'Reparación creada exitosamente',
@@ -1211,6 +1221,16 @@ exports.changeRepairState = async (req, res) => {
     
     await connection.commit();
     
+    await auditoriaService.registrar({
+      req,
+      empresaId: req.tenant?.empresa_id,
+      accion: 'EDITAR',
+      entidad: 'REPARACION',
+      entidadId: id,
+      descripcion: `Reparación ${id} actualizada`,
+      datosAnteriores: { estado: estadoAnterior },
+      datosNuevos: updates,
+    });
     res.json({
       success: true,
       message: 'Estado actualizado exitosamente',
@@ -1278,6 +1298,16 @@ exports.updateEstadoReparacion = async (req, res) => {
       ]
     );
 
+    await auditoriaService.registrar({
+      req,
+      empresaId: req.tenant?.empresa_id,
+      accion: 'EDITAR',
+      entidad: 'REPARACION',
+      entidadId: id,
+      descripcion: `Estado de reparación actualizado a ${estado}`,
+      datosAnteriores: { estado: estadoAnteriorSimple },
+      datosNuevos: { estado },
+    });
     res.json({
       success: true,
       message: 'Estado actualizado exitosamente'
@@ -1860,6 +1890,21 @@ exports.cancelarReparacion = async (req, res) => {
     );
 
     await connection.commit();
+    await auditoriaService.registrar({
+      req,
+      empresaId: req.tenant?.empresa_id,
+      accion: 'CANCELAR',
+      entidad: 'REPARACION',
+      entidadId: id,
+      descripcion: `Reparación ${id} cancelada`,
+      datosAnteriores: { estado: estadoAnterior },
+      datosNuevos: {
+        estado: 'CANCELADA',
+        motivo: motivoLimpio,
+        devolucion_monto: montoDev,
+        monto_retenido: montoRetenido,
+      },
+    });
     res.json({
       success: true,
       message: 'Reparación cancelada exitosamente',

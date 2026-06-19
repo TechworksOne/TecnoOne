@@ -2,6 +2,7 @@ import {
   Box, ChevronLeft, ChevronRight, FileText, Home, User, Users,
   CreditCard, Wrench, Settings, ShoppingBag, Building2, GitBranch,
   Tag, Shield, Wallet, BarChart3, Receipt, CalendarDays, ClipboardList,
+  History,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
@@ -51,6 +52,7 @@ const GROUPS = [
       { to: "/clientes",       label: "Clientes",        icon: <Users size={17} />,     roles: ["ADMINISTRADOR", "VENTAS"]     },
       { to: "/proveedores",    label: "Proveedores",     icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"]               },
       { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />,    roles: ["ADMINISTRADOR"]               },
+      { to: "/auditoria",      label: "Auditoría",       icon: <History size={17} />,   roles: ["ADMINISTRADOR"]               },
       { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, roles: ["ADMINISTRADOR"]                 },
     ],
   },

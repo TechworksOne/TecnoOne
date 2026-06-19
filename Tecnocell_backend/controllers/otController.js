@@ -1,6 +1,7 @@
 // Controller: Órdenes de Trabajo (OT)
 // Gestiona la asignación de reparaciones a técnicos
 const db = require('../config/database');
+const auditoriaService = require('../services/auditoriaService');
 
 // Estados que ya no son trabajo activo
 const ESTADOS_INACTIVOS = ['CANCELADA', 'ENTREGADA'];
@@ -368,6 +369,15 @@ exports.asignarTecnico = async (req, res) => {
       [id, ...tenant.params]
     );
 
+    await auditoriaService.registrar({
+      req,
+      empresaId: req.tenant?.empresa_id,
+      accion: 'ASIGNAR_TECNICO',
+      entidad: 'REPARACION',
+      entidadId: id,
+      descripcion: `Técnico ${tecnico.name || tecnico.username || tecnico.id} asignado`,
+      datosNuevos: { tecnico_id: tecnico.id, tecnico_nombre: tecnico.name || tecnico.nombre_completo },
+    });
     res.json({
       success: true,
       message: 'Técnico asignado correctamente',
