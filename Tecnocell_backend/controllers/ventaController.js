@@ -220,9 +220,34 @@ exports.createVenta = async (req, res) => {
           });
         }
 
+        const montoPago = Number(pago.monto || 0);
+        const totalVenta = Number(total);
+        const esEfectivo =
+          metodoPagoIndividual === 'EFECTIVO';
+
         pagosNormalizados.push({
           ...pago,
           metodo: metodoPagoIndividual,
+
+          // El monto aplicado nunca debe incluir el cambio.
+          monto: esEfectivo
+            ? Math.min(montoPago, totalVenta)
+            : montoPago,
+
+          // Datos informativos para recibo o auditoría.
+          monto_recibido: esEfectivo
+            ? Number(
+                pago.monto_recibido ??
+                montoPago
+              )
+            : null,
+
+          cambio: esEfectivo
+            ? Number(
+                pago.cambio ??
+                Math.max(0, montoPago - totalVenta)
+              )
+            : null,
         });
       }
     }
@@ -252,6 +277,23 @@ exports.createVenta = async (req, res) => {
     const pagosJSON = pagosNormalizados
       ? JSON.stringify(pagosNormalizados)
       : null;
+
+    const totalVentaAplicado = Number(total) || 0;
+
+    const montoPagadoNormalizado = pagosNormalizados
+      ? Math.min(
+          pagosNormalizados.reduce(
+            (acumulado, pago) =>
+              acumulado + Number(pago.monto || 0),
+            0
+          ),
+          totalVentaAplicado
+        )
+      : Math.min(
+          Number(monto_pagado || 0),
+          totalVentaAplicado
+        );
+
 
     const query = `
       INSERT INTO ventas (
@@ -299,7 +341,7 @@ exports.createVenta = async (req, res) => {
       total,
       metodoPagoNorm,
       pagosJSON,
-      monto_pagado || 0,
+      montoPagadoNormalizado,
       observaciones || null,
       notas_internas || null,
       created_by || null,
@@ -771,7 +813,15 @@ exports.getVentaById = async (req, res) => {
 exports.registrarPago = async (req, res) => {
   try {
     const { id } = req.params;
-    const { monto, metodo, referencia, comprobanteUrl, usuario_id } = req.body;
+    const {
+      monto,
+      monto_recibido,
+      cambio,
+      metodo,
+      referencia,
+      comprobanteUrl,
+      usuario_id
+    } = req.body;
     const tenant = ventaTenantClause(req);
     const empresaId = requireTenantEmpresaId(req);
 
@@ -819,16 +869,57 @@ exports.registrarPago = async (req, res) => {
     }
     const ventaActual = ventasRows[0];
 
-    // Convertir monto a centavos (si viene en quetzales)
-    const montoCentavos = Math.round(parseFloat(monto) * 100);
+    // El monto recibido puede ser superior al saldo únicamente
+    // cuando el método es efectivo. A la venta y a caja se aplica
+    // solamente el saldo pendiente.
+    const montoIngresadoCentavos =
+      Math.round(parseFloat(monto) * 100);
 
-    // Validar que no exceda el saldo
-    const saldoPendiente = ventaActual.total - ventaActual.monto_pagado;
-    if (montoCentavos > saldoPendiente) {
-      return res.status(400).json({ 
-        error: `El monto (Q${(montoCentavos/100).toFixed(2)}) excede el saldo pendiente (Q${(saldoPendiente/100).toFixed(2)})` 
+    const saldoPendiente = Math.max(
+      0,
+      Number(ventaActual.total) -
+      Number(ventaActual.monto_pagado || 0)
+    );
+
+    const esEfectivo =
+      metodoNormalizado === 'EFECTIVO';
+
+    if (
+      !esEfectivo &&
+      montoIngresadoCentavos > saldoPendiente
+    ) {
+      return res.status(400).json({
+        error:
+          `El monto (Q${(montoIngresadoCentavos / 100).toFixed(2)}) ` +
+          `excede el saldo pendiente (Q${(saldoPendiente / 100).toFixed(2)})`
       });
     }
+
+    const montoAplicadoCentavos =
+      esEfectivo
+        ? Math.min(
+            montoIngresadoCentavos,
+            saldoPendiente
+          )
+        : montoIngresadoCentavos;
+
+    const montoRecibidoCentavos =
+      esEfectivo
+        ? Math.round(
+            parseFloat(
+              monto_recibido ?? monto
+            ) * 100
+          )
+        : montoAplicadoCentavos;
+
+    const cambioCentavos =
+      esEfectivo
+        ? Math.max(
+            0,
+            montoRecibidoCentavos -
+            montoAplicadoCentavos
+          )
+        : 0;
 
     // Agregar pago al array
     const pagosActuales = ventaActual.pagos
@@ -837,14 +928,22 @@ exports.registrarPago = async (req, res) => {
 
     pagosActuales.push({
       metodo: metodoNormalizado,
-      monto: montoCentavos,
+      monto: montoAplicadoCentavos,
+      monto_recibido:
+        esEfectivo
+          ? montoRecibidoCentavos
+          : null,
+      cambio:
+        esEfectivo
+          ? cambioCentavos
+          : null,
       referencia: referencia || null,
       comprobanteUrl: comprobanteNormalizado || null,
       fecha: new Date().toISOString(),
       usuario_id: usuario_id || null
     });
 
-    const nuevoMontoPagado = ventaActual.monto_pagado + montoCentavos;
+    const nuevoMontoPagado = Number(ventaActual.monto_pagado || 0) + montoAplicadoCentavos;
     const metodoFinal =
       pagosActuales.length > 1
         ? 'MIXTO'
@@ -860,7 +959,7 @@ exports.registrarPago = async (req, res) => {
       await cajaController.registrarMovimientoVenta(
         Number(id),
         metodoNormalizado,
-        montoCentavos,
+        montoAplicadoCentavos,
         usuario_id || 'Sistema',
         null,
         null,

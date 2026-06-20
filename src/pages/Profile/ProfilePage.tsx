@@ -10,6 +10,7 @@ import { canViewCosts, isAdmin } from '../../lib/permissions';
 import { getInitialsFromName, getSafeImageUrl } from '../../lib/avatar';
 import API_URL from '../../services/config';
 import axios from 'axios';
+import FirmaCanvas from '../../components/repairs/FirmaCanvas';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,116 +81,6 @@ const cardStyle = {
   background: 'var(--color-surface)',
   borderColor: 'var(--color-border)',
 };
-
-// ─── Signature Pad ────────────────────────────────────────────────────────────
-
-function SignaturePad({
-  initialValue,
-  onChange,
-}: {
-  initialValue: string | null;
-  onChange: (dataUrl: string | null) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-  const lastPos = useRef<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    if (!initialValue || !canvasRef.current) return;
-    const img = new Image();
-    img.onload = () => {
-      const ctx = canvasRef.current?.getContext('2d');
-      if (ctx) ctx.drawImage(img, 0, 0);
-    };
-    img.src = initialValue;
-  }, []);
-
-  const getXY = (
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
-  ) => {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    if ('touches' in e) {
-      return {
-        x: (e.touches[0].clientX - rect.left) * scaleX,
-        y: (e.touches[0].clientY - rect.top) * scaleY,
-      };
-    }
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
-    };
-  };
-
-  const onStart = (
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
-  ) => {
-    e.preventDefault();
-    drawing.current = true;
-    lastPos.current = getXY(e);
-  };
-
-  const onMove = (
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
-  ) => {
-    e.preventDefault();
-    if (!drawing.current || !canvasRef.current) return;
-    const ctx = canvasRef.current.getContext('2d')!;
-    const pos = getXY(e);
-    ctx.beginPath();
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 1.8;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    if (lastPos.current) {
-      ctx.moveTo(lastPos.current.x, lastPos.current.y);
-      ctx.lineTo(pos.x, pos.y);
-    }
-    ctx.stroke();
-    lastPos.current = pos;
-    onChange(canvasRef.current.toDataURL('image/png'));
-  };
-
-  const onEnd = () => {
-    drawing.current = false;
-    lastPos.current = null;
-  };
-
-  const clear = () => {
-    if (!canvasRef.current) return;
-    const ctx = canvasRef.current.getContext('2d')!;
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    onChange(null);
-  };
-
-  return (
-    <div className="space-y-2">
-      <canvas
-        ref={canvasRef}
-        width={580}
-        height={130}
-        className="w-full rounded-xl border cursor-crosshair touch-none block"
-        style={{ background: '#ffffff', borderColor: 'var(--color-border)' }}
-        onMouseDown={onStart}
-        onMouseMove={onMove}
-        onMouseUp={onEnd}
-        onMouseLeave={onEnd}
-        onTouchStart={onStart}
-        onTouchMove={onMove}
-        onTouchEnd={onEnd}
-      />
-      <button
-        type="button"
-        onClick={clear}
-        className="text-xs font-semibold text-red-500 hover:underline cursor-pointer"
-      >
-        Limpiar firma
-      </button>
-    </div>
-  );
-}
 
 // ─── Avatar component ─────────────────────────────────────────────────────────
 
@@ -469,10 +360,11 @@ function ModalEditar({
               <span className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
             </p>
             <p className="text-xs text-[var(--color-text-muted)] mb-2">
-              Dibuja tu firma en el area de abajo
+              Firma directamente o pulsa “Firmar en grande” en el teléfono
             </p>
-            <SignaturePad
+            <FirmaCanvas
               initialValue={form.firma}
+              fullscreenTitle="Firma digital"
               onChange={v => set('firma', v)}
             />
           </div>

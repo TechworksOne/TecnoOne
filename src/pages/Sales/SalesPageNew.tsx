@@ -210,11 +210,52 @@ export default function SalesPage() {
     }
   };
 
+  const saldoPagoCentavos = selectedVenta
+    ? Number(
+        selectedVenta.saldo_pendiente ??
+        (
+          selectedVenta.total -
+          (selectedVenta.monto_pagado ?? 0)
+        )
+      )
+    : 0;
+
+  const saldoPagoQuetzales =
+    saldoPagoCentavos / 100;
+
+  const montoPagoIngresado =
+    Number.parseFloat(pagoMonto) || 0;
+
+  const pagoAplicado =
+    Math.min(
+      montoPagoIngresado,
+      saldoPagoQuetzales
+    );
+
+  const cambioPago =
+    pagoMetodo === 'EFECTIVO'
+      ? Math.max(
+          0,
+          montoPagoIngresado - saldoPagoQuetzales
+        )
+      : 0;
+
   const handleRegistrarPago = async () => {
     if (!selectedVenta) return;
 
     if (!pagoMonto || parseFloat(pagoMonto) <= 0) {
       toast.add('Ingresa un monto válido', 'error');
+      return;
+    }
+
+    if (
+      pagoMetodo !== 'EFECTIVO' &&
+      montoPagoIngresado > saldoPagoQuetzales + 0.005
+    ) {
+      toast.add(
+        `El monto no puede exceder el saldo pendiente de Q${saldoPagoQuetzales.toFixed(2)}`,
+        'error'
+      );
       return;
     }
 
@@ -237,7 +278,21 @@ export default function SalesPage() {
     setPagoLoading(true);
     try {
       await ventaService.registrarPago(selectedVenta.id!, {
-        monto: parseFloat(pagoMonto),
+        monto:
+          pagoMetodo === 'EFECTIVO'
+            ? pagoAplicado
+            : montoPagoIngresado,
+
+        monto_recibido:
+          pagoMetodo === 'EFECTIVO'
+            ? montoPagoIngresado
+            : undefined,
+
+        cambio:
+          pagoMetodo === 'EFECTIVO'
+            ? cambioPago
+            : undefined,
+
         metodo: pagoMetodo,
         referencia: pagoRef || undefined,
         comprobanteUrl: pagoComprobanteUrl || undefined,
@@ -738,7 +793,11 @@ export default function SalesPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">Monto a pagar (Q)</label>
+              <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">
+                {pagoMetodo === 'EFECTIVO'
+                  ? 'Efectivo recibido (Q)'
+                  : 'Monto a pagar (Q)'}
+              </label>
               <Input
                 type="number"
                 step="0.01"
@@ -748,6 +807,27 @@ export default function SalesPage() {
                 placeholder="0.00"
               />
             </div>
+
+            {pagoMetodo === 'EFECTIVO' && montoPagoIngresado > 0 && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                <div className="flex items-center justify-between text-[var(--color-text-sec)]">
+                  <span>Pago aplicado</span>
+                  <span className="font-semibold text-[var(--color-text)]">
+                    Q {pagoAplicado.toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between border-t border-emerald-200 pt-2 dark:border-emerald-900/50">
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                    Cambio
+                  </span>
+
+                  <span className="text-base font-bold text-emerald-700 dark:text-emerald-400">
+                    Q {cambioPago.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">Método de pago</label>

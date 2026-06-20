@@ -274,9 +274,53 @@ const getCotizacionById = async (req, res) => {
       });
     }
 
+    const cotizacion = cotizaciones[0];
+
+    let itemsNormalizados = [];
+
+    if (Array.isArray(cotizacion.items)) {
+      itemsNormalizados = cotizacion.items;
+    } else if (Buffer.isBuffer(cotizacion.items)) {
+      try {
+        const parsed = JSON.parse(
+          cotizacion.items.toString('utf8')
+        );
+
+        itemsNormalizados = Array.isArray(parsed)
+          ? parsed
+          : [];
+      } catch (parseError) {
+        console.warn(
+          'Items inválidos en cotización:',
+          id,
+          parseError.message
+        );
+      }
+    } else if (
+      typeof cotizacion.items === 'string' &&
+      cotizacion.items.trim()
+    ) {
+      try {
+        const parsed = JSON.parse(cotizacion.items);
+
+        itemsNormalizados = Array.isArray(parsed)
+          ? parsed
+          : [];
+      } catch (parseError) {
+        console.warn(
+          'Items inválidos en cotización:',
+          id,
+          parseError.message
+        );
+      }
+    }
+
     res.json({
       success: true,
-      data: cotizaciones[0]
+      data: {
+        ...cotizacion,
+        items: itemsNormalizados
+      }
     });
   } catch (error) {
     console.error('Error al obtener cotizacion:', error);
