@@ -15,6 +15,8 @@ export interface LoginResponse {
     role: string;
     roles: string[];
     empresa_id: number | null;
+    tipo_usuario?: 'EMPRESA' | 'PLATAFORMA';
+    es_super_admin?: boolean;
     perfil: {
       nombres?: string;
       apellidos?: string;

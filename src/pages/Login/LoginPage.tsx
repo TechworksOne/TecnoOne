@@ -42,7 +42,8 @@ export default function LoginPage() {
     e.preventDefault();
     try {
       await login({ username, password });
-      navigate("/dashboard");
+      const authenticatedUser = useAuth.getState().user;
+      navigate(authenticatedUser?.es_super_admin ? "/superadmin" : "/dashboard");
     } catch (err) {
       console.error("Error al iniciar sesión:", err);
     }

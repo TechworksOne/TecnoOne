@@ -17,6 +17,8 @@ interface User {
   roles: string[];
   empresa_id: number | null;
   perfil: UserPerfil | null;
+  tipo_usuario?: "EMPRESA" | "PLATAFORMA";
+  es_super_admin?: boolean;
 }
 
 export interface AuthState {
@@ -70,7 +72,9 @@ export const useAuth = create<AuthState>((set, get) => ({
         isLoading: false,
         error: null,
       });
-      try {
+      if (response.user.es_super_admin || response.user.role === 'superadmin') {
+        set({ permissions: [], permissionsLoaded: true });
+      } else try {
         const permissions = await permisoService.getMisPermisos();
         set({ permissions, permissionsLoaded: true });
       } catch {
@@ -112,7 +116,11 @@ export const useAuth = create<AuthState>((set, get) => ({
     const token = authService.getToken();
     if (user && token) {
       set({ user: user as User, role: user.role as User["role"], token });
-      void get().loadPermissions();
+      if (user.es_super_admin || user.role === 'superadmin') {
+        set({ permissions: [], permissionsLoaded: true });
+      } else {
+        void get().loadPermissions();
+      }
     }
   },
 
