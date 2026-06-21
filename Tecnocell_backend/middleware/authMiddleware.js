@@ -10,7 +10,11 @@ const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    decoded.empresa_id = decoded.empresa_id ?? null;
+    decoded.id = decoded.userId ?? decoded.id;
+    decoded.empresa_id = decoded.empresaId ?? decoded.empresa_id ?? null;
+    decoded.tipo_usuario = decoded.tipoUsuario ?? decoded.tipo_usuario ?? 'EMPRESA';
+    decoded.es_super_admin = Boolean(decoded.esSuperAdmin ?? decoded.es_super_admin);
+    decoded.role = decoded.rol ?? decoded.role;
     req.user = decoded; // Agregar datos del usuario al request
     next();
   } catch (error) {

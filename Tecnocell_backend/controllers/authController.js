@@ -50,15 +50,24 @@ const login = async (req, res) => {
     );
     const rolesArray = rolesRows.map(r => r.nombre);
     const empresaId = user.empresa_id ?? null;
+    const tipoUsuario = user.tipo_usuario || 'EMPRESA';
+    const esSuperAdmin = Number(user.es_super_admin) === 1;
+    const rol = esSuperAdmin ? 'superadmin' : user.role;
 
     // Generar token JWT (incluye roles para middleware)
     const token = jwt.sign(
       {
+        userId: user.id,
+        empresaId,
+        tipoUsuario,
+        esSuperAdmin,
+        rol,
+        // Alias de compatibilidad para controladores existentes.
         id: user.id,
         email: user.email,
         username: user.username,
         name: user.name,
-        role: user.role,
+        role: rol,
         roles: rolesArray,
         empresa_id: empresaId
       },
@@ -78,9 +87,11 @@ const login = async (req, res) => {
         username: user.username,
         email: user.email,
         name: user.name,
-        role: user.role,
+        role: rol,
         roles: rolesArray,
         empresa_id: empresaId,
+        tipo_usuario: tipoUsuario,
+        es_super_admin: esSuperAdmin,
         perfil: perfil || null,
       }
     });
@@ -118,7 +129,9 @@ const getMe = async (req, res) => {
     const userId = req.user.id;
 
     const [[user]] = await db.query(
-      'SELECT id, username, email, name, role, empresa_id, active, ultimo_login, created_at, updated_at FROM users WHERE id = ?',
+      `SELECT id, username, email, name, role, empresa_id, active,
+              tipo_usuario, es_super_admin, ultimo_login, created_at, updated_at
+       FROM users WHERE id = ?`,
       [userId]
     );
     if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
@@ -139,8 +152,10 @@ const getMe = async (req, res) => {
         username: user.username,
         email: user.email,
         name: user.name,
-        role: user.role,
+        role: Number(user.es_super_admin) === 1 ? 'superadmin' : user.role,
         empresa_id: user.empresa_id ?? null,
+        tipo_usuario: user.tipo_usuario || 'EMPRESA',
+        es_super_admin: Number(user.es_super_admin) === 1,
         active: Boolean(user.active),
         ultimo_login: user.ultimo_login,
         created_at: user.created_at,

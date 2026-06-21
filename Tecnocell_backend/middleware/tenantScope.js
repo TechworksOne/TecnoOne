@@ -3,19 +3,21 @@ const tenantScope = (req, res, next) => {
     return res.status(401).json({ message: 'No autorizado' });
   }
 
-  const empresa_id = req.user.empresa_id ?? null;
-  const isSuperadmin = req.user.role === 'superadmin';
+  const empresa_id = req.user.empresaId ?? req.user.empresa_id ?? null;
+  const tipoUsuario = req.user.tipoUsuario ?? req.user.tipo_usuario ?? 'EMPRESA';
+  const esSuperAdmin = Boolean(req.user.esSuperAdmin ?? req.user.es_super_admin);
 
-  if (isSuperadmin && empresa_id === null) {
-    req.tenant = { empresa_id, isSuperadmin };
-    return next();
+  if (tipoUsuario === 'PLATAFORMA' || esSuperAdmin) {
+    return res.status(403).json({
+      message: 'Los usuarios de plataforma no pueden acceder a rutas empresariales',
+    });
   }
 
-  if (!isSuperadmin && empresa_id === null) {
+  if (empresa_id === null) {
     return res.status(403).json({ message: 'Empresa no asignada al usuario' });
   }
 
-  req.tenant = { empresa_id, isSuperadmin };
+  req.tenant = { empresa_id, isSuperadmin: false };
   return next();
 };
 

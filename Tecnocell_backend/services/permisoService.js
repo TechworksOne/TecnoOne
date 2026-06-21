@@ -1,7 +1,7 @@
 const db = require('../config/database');
 
 function isSuperadmin(req) {
-  return req?.tenant?.isSuperadmin || req?.user?.role === 'superadmin';
+  return false;
 }
 
 async function getEffectivePermissions(req, connection = db) {
