@@ -1,6 +1,6 @@
 const db = require('../config/database');
 
-const ESTADOS_PERMITIDOS = new Set(['activa', 'prueba']);
+const ESTADOS_PERMITIDOS = new Set(['activa', 'prueba', 'demo']);
 
 function empresaInactivaResponse(res, code = 'EMPRESA_INACTIVA') {
   return res.status(403).json({

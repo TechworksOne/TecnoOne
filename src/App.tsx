@@ -99,6 +99,7 @@ export default function App() {
               ))}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/superadmin/*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </main>
         </div>

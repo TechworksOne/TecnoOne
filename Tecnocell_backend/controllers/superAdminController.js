@@ -235,6 +235,9 @@ exports.updateEmpresa = async (req, res) => {
   try {
     const [[previous]] = await db.query('SELECT * FROM empresas WHERE id = ? LIMIT 1', [req.params.id]);
     if (!previous) return res.status(404).json({ success: false, message: 'Empresa no encontrada' });
+    if (req.body?.nombre !== undefined && !text(req.body.nombre, 150)) {
+      return res.status(400).json({ success: false, message: 'El nombre no puede quedar vacío' });
+    }
     if (!validDate(req.body?.fecha_vencimiento)) {
       return res.status(400).json({ success: false, message: 'fecha_vencimiento debe usar formato YYYY-MM-DD' });
     }
