@@ -12,6 +12,33 @@ const ORDER_FIELDS = {
   usuarios: 'total_usuarios',
 };
 
+const SUPER_ADMIN_SUMMARY_SQL = `
+  SELECT
+    COUNT(*) AS empresas_totales,
+    SUM(
+      LOWER(COALESCE(estado, '')) = 'activa'
+      AND LOWER(COALESCE(plan, '')) <> 'demo'
+    ) AS empresas_activas,
+    SUM(
+      LOWER(COALESCE(plan, '')) = 'demo'
+      AND LOWER(COALESCE(estado, '')) IN ('activa', 'demo')
+    ) AS empresas_demo,
+    SUM(
+      LOWER(COALESCE(estado, '')) = 'suspendida'
+    ) AS empresas_suspendidas,
+    SUM(
+      LOWER(COALESCE(estado, '')) = 'cancelada'
+    ) AS empresas_canceladas
+  FROM empresas
+`;
+
+const SUPER_ADMIN_USERS_SUMMARY_SQL = `
+  SELECT COUNT(*) AS usuarios_totales
+  FROM users
+  WHERE COALESCE(tipo_usuario, 'EMPRESA') = 'EMPRESA'
+    AND COALESCE(es_super_admin, 0) = 0
+`;
+
 function text(value, max = 255) {
   if (value === undefined || value === null) return null;
   const clean = String(value).trim();
@@ -50,19 +77,8 @@ function empresaSelect() {
 }
 
 exports.getMe = async (req, res) => {
-  const [[summary]] = await db.query(
-    `SELECT
-       COUNT(*) AS empresas_totales,
-       SUM(LOWER(estado) = 'activa') AS empresas_activas,
-       SUM(LOWER(estado) = 'demo') AS empresas_demo,
-       SUM(LOWER(estado) = 'suspendida') AS empresas_suspendidas
-     FROM empresas`
-  );
-  const [[users]] = await db.query(
-    `SELECT COUNT(*) AS usuarios_totales
-     FROM users
-     WHERE COALESCE(tipo_usuario, 'EMPRESA') = 'EMPRESA'`
-  );
+  const [[summary]] = await db.query(SUPER_ADMIN_SUMMARY_SQL);
+  const [[users]] = await db.query(SUPER_ADMIN_USERS_SUMMARY_SQL);
 
   res.json({
     success: true,
@@ -75,11 +91,15 @@ exports.getMe = async (req, res) => {
         empresas_activas: Number(summary.empresas_activas || 0),
         empresas_demo: Number(summary.empresas_demo || 0),
         empresas_suspendidas: Number(summary.empresas_suspendidas || 0),
+        empresas_canceladas: Number(summary.empresas_canceladas || 0),
         usuarios_totales: Number(users.usuarios_totales || 0),
       },
     },
   });
 };
+
+exports.SUPER_ADMIN_SUMMARY_SQL = SUPER_ADMIN_SUMMARY_SQL;
+exports.SUPER_ADMIN_USERS_SUMMARY_SQL = SUPER_ADMIN_USERS_SUMMARY_SQL;
 
 exports.getEmpresas = async (req, res) => {
   try {

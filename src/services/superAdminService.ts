@@ -13,6 +13,7 @@ export interface SuperAdminSummary {
   empresas_activas: number;
   empresas_demo: number;
   empresas_suspendidas: number;
+  empresas_canceladas: number;
   usuarios_totales: number;
 }
 
