@@ -5,6 +5,19 @@ export const ROLES = {
   VENTAS: 'VENTAS',
 } as const;
 
+export const PERMISSIONS = {
+  COMPRAS_VER: 'compras.ver',
+  VENTAS_VER: 'ventas.ver',
+  VENTAS_CREAR: 'ventas.crear',
+  REPARACIONES_VER: 'reparaciones.ver',
+  USUARIOS_ADMINISTRAR: 'usuarios.administrar',
+  PERMISOS_ADMINISTRAR: 'permisos.administrar',
+  EMPRESA_EDITAR: 'empresa.editar',
+  AUDITORIA_VER: 'auditoria.ver',
+  REPORTES_VER: 'reportes.ver',
+  CAJA_VER: 'caja.ver',
+} as const;
+
 /** Rutas exclusivas de ADMINISTRADOR */
 export const ADMIN_ONLY_ROUTES = [
   '/compras',

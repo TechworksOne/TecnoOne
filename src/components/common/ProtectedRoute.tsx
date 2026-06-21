@@ -7,6 +7,7 @@ interface Props {
   children: React.ReactNode;
   /** Roles requeridos para acceder (si está vacío: sólo autenticación) */
   roles?: string[];
+  permission?: string;
 }
 
 /** Normaliza roles RBAC + campo role legado para compatibilidad hacia atrás */
@@ -17,11 +18,12 @@ function getEffectiveRoles(user: { roles?: string[]; role?: string } | null): st
   if (legacy === 'admin' || legacy === 'administrador') set.add('ADMINISTRADOR');
   if (legacy === 'tecnico')                             set.add('TECNICO');
   if (legacy === 'ventas' || legacy === 'employee')     set.add('VENTAS');
+  if (legacy === 'superadmin')                          set.add('SUPERADMIN');
   return [...set];
 }
 
-export default function ProtectedRoute({ children, roles }: Props) {
-  const { user, role } = useAuth();
+export default function ProtectedRoute({ children, roles, permission }: Props) {
+  const { user, role, permissionsLoaded, hasPermission } = useAuth();
   const location = useLocation();
 
   // No autenticado → login
@@ -31,9 +33,15 @@ export default function ProtectedRoute({ children, roles }: Props) {
 
   // Verificar acceso por ruta/roles
   const userRoles = getEffectiveRoles(user);
-  const canAccess = roles
-    ? roles.some(r => userRoles.includes(r))
-    : canAccessRoute(userRoles, location.pathname);
+  if (permission && !permissionsLoaded) {
+    return <div className="min-h-[40vh] animate-pulse rounded-2xl bg-[var(--color-surface)]" />;
+  }
+
+  const canAccess = permission
+    ? hasPermission(permission)
+    : roles
+      ? roles.some(r => userRoles.includes(r))
+      : canAccessRoute(userRoles, location.pathname);
 
   if (!canAccess) {
     return (

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { authService, LoginCredentials } from "../services/authService";
+import { permisoService } from "../services/permisoService";
 
 interface UserPerfil {
   nombres?: string;
@@ -12,25 +13,29 @@ interface User {
   username: string;
   name: string;
   email: string;
-  role: string;
+  role: "admin" | "employee" | "tecnico" | "superadmin";
   roles: string[];
   empresa_id: number | null;
   perfil: UserPerfil | null;
 }
 
-interface AuthState {
+export interface AuthState {
   user: User | null;
-  role: "admin" | "employee" | "tecnico" | null;
+  role: User["role"] | null;
   token: string | null;
   isLoading: boolean;
   error: string | null;
+  permissions: string[];
+  permissionsLoaded: boolean;
 
   // Actions
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => void;
-  setRole: (role: "admin" | "employee" | "tecnico") => void;
+  setRole: (role: User["role"]) => void;
   initAuth: () => void;
   hasRole: (role: string) => boolean;
+  loadPermissions: () => Promise<void>;
+  hasPermission: (permission: string) => boolean;
 }
 
 // ── Lectura síncrona de localStorage al crear el store ────────────────────────
@@ -45,11 +50,13 @@ function readStoredAuth() {
   return { user: null, role: null, token: null };
 }
 
-export const useAuth = create<AuthState>((set) => ({
+export const useAuth = create<AuthState>((set, get) => ({
   // Estado inicial: leído SÍNCRONAMENTE desde localStorage
   ...readStoredAuth(),
   isLoading: false,
   error: null,
+  permissions: [],
+  permissionsLoaded: false,
 
   // Iniciar sesión con credenciales reales
   login: async (credentials: LoginCredentials) => {
@@ -63,6 +70,12 @@ export const useAuth = create<AuthState>((set) => ({
         isLoading: false,
         error: null,
       });
+      try {
+        const permissions = await permisoService.getMisPermisos();
+        set({ permissions, permissionsLoaded: true });
+      } catch {
+        set({ permissions: [], permissionsLoaded: true });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Error al iniciar sesión";
       set({
@@ -84,6 +97,8 @@ export const useAuth = create<AuthState>((set) => ({
       role: null,
       token: null,
       error: null,
+      permissions: [],
+      permissionsLoaded: false,
     });
   },
 
@@ -97,13 +112,34 @@ export const useAuth = create<AuthState>((set) => ({
     const token = authService.getToken();
     if (user && token) {
       set({ user: user as User, role: user.role as User["role"], token });
+      void get().loadPermissions();
     }
   },
 
   // Verificar si el usuario tiene un rol específico
   hasRole: (role: string) => {
-    const state = useAuth.getState();
+    const state = get();
     return state.user?.roles?.includes(role) ?? state.user?.role === role;
+  },
+
+  loadPermissions: async () => {
+    const state = get();
+    if (!state.token) {
+      set({ permissions: [], permissionsLoaded: true });
+      return;
+    }
+    try {
+      const permissions = await permisoService.getMisPermisos();
+      set({ permissions, permissionsLoaded: true });
+    } catch {
+      set({ permissions: [], permissionsLoaded: true });
+    }
+  },
+
+  hasPermission: (permission: string) => {
+    const state = get();
+    if (state.user?.role === 'superadmin') return true;
+    return state.permissions.includes('*') || state.permissions.includes(permission);
   },
 }));
 

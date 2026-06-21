@@ -4,6 +4,7 @@ const ventaController = require('../controllers/ventaController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePermission = require('../middleware/requirePermission');
 
 // Todas las rutas de ventas requieren autenticación y tenant scope
 router.use(verifyToken);
@@ -13,15 +14,16 @@ router.use(checkEmpresaActiva);
 // Rutas de ventas
 router.post(
   '/comprobantes',
+  requirePermission('ventas.editar'),
   ventaController.uploadComprobante.single('comprobante'),
   ventaController.subirComprobante
 );
-router.post('/', ventaController.createVenta);
-router.post('/from-quote/:cotizacionId', ventaController.createVentaFromQuote);
-router.get('/', ventaController.getAllVentas);
-router.get('/estadisticas', ventaController.getEstadisticas);
-router.get('/:id', ventaController.getVentaById);
-router.post('/:id/pagos', ventaController.registrarPago);
-router.post('/:id/anular', ventaController.anularVenta);
+router.post('/', requirePermission('ventas.crear'), ventaController.createVenta);
+router.post('/from-quote/:cotizacionId', requirePermission('ventas.crear'), ventaController.createVentaFromQuote);
+router.get('/', requirePermission('ventas.ver'), ventaController.getAllVentas);
+router.get('/estadisticas', requirePermission('ventas.ver'), ventaController.getEstadisticas);
+router.get('/:id', requirePermission('ventas.ver'), ventaController.getVentaById);
+router.post('/:id/pagos', requirePermission('ventas.editar'), ventaController.registrarPago);
+router.post('/:id/anular', requirePermission('ventas.anular'), ventaController.anularVenta);
 
 module.exports = router;

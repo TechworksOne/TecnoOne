@@ -31,10 +31,12 @@ import DeudoresPage from "./pages/Deudores/DeudoresPage";
 import OrdenesTrabajoPage from "./pages/OrdenesTrabajo/OrdenesTrabajoPage";
 import EmpresaPage from "./pages/Configuracion/EmpresaPage";
 import AuditoriaPage from "./pages/Auditoria/AuditoriaPage";
+import PermisosPage from "./pages/Permisos/PermisosPage";
 import ProtectedRoute from "./components/common/ProtectedRoute";
-import { ROLES } from "./lib/permissions";
+import { PERMISSIONS, ROLES } from "./lib/permissions";
 
 const ADMIN         = [ROLES.ADMINISTRADOR];
+const ADMIN_CONFIG  = [ROLES.ADMINISTRADOR, 'SUPERADMIN'];
 const ADMIN_TECNICO = [ROLES.ADMINISTRADOR, ROLES.TECNICO];
 const ADMIN_VENTAS  = [ROLES.ADMINISTRADOR, ROLES.VENTAS];
 const ALL_ROLES     = [ROLES.ADMINISTRADOR, ROLES.TECNICO, ROLES.VENTAS];
@@ -42,47 +44,56 @@ const ALL_ROLES     = [ROLES.ADMINISTRADOR, ROLES.TECNICO, ROLES.VENTAS];
 const PR = (roles: string[], child: React.ReactElement) => (
   <ProtectedRoute roles={roles}>{child}</ProtectedRoute>
 );
+const PP = (permission: string, child: React.ReactElement) => (
+  <ProtectedRoute permission={permission}>{child}</ProtectedRoute>
+);
+const APR = (permission: string, child: React.ReactElement) => (
+  <ProtectedRoute roles={ADMIN_CONFIG}>
+    <ProtectedRoute permission={permission}>{child}</ProtectedRoute>
+  </ProtectedRoute>
+);
 
 const routes = [
   { path: "/login",     element: <LoginPage /> },
-  { path: "/dashboard", element: <DashboardPage /> },
+  { path: "/dashboard", element: PP('dashboard.ver', <DashboardPage />) },
 
   // ── Operación ──────────────────────────────────────────────────────────────
-  { path: "/productos",            element: PR(ADMIN_VENTAS,  <ProductsPage />) },
-  { path: "/repuestos",            element: PR(ALL_ROLES, <RepuestosPage />) },
-  { path: "/repuestos/nuevo",      element: PR(ALL_ROLES, <RepuestoForm />) },
-  { path: "/repuestos/editar/:id", element: PR(ALL_ROLES, <RepuestoForm />) },
-  { path: "/compras",              element: PR(ADMIN,         <PurchasesPage />) },
-  { path: "/compras/nueva",        element: PR(ADMIN,         <PurchaseFormPage />) },
-  { path: "/cotizaciones",                element: PR(ADMIN_VENTAS, <QuotesPage />) },
-  { path: "/cotizaciones/nueva",          element: PR(ADMIN_VENTAS, <QuoteFormPage />) },
-  { path: "/cotizaciones/:id/editar",     element: PR(ADMIN_VENTAS, <QuoteFormPage />) },
-  { path: "/cotizaciones/:id",            element: PR(ADMIN_VENTAS, <QuoteDetailPage />) },
-  { path: "/ventas",       element: PR(ADMIN_VENTAS, <SalesPageNew />) },
-  { path: "/ventas/nueva", element: PR(ADMIN_VENTAS, <SaleNewPage />) },
-  { path: "/ventas/:id",   element: PR(ADMIN_VENTAS, <SaleDetailPage />) },
+  { path: "/productos",            element: PP('productos.ver', <ProductsPage />) },
+  { path: "/repuestos",            element: PP('repuestos.ver', <RepuestosPage />) },
+  { path: "/repuestos/nuevo",      element: PP('repuestos.ver', <RepuestoForm />) },
+  { path: "/repuestos/editar/:id", element: PP('repuestos.ver', <RepuestoForm />) },
+  { path: "/compras",              element: PP(PERMISSIONS.COMPRAS_VER, <PurchasesPage />) },
+  { path: "/compras/nueva",        element: PP('compras.crear', <PurchaseFormPage />) },
+  { path: "/cotizaciones",                element: PP('cotizaciones.ver', <QuotesPage />) },
+  { path: "/cotizaciones/nueva",          element: PP('cotizaciones.editar', <QuoteFormPage />) },
+  { path: "/cotizaciones/:id/editar",     element: PP('cotizaciones.editar', <QuoteFormPage />) },
+  { path: "/cotizaciones/:id",            element: PP('cotizaciones.ver', <QuoteDetailPage />) },
+  { path: "/ventas",       element: PP(PERMISSIONS.VENTAS_VER, <SalesPageNew />) },
+  { path: "/ventas/nueva", element: PP(PERMISSIONS.VENTAS_CREAR, <SaleNewPage />) },
+  { path: "/ventas/:id",   element: PP(PERMISSIONS.VENTAS_VER, <SaleDetailPage />) },
 
   // ── Servicio técnico ───────────────────────────────────────────────────────
-  { path: "/reparaciones",            element: PR(ALL_ROLES,     <RepairsPage />) },
-  { path: "/reparaciones/nueva",      element: PR(ALL_ROLES,     <RepairFormSimple />) },
-  { path: "/reparaciones/:id/editar", element: PR(ALL_ROLES,     <RepairFormSimple />) },
-  { path: "/flujo-reparaciones",      element: PR(ALL_ROLES, <FlujoReparacionesPage />) },
-  { path: "/flujo-reparaciones/:id",  element: PR(ALL_ROLES, <FlujoReparacionDetailPage />) },
-  { path: "/ordenes-trabajo",         element: PR(ADMIN_TECNICO, <OrdenesTrabajoPage />) },
-  { path: "/agenda",                  element: PR(ALL_ROLES, <AgendaPage />) },
+  { path: "/reparaciones",            element: PP(PERMISSIONS.REPARACIONES_VER, <RepairsPage />) },
+  { path: "/reparaciones/nueva",      element: PP('reparaciones.crear', <RepairFormSimple />) },
+  { path: "/reparaciones/:id/editar", element: PP('reparaciones.editar', <RepairFormSimple />) },
+  { path: "/flujo-reparaciones",      element: PP('flujo_reparaciones.ver', <FlujoReparacionesPage />) },
+  { path: "/flujo-reparaciones/:id",  element: PP('flujo_reparaciones.ver', <FlujoReparacionDetailPage />) },
+  { path: "/ordenes-trabajo",         element: PP('ordenes_trabajo.ver', <OrdenesTrabajoPage />) },
+  { path: "/agenda",                  element: PP('agenda.ver', <AgendaPage />) },
   { path: "/pago-tarjeta",            element: PR(ADMIN_VENTAS,  <CardPaymentPage />) },
 
   // ── Administración ─────────────────────────────────────────────────────────
-  { path: "/clientes",       element: PR(ADMIN_VENTAS, <CustomersPage />) },
-  { path: "/caja-bancos",    element: PR(ALL_ROLES,    <CajaBancosPage />) },
-  { path: "/deudores",       element: PR(ADMIN,        <DeudoresPage />) },
-  { path: "/proveedores",    element: PR(ADMIN,        <SuppliersPage />) },
-  { path: "/stickers-garantia", element: PR(ADMIN,     <StickersGarantiaPage />) },
-  { path: "/admin-usuarios", element: PR(ADMIN,        <AdminUsuariosPage />) },
-  { path: "/configuracion/empresa", element: PR(ADMIN, <EmpresaPage />) },
-  { path: "/reportes",       element: PR(ADMIN,        <ReportesPage />) },
-  { path: "/auditoria",      element: PR(ADMIN,        <AuditoriaPage />) },
-  { path: "/usuarios",       element: PR(ADMIN,        <UsersPage />) },
+  { path: "/clientes",       element: PP('clientes.ver', <CustomersPage />) },
+  { path: "/caja-bancos",    element: PP(PERMISSIONS.CAJA_VER, <CajaBancosPage />) },
+  { path: "/deudores",       element: PP('deudores.ver', <DeudoresPage />) },
+  { path: "/proveedores",    element: PP('proveedores.ver', <SuppliersPage />) },
+  { path: "/stickers-garantia", element: PP('stickers.ver', <StickersGarantiaPage />) },
+  { path: "/admin-usuarios", element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <AdminUsuariosPage />) },
+  { path: "/configuracion/empresa", element: PP(PERMISSIONS.EMPRESA_EDITAR, <EmpresaPage />) },
+  { path: "/reportes",       element: PP(PERMISSIONS.REPORTES_VER, <ReportesPage />) },
+  { path: "/auditoria",      element: PP(PERMISSIONS.AUDITORIA_VER, <AuditoriaPage />) },
+  { path: "/permisos",       element: APR(PERMISSIONS.PERMISOS_ADMINISTRAR, <PermisosPage />) },
+  { path: "/usuarios",       element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <UsersPage />) },
 
   // ── Sin restricción de rol (solo autenticación) ────────────────────────────
   { path: "/fel",    element: <FelPage /> },

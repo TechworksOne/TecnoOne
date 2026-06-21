@@ -3,18 +3,23 @@ const router = express.Router();
 const ctrl = require('../controllers/adminUsuariosController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePermission = require('../middleware/requirePermission');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
+router.use(tenantScope);
+router.use(checkEmpresaActiva);
+router.use(requirePermission('usuarios.administrar'));
 
 // ── Usuarios ──────────────────────────────────────────────────────────────
-router.get('/usuarios', tenantScope, ctrl.getUsuarios);
-router.get('/usuarios/:id', tenantScope, ctrl.getUsuarioById);
-router.post('/usuarios', tenantScope, ctrl.upload.single('foto_perfil'), ctrl.createUsuario);
-router.put('/usuarios/:id', tenantScope, ctrl.upload.single('foto_perfil'), ctrl.updateUsuario);
-router.patch('/usuarios/:id/estado', tenantScope, ctrl.toggleEstado);
-router.patch('/usuarios/:id/password', tenantScope, ctrl.changePassword);
-router.delete('/usuarios/:id', tenantScope, ctrl.deleteUsuario);
+router.get('/usuarios', ctrl.getUsuarios);
+router.get('/usuarios/:id', ctrl.getUsuarioById);
+router.post('/usuarios', ctrl.upload.single('foto_perfil'), ctrl.createUsuario);
+router.put('/usuarios/:id', ctrl.upload.single('foto_perfil'), ctrl.updateUsuario);
+router.patch('/usuarios/:id/estado', ctrl.toggleEstado);
+router.patch('/usuarios/:id/password', ctrl.changePassword);
+router.delete('/usuarios/:id', ctrl.deleteUsuario);
 
 // ── Roles ─────────────────────────────────────────────────────────────────
 router.get('/roles', ctrl.getRoles);

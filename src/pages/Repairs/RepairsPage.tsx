@@ -832,8 +832,9 @@ function RepairCard({
 export default function RepairsPage() {
   const navigate = useNavigate();
   const { repairs, deleteRepair, changeRepairState, updateRepair, searchRepairs, isLoading, validateStickerUniqueness } = useRepairs();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const userIsAdmin = isAdmin(user?.roles);
+  const canAssignTech = hasPermission('reparaciones.asignar_tecnico');
   const { empresa, loadEmpresa } = useEmpresa();
 
   const [searchQuery,    setSearchQuery]    = useState('');
@@ -1341,7 +1342,7 @@ const handleImprimirTicket = (r: Repair) => {
             onPayBalance={rep => setShowPayModal(rep)}
             onCancel={rep => setShowCancelModal(rep)}
             onAssignTech={rep => setShowAssignModal(rep)}
-            userIsAdmin={userIsAdmin}
+            userIsAdmin={canAssignTech}
           />
         ))}
       </div>

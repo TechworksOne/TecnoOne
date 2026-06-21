@@ -2,7 +2,7 @@ import {
   Box, ChevronLeft, ChevronRight, FileText, Home, User, Users,
   CreditCard, Wrench, Settings, ShoppingBag, Building2, GitBranch,
   Tag, Shield, Wallet, BarChart3, Receipt, CalendarDays, ClipboardList,
-  History,
+  History, KeyRound,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
@@ -18,42 +18,43 @@ const GROUPS = [
   {
     label: "Principal",
     items: [
-      { to: "/dashboard", label: "Dashboard", icon: <Home size={17} />, roles: null },
+      { to: "/dashboard", label: "Dashboard", icon: <Home size={17} />, roles: null, permission: "dashboard.ver" },
       { to: "/perfil",    label: "Perfil",    icon: <User size={17} />, roles: null },
     ],
   },
   {
     label: "Operación",
     items: [
-      { to: "/productos",    label: "Productos",    icon: <Box size={17} />,         roles: ["ADMINISTRADOR", "VENTAS"]                },
-      { to: "/repuestos",    label: "Repuestos",    icon: <Settings size={17} />,    roles: null },
+      { to: "/productos",    label: "Productos",    icon: <Box size={17} />,         roles: ["ADMINISTRADOR", "VENTAS"], permission: "productos.ver" },
+      { to: "/repuestos",    label: "Repuestos",    icon: <Settings size={17} />,    roles: null, permission: "repuestos.ver" },
       // null = todos los roles autenticados
-      { to: "/compras",      label: "Compras",      icon: <ShoppingBag size={17} />, roles: ["ADMINISTRADOR"]                          },
-      { to: "/cotizaciones", label: "Cotizaciones", icon: <FileText size={17} />,    roles: ["ADMINISTRADOR", "VENTAS"]                },
-      { to: "/ventas",       label: "Ventas",       icon: <CreditCard size={17} />,  roles: ["ADMINISTRADOR", "VENTAS"]                },
+      { to: "/compras",      label: "Compras",      icon: <ShoppingBag size={17} />, roles: ["ADMINISTRADOR"], permission: "compras.ver" },
+      { to: "/cotizaciones", label: "Cotizaciones", icon: <FileText size={17} />,    roles: ["ADMINISTRADOR", "VENTAS"], permission: "cotizaciones.ver" },
+      { to: "/ventas",       label: "Ventas",       icon: <CreditCard size={17} />,  roles: ["ADMINISTRADOR", "VENTAS"], permission: "ventas.ver" },
     ],
   },
   {
     label: "Servicio técnico",
     items: [
-      { to: "/reparaciones",       label: "Reparaciones",       icon: <Wrench size={17} />,        roles: ["ADMINISTRADOR", "TECNICO", "VENTAS"] },
-      { to: "/flujo-reparaciones", label: "Flujo Rep.",         icon: <GitBranch size={17} />,     roles: null },
-      { to: "/ordenes-trabajo",    label: "Órdenes de Trabajo", icon: <ClipboardList size={17} />, roles: ["ADMINISTRADOR", "TECNICO"]           },
-      { to: "/agenda",             label: "Agenda entregas",    icon: <CalendarDays size={17} />,  roles: null },
-      { to: "/stickers-garantia",  label: "Stickers garantía",  icon: <Tag size={17} />,           roles: ["ADMINISTRADOR"]                      },
+      { to: "/reparaciones",       label: "Reparaciones",       icon: <Wrench size={17} />,        roles: ["ADMINISTRADOR", "TECNICO", "VENTAS"], permission: "reparaciones.ver" },
+      { to: "/flujo-reparaciones", label: "Flujo Rep.",         icon: <GitBranch size={17} />,     roles: null, permission: "flujo_reparaciones.ver" },
+      { to: "/ordenes-trabajo",    label: "Órdenes de Trabajo", icon: <ClipboardList size={17} />, roles: ["ADMINISTRADOR", "TECNICO"], permission: "ordenes_trabajo.ver" },
+      { to: "/agenda",             label: "Agenda entregas",    icon: <CalendarDays size={17} />,  roles: null, permission: "agenda.ver" },
+      { to: "/stickers-garantia",  label: "Stickers garantía",  icon: <Tag size={17} />,           roles: ["ADMINISTRADOR"], permission: "stickers.ver" },
     ],
   },
   {
     label: "Administración",
     items: [
-      { to: "/caja-bancos",    label: "Caja y Bancos",   icon: <Wallet size={17} />,    roles: null },
-      { to: "/deudores",       label: "Deudores",        icon: <Receipt size={17} />,   roles: ["ADMINISTRADOR"]               },
-      { to: "/reportes",       label: "Reportes",        icon: <BarChart3 size={17} />, roles: ["ADMINISTRADOR"]               },
-      { to: "/clientes",       label: "Clientes",        icon: <Users size={17} />,     roles: ["ADMINISTRADOR", "VENTAS"]     },
-      { to: "/proveedores",    label: "Proveedores",     icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"]               },
-      { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />,    roles: ["ADMINISTRADOR"]               },
-      { to: "/auditoria",      label: "Auditoría",       icon: <History size={17} />,   roles: ["ADMINISTRADOR"]               },
-      { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, roles: ["ADMINISTRADOR"]                 },
+      { to: "/caja-bancos",    label: "Caja y Bancos",   icon: <Wallet size={17} />,    roles: null, permission: "caja.ver" },
+      { to: "/deudores",       label: "Deudores",        icon: <Receipt size={17} />,   roles: ["ADMINISTRADOR"], permission: "deudores.ver" },
+      { to: "/reportes",       label: "Reportes",        icon: <BarChart3 size={17} />, roles: ["ADMINISTRADOR"], permission: "reportes.ver" },
+      { to: "/clientes",       label: "Clientes",        icon: <Users size={17} />,     roles: ["ADMINISTRADOR", "VENTAS"], permission: "clientes.ver" },
+      { to: "/proveedores",    label: "Proveedores",     icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"], permission: "proveedores.ver" },
+      { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />,    roles: ["ADMINISTRADOR"], permission: "usuarios.administrar" },
+      { to: "/permisos",       label: "Permisos",        icon: <KeyRound size={17} />,  roles: ["ADMINISTRADOR"], permission: "permisos.administrar", adminOnly: true },
+      { to: "/auditoria",      label: "Auditoría",       icon: <History size={17} />,   roles: ["ADMINISTRADOR"], permission: "auditoria.ver" },
+      { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, roles: ["ADMINISTRADOR"], permission: "empresa.editar" },
     ],
   },
 ];
@@ -66,7 +67,7 @@ function getInitials(name: string): string {
 
 export default function Sidebar() {
   const { isOpen, toggle } = useSidebar();
-  const { user } = useAuth();
+  const { user, permissions, permissionsLoaded } = useAuth();
   const { empresa, loadEmpresa } = useEmpresa();
   const location = useLocation();
 
@@ -185,7 +186,16 @@ export default function Sidebar() {
         style={{ padding: isOpen ? "8px 10px 20px" : "8px 7px 20px" }}
       >
         {GROUPS.map((group, gi) => {
-          const visible = group.items.filter(item => !item.roles || item.roles.some(r => effectiveRoles.has(r)));
+          const visible = group.items.filter(item => {
+            const permission = 'permission' in item ? item.permission : undefined;
+            const adminOnly = 'adminOnly' in item ? item.adminOnly : false;
+            if (adminOnly && !effectiveRoles.has('ADMINISTRADOR') && legacyRole !== 'superadmin') return false;
+            if (permission) {
+              return permissionsLoaded &&
+                (legacyRole === 'superadmin' || permissions.includes('*') || permissions.includes(permission));
+            }
+            return !item.roles || item.roles.some(r => effectiveRoles.has(r));
+          });
           if (visible.length === 0) return null;
 
           return (

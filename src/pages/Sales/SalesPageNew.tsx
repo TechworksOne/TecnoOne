@@ -65,7 +65,9 @@ function getDateRange(preset: string): { fecha_desde: string; fecha_hasta: strin
 export default function SalesPage() {
   const navigate = useNavigate();
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canEditPayments = hasPermission('ventas.editar');
+  const canCancelSales = hasPermission('ventas.anular');
   const { empresa, loadEmpresa } = useEmpresa();
 
   useEffect(() => {
@@ -500,7 +502,7 @@ export default function SalesPage() {
                             >
                               <Printer size={14} />
                             </button>
-                            {(v.estado === 'PENDIENTE' || v.estado === 'PARCIAL') && (
+                            {canEditPayments && (v.estado === 'PENDIENTE' || v.estado === 'PARCIAL') && (
                               <button
                                 onClick={() => openPago(v)}
                                 className="p-1.5 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-500 dark:text-emerald-400"
@@ -509,7 +511,7 @@ export default function SalesPage() {
                                 <CreditCard size={14} />
                               </button>
                             )}
-                            {v.estado !== 'ANULADA' && (
+                            {canCancelSales && v.estado !== 'ANULADA' && (
                               <button
                                 onClick={() => openAnular(v)}
                                 className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 dark:text-red-400"
@@ -552,10 +554,10 @@ export default function SalesPage() {
                   <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{formatDate(v.fecha_venta ?? v.created_at ?? '')} · {items.length} item{items.length !== 1 ? 's' : ''}</p>
                   <div className="flex gap-2 mt-3">
                     <button onClick={() => openDetail(v)} className="flex-1 py-1.5 text-xs rounded-lg border border-[var(--color-border)] text-[var(--color-primary)] hover:bg-[var(--color-active-bg)] transition-colors">Ver</button>
-                    {(v.estado === 'PENDIENTE' || v.estado === 'PARCIAL') && (
+                    {canEditPayments && (v.estado === 'PENDIENTE' || v.estado === 'PARCIAL') && (
                       <button onClick={() => openPago(v)} className="flex-1 py-1.5 text-xs rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors">Pagar</button>
                     )}
-                    {v.estado !== 'ANULADA' && (
+                    {canCancelSales && v.estado !== 'ANULADA' && (
                       <button onClick={() => openAnular(v)} className="flex-1 py-1.5 text-xs rounded-lg border border-red-200 dark:border-red-800 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">Anular</button>
                     )}
                   </div>
@@ -706,7 +708,7 @@ export default function SalesPage() {
               <Button variant="ghost" onClick={() => handlePrint(selectedVenta)} className="flex-1">
                 <Printer size={14} /> Imprimir
               </Button>
-              {(selectedVenta.estado === 'PENDIENTE' || selectedVenta.estado === 'PARCIAL') && (
+              {canEditPayments && (selectedVenta.estado === 'PENDIENTE' || selectedVenta.estado === 'PARCIAL') && (
                 <Button
                   onClick={() => { setShowDetail(false); setTimeout(() => openPago(selectedVenta), 100); }}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -714,7 +716,7 @@ export default function SalesPage() {
                   <CreditCard size={14} /> Registrar Pago
                 </Button>
               )}
-              {selectedVenta.estado !== 'ANULADA' && (
+              {canCancelSales && selectedVenta.estado !== 'ANULADA' && (
                 <Button
                   variant="ghost"
                   onClick={() => { setShowDetail(false); setTimeout(() => openAnular(selectedVenta), 100); }}
