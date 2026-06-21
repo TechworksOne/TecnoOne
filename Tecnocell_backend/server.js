@@ -50,6 +50,7 @@ const tarjetaCreditoRoutes = require('./routes/tarjetaCreditoRoutes');
 const empresaRoutes = require('./routes/empresaRoutes');
 const auditoriaRoutes = require('./routes/auditoriaRoutes');
 const permisoRoutes = require('./routes/permisoRoutes');
+const superAdminRoutes = require('./routes/superAdminRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -78,6 +79,7 @@ app.use('/api/tarjetas-credito', tarjetaCreditoRoutes);
 app.use('/api/empresa', empresaRoutes);
 app.use('/api/auditoria', auditoriaRoutes);
 app.use('/api/permisos', permisoRoutes);
+app.use('/api/superadmin', superAdminRoutes);
 // app.use('/api/dashboard', dashboardRoutes);
 app.use('/api', marcaLineaRoutes);
 
