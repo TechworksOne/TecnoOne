@@ -27,6 +27,36 @@ WHERE tipo_usuario IS NULL
 CREATE INDEX IF NOT EXISTS idx_users_tipo_super_admin
   ON users (tipo_usuario, es_super_admin, active);
 
+SET @scope_constraint_exists = (
+  SELECT COUNT(*)
+  FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'users'
+    AND CONSTRAINT_NAME = 'chk_users_scope'
+);
+SET @scope_constraint_sql = IF(
+  @scope_constraint_exists = 0,
+  'ALTER TABLE users ADD CONSTRAINT chk_users_scope CHECK (
+    (
+      tipo_usuario = ''EMPRESA''
+      AND es_super_admin = 0
+      AND empresa_id IS NOT NULL
+      AND role <> ''superadmin''
+    )
+    OR
+    (
+      tipo_usuario = ''PLATAFORMA''
+      AND es_super_admin = 1
+      AND empresa_id IS NULL
+      AND role = ''superadmin''
+    )
+  )',
+  'SELECT 1'
+);
+PREPARE scope_constraint_stmt FROM @scope_constraint_sql;
+EXECUTE scope_constraint_stmt;
+DEALLOCATE PREPARE scope_constraint_stmt;
+
 CREATE TABLE IF NOT EXISTS auditoria_super_admin (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   super_admin_id INT NOT NULL,
