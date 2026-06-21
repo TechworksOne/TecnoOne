@@ -7,7 +7,7 @@ const loginRateLimiter = require('../middleware/loginRateLimiter');
 // Rutas públicas
 router.post('/login', loginRateLimiter, authController.login);
 router.post('/logout', authController.logout);
-router.get('/verify', authController.verifyToken);
+router.get('/verify', verifyToken, authController.verifyToken);
 
 // Rutas protegidas
 router.get('/me', verifyToken, authController.getMe);
