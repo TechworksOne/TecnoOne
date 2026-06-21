@@ -641,6 +641,8 @@ function RepairCard({
   userIsAdmin: boolean;
 }) {
   const isCancelled = repair.estado === 'CANCELADA';
+  const isDelivered = repair.estado === 'ENTREGADA';
+  const canEditOperationalData = !isCancelled && !isDelivered;
   const saldo = calcSaldo(repair);
   const totalPagado = calcTotalPagado(repair);
   const isPaid = repair.total > 0 && saldo <= 0;
@@ -791,7 +793,7 @@ function RepairCard({
           <button onClick={() => onHistory(repair.id)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
             <History size={12} /> Ver Historial
           </button>
-          {!isCancelled && (
+          {canEditOperationalData && (
             <button onClick={onFlowManage} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800">
               <Clock size={12} /> Flujo
             </button>
@@ -802,7 +804,7 @@ function RepairCard({
           <button onClick={() => onPrintTicket(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800" title="Imprimir ticket térmico">
             <Printer size={12} /> Ticket
           </button>
-          {!isCancelled && (
+          {canEditOperationalData && (
             <button onClick={() => onEditPriority(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-800">
               <ChevronDown size={12} /> Prioridad
             </button>
@@ -817,7 +819,7 @@ function RepairCard({
               <Ban size={12} /> Cancelar
             </button>
           )}
-          {userIsAdmin && !isCancelled && (
+          {userIsAdmin && canEditOperationalData && (
             <button onClick={() => onAssignTech(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800">
               <UserCheck size={12} /> {repair.tecnicoAsignadoId ? 'Técnico' : 'Asignar'}
             </button>
@@ -1359,7 +1361,8 @@ const handleImprimirTicket = (r: Repair) => {
       )}
 
       {/* Editar prioridad */}
-      {showPriorityModal && (
+      {showPriorityModal &&
+        !['ENTREGADA', 'CANCELADA'].includes(showPriorityModal.estado) && (
         <ModalEditarPrioridad
           repair={showPriorityModal}
           onClose={() => setShowPriorityModal(null)}
@@ -1386,7 +1389,8 @@ const handleImprimirTicket = (r: Repair) => {
       )}
 
       {/* Asignar técnico */}
-      {showAssignModal && (
+      {showAssignModal &&
+        !['ENTREGADA', 'CANCELADA'].includes(showAssignModal.estado) && (
         <ModalAsignarTecnicoRepairs
           repair={showAssignModal}
           tecnicos={tecnicos}
@@ -1403,6 +1407,8 @@ const handleImprimirTicket = (r: Repair) => {
         const totalPagado = calcTotalPagado(r);
         const isPaid = r.total > 0 && saldo <= 0;
         const isCancelled = r.estado === 'CANCELADA';
+        const isDelivered = r.estado === 'ENTREGADA';
+        const canEditOperationalData = !isCancelled && !isDelivered;
         return (
           <Modal
             open={showDetailModal}
@@ -1571,12 +1577,12 @@ const handleImprimirTicket = (r: Repair) => {
                 <button onClick={() => handleImprimirTicket(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-amber-700 dark:text-amber-300 transition-colors">
                   <Printer size={13} /> Imprimir Ticket
                 </button>
-                {!isCancelled && (
+                {canEditOperationalData && (
                   <button onClick={() => navigate('/flujo-reparaciones')} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white transition-colors">
                     <Clock size={13} /> Gestionar Flujo
                   </button>
                 )}
-                {!isCancelled && (
+                {canEditOperationalData && (
                   <button
                     onClick={() => { setShowDetailModal(false); setShowPriorityModal(r); }}
                     className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/40 hover:bg-violet-100 dark:hover:bg-violet-950/60 text-violet-700 dark:text-violet-300 transition-colors"

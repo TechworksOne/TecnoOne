@@ -438,10 +438,24 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
           banco_id: p.metodo === 'TRANSFERENCIA' ? bancoSeleccionado : null,
         }));
       } else {
-        const montoPago = metodo === 'EFECTIVO' ? montoRecibido : total;
+        // El pago aplicado es el total de la venta.
+        // El efectivo recibido y el cambio son informativos.
+        const montoPago = totalConInteres;
+        const montoRecibidoCentavos =
+          metodo === 'EFECTIVO'
+            ? ventaService.quetzalesACentavos(montoRecibido)
+            : null;
+        const cambioCentavos =
+          metodo === 'EFECTIVO'
+            ? ventaService.quetzalesACentavos(
+                Math.max(0, montoRecibido - totalConInteres)
+              )
+            : null;
         pagosArray = [{
           metodo,
           monto: ventaService.quetzalesACentavos(montoPago),
+          monto_recibido: montoRecibidoCentavos,
+          cambio: cambioCentavos,
           referencia: referencia || null,
           comprobante_url: comprobanteUrl || null,
           fecha: now,

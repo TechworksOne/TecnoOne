@@ -215,7 +215,15 @@ const updateMePerfil = async (req, res) => {
       updateValues.push(telefonoNormalizado || null);
     }
     if (direccion !== undefined) { updateFields.push('direccion = ?'); updateValues.push(direccion || null); }
-    if (firma !== undefined) { updateFields.push('firma = ?'); updateValues.push(firma || null); }
+    const firmaFueEnviada =
+      firma !== undefined &&
+      firma !== null &&
+      String(firma).trim() !== '';
+
+    if (firmaFueEnviada) {
+      updateFields.push('firma = ?');
+      updateValues.push(String(firma).trim());
+    }
     if (req.file) {
       const foto_perfil = `/uploads/usuarios/${userId}/perfil/${req.file.filename}`;
       updateFields.push('foto_perfil = ?');

@@ -105,46 +105,46 @@ export default function ModalHistorialReparacion({
     badgeColor: string;
   } => {
     const configs: Record<string, { icon: React.ReactNode; color: string; dotColor: string; badgeColor: string }> = {
-      REPARACION_CREADA:    { icon: <Plus size={14} />,            color: 'bg-blue-50 border-blue-200',    dotColor: 'bg-blue-500',    badgeColor: 'text-blue-700 bg-blue-100' },
-      CHECKLIST_COMPLETADO: { icon: <ClipboardCheck size={14} />,  color: 'bg-violet-50 border-violet-200', dotColor: 'bg-violet-500',  badgeColor: 'text-violet-700 bg-violet-100' },
-      ANTICIPO_REGISTRADO:  { icon: <DollarSign size={14} />,      color: 'bg-amber-50 border-amber-200',  dotColor: 'bg-amber-400',   badgeColor: 'text-amber-700 bg-amber-100' },
-      ANTICIPO_PENDIENTE:   { icon: <DollarSign size={14} />,      color: 'bg-amber-50 border-amber-200',  dotColor: 'bg-amber-400',   badgeColor: 'text-amber-700 bg-amber-100' },
-      ANTICIPO_CONFIRMADO:  { icon: <Banknote size={14} />,        color: 'bg-emerald-50 border-emerald-200', dotColor: 'bg-emerald-500', badgeColor: 'text-emerald-700 bg-emerald-100' },
-      CAMBIO_ESTADO:        { icon: <ArrowRightLeft size={14} />,  color: 'bg-slate-50 border-slate-200',  dotColor: 'bg-slate-500',   badgeColor: 'text-slate-700 bg-slate-100' },
+      REPARACION_CREADA:    { icon: <Plus size={14} />,            color: 'bg-blue-50 border-blue-200 dark:bg-blue-500/[0.08] dark:border-blue-400/20',    dotColor: 'bg-blue-500',    badgeColor: 'text-blue-700 bg-blue-100 dark:text-blue-300 dark:bg-blue-500/15' },
+      CHECKLIST_COMPLETADO: { icon: <ClipboardCheck size={14} />,  color: 'bg-violet-50 border-violet-200 dark:bg-violet-500/[0.08] dark:border-violet-400/20', dotColor: 'bg-violet-500',  badgeColor: 'text-violet-700 bg-violet-100 dark:text-violet-300 dark:bg-violet-500/15' },
+      ANTICIPO_REGISTRADO:  { icon: <DollarSign size={14} />,      color: 'bg-amber-50 border-amber-200 dark:bg-amber-500/[0.08] dark:border-amber-400/20',  dotColor: 'bg-amber-400',   badgeColor: 'text-amber-700 bg-amber-100 dark:text-amber-300 dark:bg-amber-500/15' },
+      ANTICIPO_PENDIENTE:   { icon: <DollarSign size={14} />,      color: 'bg-amber-50 border-amber-200 dark:bg-amber-500/[0.08] dark:border-amber-400/20',  dotColor: 'bg-amber-400',   badgeColor: 'text-amber-700 bg-amber-100 dark:text-amber-300 dark:bg-amber-500/15' },
+      ANTICIPO_CONFIRMADO:  { icon: <Banknote size={14} />,        color: 'bg-emerald-50 border-emerald-200 dark:bg-emerald-500/[0.08] dark:border-emerald-400/20', dotColor: 'bg-emerald-500', badgeColor: 'text-emerald-700 bg-emerald-100 dark:text-emerald-300 dark:bg-emerald-500/15' },
+      CAMBIO_ESTADO:        { icon: <ArrowRightLeft size={14} />,  color: 'bg-slate-50 border-slate-200 dark:bg-slate-800/50 dark:border-slate-700',  dotColor: 'bg-slate-500',   badgeColor: 'text-slate-700 bg-slate-100 dark:text-slate-300 dark:bg-slate-700/60' },
     };
-    return configs[tipo] || { icon: <AlertCircle size={14} />, color: 'bg-gray-50 border-gray-200', dotColor: 'bg-gray-400', badgeColor: 'text-gray-700 bg-gray-100' };
+    return configs[tipo] || { icon: <AlertCircle size={14} />, color: 'bg-gray-50 border-gray-200 dark:bg-slate-800/50 dark:border-slate-700', dotColor: 'bg-gray-400', badgeColor: 'text-gray-700 bg-gray-100 dark:text-slate-300 dark:bg-slate-700/60' };
   };
 
   const getEstadoBadgeColor = (estado: string): string => {
     const map: Record<string, string> = {
-      RECIBIDA: 'text-blue-700 bg-blue-100',
-      EN_DIAGNOSTICO: 'text-yellow-700 bg-yellow-100',
-      ESPERANDO_AUTORIZACION: 'text-orange-700 bg-orange-100',
-      AUTORIZADA: 'text-blue-700 bg-blue-100',
-      EN_REPARACION: 'text-yellow-700 bg-yellow-100',
-      ESPERANDO_PIEZA: 'text-orange-700 bg-orange-100',
-      COMPLETADA: 'text-green-700 bg-green-100',
-      ENTREGADA: 'text-emerald-700 bg-emerald-100',
-      CANCELADA: 'text-red-700 bg-red-100',
-      STAND_BY: 'text-slate-700 bg-slate-100',
-      ANTICIPO_REGISTRADO: 'text-amber-700 bg-amber-100',
+      RECIBIDA: 'text-blue-700 bg-blue-100 dark:text-blue-300 dark:bg-blue-500/15',
+      EN_DIAGNOSTICO: 'text-yellow-700 bg-yellow-100 dark:text-yellow-300 dark:bg-yellow-500/15',
+      ESPERANDO_AUTORIZACION: 'text-orange-700 bg-orange-100 dark:text-orange-300 dark:bg-orange-500/15',
+      AUTORIZADA: 'text-blue-700 bg-blue-100 dark:text-blue-300 dark:bg-blue-500/15',
+      EN_REPARACION: 'text-yellow-700 bg-yellow-100 dark:text-yellow-300 dark:bg-yellow-500/15',
+      ESPERANDO_PIEZA: 'text-orange-700 bg-orange-100 dark:text-orange-300 dark:bg-orange-500/15',
+      COMPLETADA: 'text-green-700 bg-green-100 dark:text-green-300 dark:bg-green-500/15',
+      ENTREGADA: 'text-emerald-700 bg-emerald-100 dark:text-emerald-300 dark:bg-emerald-500/15',
+      CANCELADA: 'text-red-700 bg-red-100 dark:text-red-300 dark:bg-red-500/15',
+      STAND_BY: 'text-slate-700 bg-slate-100 dark:text-slate-300 dark:bg-slate-700/60',
+      ANTICIPO_REGISTRADO: 'text-amber-700 bg-amber-100 dark:text-amber-300 dark:bg-amber-500/15',
     };
-    return map[estado] || 'text-gray-700 bg-gray-100';
+    return map[estado] || 'text-gray-700 bg-gray-100 dark:text-slate-300 dark:bg-slate-700/60';
   };
 
   if (!isOpen) return null;
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-2 backdrop-blur-sm sm:p-4">
+        <div className="flex max-h-[94dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700/80 dark:bg-slate-950 sm:rounded-3xl">
           {/* Header */}
-          <div className="flex items-start justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 py-4 dark:border-slate-800 dark:bg-slate-950/95 sm:px-6 sm:py-5">
             <div>
-              <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Historial Completo</h2>
+              <h2 className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100 sm:text-xl">Historial Completo</h2>
               {reparacion && (
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-                  <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">{reparacion.id}</span>
+                <p className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-slate-500 dark:text-slate-400 sm:text-sm">
+                  <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300 sm:text-xs">{reparacion.id}</span>
                   {' · '}{reparacion.cliente_nombre}
                   {' · '}{reparacion.equipo}
                 </p>
@@ -152,23 +152,23 @@ export default function ModalHistorialReparacion({
             </div>
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="shrink-0 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
             >
               <X size={22} />
             </button>
           </div>
 
           {/* Body */}
-          <div className="overflow-y-auto flex-1 px-6 py-5">
+          <div className="flex-1 overflow-y-auto bg-slate-50/70 px-4 py-5 dark:bg-slate-950 sm:px-6 sm:py-6">
             {loading ? (
-              <div className="flex flex-col items-center justify-center py-16 text-slate-500">
+              <div className="flex flex-col items-center justify-center py-16 text-slate-500 dark:text-slate-400">
                 <div className="animate-spin rounded-full h-10 w-10 border-2 border-blue-500 border-t-transparent mb-3" />
                 <p>Cargando historial...</p>
               </div>
             ) : error ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <AlertCircle size={40} className="text-red-400 mb-3" />
-                <p className="text-slate-700 font-medium mb-1">No se pudo cargar el historial</p>
+                <p className="mb-1 font-medium text-slate-700 dark:text-slate-200">No se pudo cargar el historial</p>
                 <p className="text-slate-500 text-sm max-w-md">{error}</p>
                 <p className="text-slate-400 text-xs mt-2">
                   Verifica que el backend esté devolviendo <code>/reparaciones/:id/historial-completo</code>
@@ -183,7 +183,7 @@ export default function ModalHistorialReparacion({
             ) : eventos.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <FileText size={40} className="text-slate-300 mb-3" />
-                <p className="text-slate-600 font-medium mb-1">
+                <p className="mb-1 font-medium text-slate-600 dark:text-slate-300">
                   No se encontraron movimientos registrados para esta reparación.
                 </p>
                 <p className="text-slate-400 text-sm max-w-sm">
@@ -194,22 +194,22 @@ export default function ModalHistorialReparacion({
             ) : (
               <div className="relative">
                 {/* Línea vertical del timeline */}
-                <div className="absolute left-5 top-2 bottom-2 w-0.5 bg-slate-200" />
+                <div className="absolute bottom-2 left-4 top-2 w-px bg-slate-200 dark:bg-slate-700 sm:left-5" />
 
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   {eventos.map((ev, idx) => {
                     const cfg = getEventoConfig(ev.tipo_evento);
                     return (
-                      <div key={`${ev.id}-${idx}`} className="relative flex gap-4">
+                      <div key={`${ev.id}-${idx}`} className="relative flex min-w-0 gap-3 sm:gap-4">
                         {/* Dot del timeline */}
-                        <div className={`relative z-10 mt-3 w-10 h-10 rounded-full ${cfg.dotColor} flex items-center justify-center text-white shrink-0 shadow-sm`}>
+                        <div className={`relative z-10 mt-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white shadow-sm ring-4 ring-slate-50 dark:ring-slate-950 sm:h-10 sm:w-10 ${cfg.dotColor}`}>
                           {cfg.icon}
                         </div>
 
                         {/* Card del evento */}
-                        <div className={`flex-1 border rounded-xl p-4 ${cfg.color}`}>
+                        <div className={`min-w-0 flex-1 rounded-2xl border p-3.5 shadow-sm sm:p-4 ${cfg.color}`}>
                           {/* Header del evento */}
-                          <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cfg.badgeColor}`}>
                                 {ev.titulo}
@@ -231,12 +231,12 @@ export default function ModalHistorialReparacion({
                                 </span>
                               )}
                             </div>
-                            <div className="text-right shrink-0">
-                              <p className="text-xs text-slate-500 flex items-center gap-1 justify-end">
+                            <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-left sm:block sm:w-auto sm:shrink-0 sm:text-right">
+                              <p className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 sm:justify-end">
                                 <Calendar size={11} />
                                 {formatDate(ev.fecha)}
                               </p>
-                              <p className="text-xs text-slate-500 flex items-center gap-1 justify-end mt-0.5">
+                              <p className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 sm:mt-1 sm:justify-end">
                                 <User size={11} />
                                 {ev.usuario}
                               </p>
@@ -246,10 +246,10 @@ export default function ModalHistorialReparacion({
                           {/* Cuerpo del evento */}
                           <div className="space-y-1.5 text-sm">
                             {ev.descripcion && ev.descripcion !== ev.nota && (
-                              <p className="text-slate-700">{ev.descripcion}</p>
+                              <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-200">{ev.descripcion}</p>
                             )}
                             {ev.nota && (
-                              <p className="text-slate-600 italic text-xs border-l-2 border-slate-300 pl-2">
+                              <p className="border-l-2 border-slate-300 pl-3 text-xs italic leading-relaxed text-slate-600 dark:border-slate-600 dark:text-slate-400">
                                 {ev.nota}
                               </p>
                             )}
@@ -257,7 +257,7 @@ export default function ModalHistorialReparacion({
                             {/* Monto anticipo */}
                             {ev.monto != null && (
                               <div className="flex items-center gap-3 mt-2 flex-wrap">
-                                <span className="text-emerald-700 font-semibold">
+                                <span className="font-bold text-emerald-700 dark:text-emerald-400">
                                   Q{ev.monto.toFixed(2)}
                                 </span>
                                 {ev.metodo_pago && (
@@ -275,7 +275,7 @@ export default function ModalHistorialReparacion({
 
                             {/* Pieza necesaria */}
                             {ev.pieza_necesaria && (
-                              <div className="flex items-start gap-2 mt-1 text-xs text-slate-600">
+                              <div className="mt-2 flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
                                 <Package size={12} className="mt-0.5 shrink-0" />
                                 <span>
                                   <strong>Pieza:</strong> {ev.pieza_necesaria}
@@ -287,7 +287,7 @@ export default function ModalHistorialReparacion({
 
                             {/* Sticker */}
                             {ev.sticker_numero && (
-                              <div className="flex items-center gap-2 mt-1 text-xs text-slate-600">
+                              <div className="mt-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
                                 <CheckSquare size={12} />
                                 <span>
                                   <strong>Sticker:</strong> {ev.sticker_numero}
@@ -306,7 +306,7 @@ export default function ModalHistorialReparacion({
                                     alt={`Evidencia ${i + 1}`}
                                     loading="lazy"
                                     decoding="async"
-                                    className="w-full h-20 object-cover rounded-lg cursor-pointer hover:opacity-80 transition-opacity shadow-sm"
+                                    className="h-20 w-full cursor-pointer rounded-xl border border-slate-200 object-cover shadow-sm transition hover:opacity-80 dark:border-slate-700"
                                     onClick={() => setImagenAmpliada(getImageUrl(img))}
                                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                   />
@@ -324,11 +324,11 @@ export default function ModalHistorialReparacion({
           </div>
 
           {/* Footer */}
-          <div className="shrink-0 px-6 py-3 border-t border-slate-200 flex justify-between items-center bg-slate-50 rounded-b-2xl">
-            <span className="text-xs text-slate-400">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950 sm:px-6 sm:py-4">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
               {eventos.length > 0 ? `${eventos.length} evento${eventos.length !== 1 ? 's' : ''} registrados` : ''}
             </span>
-            <Button variant="ghost" onClick={onClose} className="text-sm">
+            <Button variant="ghost" onClick={onClose} className="rounded-xl border border-slate-200 px-4 text-sm font-semibold dark:border-slate-700">
               Cerrar
             </Button>
           </div>

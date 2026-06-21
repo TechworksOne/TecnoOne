@@ -400,7 +400,6 @@ exports.createReparacion = async (req, res) => {
 
     // Resolver nombre del usuario autenticado antes de los INSERTs
     const authUserName = await getAuthUserName(req, connection);
-
     const {
       clienteNombre,
       clienteTelefono,
@@ -1083,7 +1082,29 @@ exports.changeRepairState = async (req, res) => {
       stickerId,
       diferenciaReparacion
     } = req.body;
-    
+
+    let repuestosUsadosEstado = [];
+
+    try {
+      const rawRepuestos = req.body.repuestosUsados;
+
+      if (Array.isArray(rawRepuestos)) {
+        repuestosUsadosEstado = rawRepuestos;
+      } else if (rawRepuestos) {
+        repuestosUsadosEstado = JSON.parse(rawRepuestos);
+      }
+
+      if (!Array.isArray(repuestosUsadosEstado)) {
+        throw new Error('Formato inválido');
+      }
+    } catch (_) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'El formato de los repuestos utilizados es inválido',
+      });
+    }
+
     const uploadedFiles = req.files || [];
     const tenant = repairTenantClause(req);
     
@@ -1102,6 +1123,145 @@ exports.changeRepairState = async (req, res) => {
     }
     
     const reparacion = reparaciones[0];
+
+    const authUserId =
+      req.user?.id ||
+      req.user?.userId ||
+      req.user?.usuario_id ||
+      null;
+
+    let costoRepuestosUsados = 0;
+
+    for (const item of repuestosUsadosEstado) {
+      const repuestoId = Number(
+        item.repuesto_id ?? item.repuestoId
+      );
+      const cantidad = Number(item.cantidad);
+
+      if (
+        !Number.isInteger(repuestoId) ||
+        repuestoId <= 0 ||
+        !Number.isInteger(cantidad) ||
+        cantidad <= 0
+      ) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Repuesto o cantidad inválida',
+        });
+      }
+
+      const [[repuesto]] = await connection.query(
+        `SELECT
+           id,
+           empresa_id,
+           nombre,
+           precio_costo,
+           stock
+         FROM repuestos
+         WHERE id = ?
+           AND empresa_id = ?
+         FOR UPDATE`,
+        [
+          repuestoId,
+          reparacion.empresa_id,
+        ]
+      );
+
+      if (!repuesto) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Repuesto ID ${repuestoId} no encontrado para esta empresa`,
+        });
+      }
+
+      const stockAnterior = Number(repuesto.stock || 0);
+
+      if (stockAnterior < cantidad) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Stock insuficiente para "${repuesto.nombre}". Disponible: ${stockAnterior}, solicitado: ${cantidad}`,
+        });
+      }
+
+      const stockNuevo = stockAnterior - cantidad;
+      const costoUnitario = Number(
+        repuesto.precio_costo || 0
+      );
+      const subtotal = costoUnitario * cantidad;
+
+      costoRepuestosUsados += subtotal;
+
+      await connection.query(
+        `UPDATE repuestos
+         SET stock = ?
+         WHERE id = ?
+           AND empresa_id = ?`,
+        [
+          stockNuevo,
+          repuesto.id,
+          reparacion.empresa_id,
+        ]
+      );
+
+      await connection.query(
+        `INSERT INTO repuestos_movimientos (
+          repuesto_id,
+          tipo_movimiento,
+          cantidad,
+          stock_anterior,
+          stock_nuevo,
+          precio_unitario,
+          referencia_tipo,
+          referencia_id,
+          usuario_id,
+          notas
+        ) VALUES (
+          ?,
+          'REPARACION',
+          ?,
+          ?,
+          ?,
+          ?,
+          'REPARACION',
+          ?,
+          ?,
+          ?
+        )`,
+        [
+          repuesto.id,
+          cantidad,
+          stockAnterior,
+          stockNuevo,
+          costoUnitario,
+          id,
+          authUserId,
+          `Repuesto utilizado en reparación ${id}: ${repuesto.nombre}`,
+        ]
+      );
+
+      await connection.query(
+        `INSERT INTO reparacion_repuestos (
+          reparacion_id,
+          repuesto_id,
+          nombre,
+          cantidad,
+          costo_unitario,
+          subtotal
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          repuesto.id,
+          repuesto.nombre,
+          cantidad,
+          costoUnitario,
+          subtotal,
+        ]
+      );
+    }
+
     
     // 1. Crear entrada en historial
     const estadoAnterior = reparacion.estado;
@@ -1142,12 +1302,27 @@ exports.changeRepairState = async (req, res) => {
     // 3. Actualizar estado de la reparación
     const updates = { estado };
     if (subEtapa) updates.sub_etapa = subEtapa;
+
+    if (costoRepuestosUsados > 0) {
+      updates.costo_repuestos_total =
+        Number(reparacion.costo_repuestos_total || 0) +
+        costoRepuestosUsados;
+
+      updates.total_invertido =
+        Number(reparacion.total_invertido || 0) +
+        costoRepuestosUsados;
+    }
     
     // Manejar costo de repuesto
     if (costoRepuesto && parseFloat(costoRepuesto) > 0) {
       const costoCentavos = quetzalesACentavos(parseFloat(costoRepuesto));
       const nuevoSaldo = reparacion.saldo_anticipo - costoCentavos;
-      const nuevoInvertido = (reparacion.total_invertido || 0) + costoCentavos;
+      const nuevoInvertido =
+        Number(
+          updates.total_invertido ??
+          reparacion.total_invertido ??
+          0
+        ) + costoCentavos;
       
       updates.saldo_anticipo = nuevoSaldo;
       updates.total_invertido = nuevoInvertido;
@@ -1179,7 +1354,13 @@ exports.changeRepairState = async (req, res) => {
       if (diferenciaReparacion !== undefined) {
         const diferenciaCentavos = quetzalesACentavos(parseFloat(diferenciaReparacion));
         const saldoFinal = reparacion.saldo_anticipo + diferenciaCentavos;
-        const gananciaTotal = (reparacion.monto_anticipo + diferenciaCentavos) - (reparacion.total_invertido || 0);
+        const gananciaTotal =
+          (reparacion.monto_anticipo + diferenciaCentavos) -
+          Number(
+            updates.total_invertido ??
+            reparacion.total_invertido ??
+            0
+          );
         
         updates.diferencia_reparacion = diferenciaCentavos;
         updates.saldo_anticipo = saldoFinal;
@@ -1193,6 +1374,7 @@ exports.changeRepairState = async (req, res) => {
       'sub_etapa',
       'saldo_anticipo',
       'total_invertido',
+      'costo_repuestos_total',
       'sticker_serie_interna',
       'sticker_ubicacion',
       'fecha_cierre',
@@ -1958,87 +2140,267 @@ exports.completarReparacion = async (req, res) => {
 
     const authUserName = await getAuthUserName(req, connection);
 
+    const authUserId =
+      req.user?.id ||
+      req.user?.userId ||
+      req.user?.usuario_id ||
+      null;
+
+    if (['COMPLETADA', 'ENTREGADA'].includes(reparacion.estado)) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: `La reparación ya se encuentra en estado ${reparacion.estado}`,
+      });
+    }
+
     // ── 2. Procesar repuestos utilizados ─────────────────────────────────
-    const inventarioEmpresaId = reparacion.empresa_id ?? requireTenantEmpresaId(req);
+    const inventarioEmpresaId =
+      reparacion.empresa_id ?? requireTenantEmpresaId(req);
+
     let costoRepuestosTotal = 0;
+
     for (const item of repuestosUsados) {
-      const [[rep]] = await connection.query(
-        'SELECT id, nombre, precio_costo, stock FROM repuestos WHERE id = ? AND empresa_id = ?', [item.repuesto_id, inventarioEmpresaId]
-      );
-      if (!rep) {
-        await connection.rollback();
-        return res.status(400).json({ success: false, message: `Repuesto ID ${item.repuesto_id} no encontrado` });
-      }
-      if (rep.stock < item.cantidad) {
+      const cantidad = Number(item.cantidad);
+
+      if (!Number.isInteger(cantidad) || cantidad <= 0) {
         await connection.rollback();
         return res.status(400).json({
           success: false,
-          message: `Stock insuficiente para "${rep.nombre}". Disponible: ${rep.stock}, solicitado: ${item.cantidad}`
+          message: 'La cantidad del repuesto debe ser un entero mayor que cero',
         });
       }
-      const costoUnit  = rep.precio_costo || 0;   // centavos
-      const subtotal   = costoUnit * item.cantidad;
+
+      const [[rep]] = await connection.query(
+        `SELECT id, nombre, precio_costo, stock
+         FROM repuestos
+         WHERE id = ? AND empresa_id = ?
+         FOR UPDATE`,
+        [item.repuesto_id, inventarioEmpresaId]
+      );
+
+      if (!rep) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Repuesto ID ${item.repuesto_id} no encontrado`,
+        });
+      }
+
+      const stockAnterior = Number(rep.stock || 0);
+
+      if (stockAnterior < cantidad) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Stock insuficiente para "${rep.nombre}". Disponible: ${stockAnterior}, solicitado: ${cantidad}`,
+        });
+      }
+
+      const stockNuevo = stockAnterior - cantidad;
+      const costoUnit = Number(rep.precio_costo || 0);
+      const subtotal = costoUnit * cantidad;
+
       costoRepuestosTotal += subtotal;
 
-      await connection.query('UPDATE repuestos SET stock = stock - ? WHERE id = ? AND empresa_id = ?', [item.cantidad, rep.id, inventarioEmpresaId]);
       await connection.query(
-        `INSERT INTO reparacion_repuestos (reparacion_id, repuesto_id, nombre, cantidad, costo_unitario, subtotal)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [id, rep.id, rep.nombre, item.cantidad, costoUnit, subtotal]
+        `UPDATE repuestos
+         SET stock = ?
+         WHERE id = ? AND empresa_id = ?`,
+        [stockNuevo, rep.id, inventarioEmpresaId]
+      );
+
+      await connection.query(
+        `INSERT INTO repuestos_movimientos (
+          repuesto_id,
+          tipo_movimiento,
+          cantidad,
+          stock_anterior,
+          stock_nuevo,
+          precio_unitario,
+          referencia_tipo,
+          referencia_id,
+          usuario_id,
+          notas
+        ) VALUES (?, 'REPARACION', ?, ?, ?, ?, 'REPARACION', ?, ?, ?)`,
+        [
+          rep.id,
+          cantidad,
+          stockAnterior,
+          stockNuevo,
+          costoUnit,
+          id,
+          authUserId,
+          `Repuesto utilizado en reparación ${id}: ${rep.nombre}`,
+        ]
+      );
+
+      await connection.query(
+        `INSERT INTO reparacion_repuestos (
+          reparacion_id,
+          repuesto_id,
+          nombre,
+          cantidad,
+          costo_unitario,
+          subtotal
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          rep.id,
+          rep.nombre,
+          cantidad,
+          costoUnit,
+          subtotal,
+        ]
       );
     }
 
     // ── 3. Procesar regalías ──────────────────────────────────────────────
     let costoRegaliasTotal = 0;
+
     for (const item of regaliasUsadas) {
+      const cantidad = Number(item.cantidad);
+
+      if (!Number.isInteger(cantidad) || cantidad <= 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'La cantidad de la regalía debe ser un entero mayor que cero',
+        });
+      }
+
       let costoUnit = 0;
       let nombreItem = item.nombre || '';
 
       if (item.tipo === 'producto') {
         const [[prod]] = await connection.query(
-          'SELECT id, nombre, precio_costo, stock FROM productos WHERE id = ? AND empresa_id = ?', [item.id, inventarioEmpresaId]
+          `SELECT id, nombre, precio_costo, stock
+           FROM productos
+           WHERE id = ? AND empresa_id = ?
+           FOR UPDATE`,
+          [item.id, inventarioEmpresaId]
         );
+
         if (!prod) {
           await connection.rollback();
-          return res.status(400).json({ success: false, message: `Producto ID ${item.id} no encontrado` });
+          return res.status(400).json({
+            success: false,
+            message: `Producto ID ${item.id} no encontrado`,
+          });
         }
-        if (prod.stock < item.cantidad) {
+
+        const stockAnterior = Number(prod.stock || 0);
+
+        if (stockAnterior < cantidad) {
           await connection.rollback();
           return res.status(400).json({
             success: false,
-            message: `Stock insuficiente para "${prod.nombre}". Disponible: ${prod.stock}, solicitado: ${item.cantidad}`
+            message: `Stock insuficiente para "${prod.nombre}". Disponible: ${stockAnterior}, solicitado: ${cantidad}`,
           });
         }
-        costoUnit  = Math.round((prod.precio_costo || 0) * 100); // quetzales → centavos
+
+        const stockNuevo = stockAnterior - cantidad;
+
+        costoUnit = Math.round(
+          Number(prod.precio_costo || 0) * 100
+        );
         nombreItem = prod.nombre;
-        await connection.query('UPDATE productos SET stock = stock - ? WHERE id = ? AND empresa_id = ?', [item.cantidad, prod.id, inventarioEmpresaId]);
+
+        await connection.query(
+          `UPDATE productos
+           SET stock = ?
+           WHERE id = ? AND empresa_id = ?`,
+          [stockNuevo, prod.id, inventarioEmpresaId]
+        );
       } else {
         const [[rep]] = await connection.query(
-          'SELECT id, nombre, precio_costo, stock FROM repuestos WHERE id = ? AND empresa_id = ?', [item.id, inventarioEmpresaId]
+          `SELECT id, nombre, precio_costo, stock
+           FROM repuestos
+           WHERE id = ? AND empresa_id = ?
+           FOR UPDATE`,
+          [item.id, inventarioEmpresaId]
         );
+
         if (!rep) {
-          await connection.rollback();
-          return res.status(400).json({ success: false, message: `Repuesto ID ${item.id} no encontrado` });
-        }
-        if (rep.stock < item.cantidad) {
           await connection.rollback();
           return res.status(400).json({
             success: false,
-            message: `Stock insuficiente para "${rep.nombre}". Disponible: ${rep.stock}, solicitado: ${item.cantidad}`
+            message: `Repuesto ID ${item.id} no encontrado`,
           });
         }
-        costoUnit  = rep.precio_costo || 0;
+
+        const stockAnterior = Number(rep.stock || 0);
+
+        if (stockAnterior < cantidad) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Stock insuficiente para "${rep.nombre}". Disponible: ${stockAnterior}, solicitado: ${cantidad}`,
+          });
+        }
+
+        const stockNuevo = stockAnterior - cantidad;
+
+        costoUnit = Number(rep.precio_costo || 0);
         nombreItem = rep.nombre;
-        await connection.query('UPDATE repuestos SET stock = stock - ? WHERE id = ? AND empresa_id = ?', [item.cantidad, rep.id, inventarioEmpresaId]);
+
+        await connection.query(
+          `UPDATE repuestos
+           SET stock = ?
+           WHERE id = ? AND empresa_id = ?`,
+          [stockNuevo, rep.id, inventarioEmpresaId]
+        );
+
+        await connection.query(
+          `INSERT INTO repuestos_movimientos (
+            repuesto_id,
+            tipo_movimiento,
+            cantidad,
+            stock_anterior,
+            stock_nuevo,
+            precio_unitario,
+            referencia_tipo,
+            referencia_id,
+            usuario_id,
+            notas
+          ) VALUES (?, 'REPARACION', ?, ?, ?, ?, 'REPARACION', ?, ?, ?)`,
+          [
+            rep.id,
+            cantidad,
+            stockAnterior,
+            stockNuevo,
+            costoUnit,
+            id,
+            authUserId,
+            `Repuesto entregado como regalía en reparación ${id}: ${rep.nombre}`,
+          ]
+        );
       }
 
-      const subtotal = costoUnit * item.cantidad;
+      const subtotal = costoUnit * cantidad;
       costoRegaliasTotal += subtotal;
 
       await connection.query(
-        `INSERT INTO reparacion_regalias (reparacion_id, item_id, nombre, tipo_inventario, cantidad, costo_unitario, subtotal, nota)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, item.id, nombreItem, item.tipo || 'repuesto', item.cantidad, costoUnit, subtotal, item.nota || null]
+        `INSERT INTO reparacion_regalias (
+          reparacion_id,
+          item_id,
+          nombre,
+          tipo_inventario,
+          cantidad,
+          costo_unitario,
+          subtotal,
+          nota
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          item.id,
+          nombreItem,
+          item.tipo || 'repuesto',
+          cantidad,
+          costoUnit,
+          subtotal,
+          item.nota || null,
+        ]
       );
     }
 

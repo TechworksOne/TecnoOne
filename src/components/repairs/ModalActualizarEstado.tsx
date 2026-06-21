@@ -324,6 +324,19 @@ export default function ModalActualizarEstado({
       fd.append('estado', estadoBackend);
       fd.append('nota', nota);
       fd.append('imageTipo', estadoBackend === 'ENTREGADA' ? 'final' : 'historial');
+
+      if (repuestosUsados.length > 0) {
+        fd.append(
+          'repuestosUsados',
+          JSON.stringify(
+            repuestosUsados.map(r => ({
+              repuesto_id: r.repuestoId,
+              cantidad: r.cantidad,
+            }))
+          )
+        );
+      }
+
       if (estadoBackend === 'ESPERANDO_PIEZA' && piezaNecesaria) {
         fd.append('piezaNecesaria', piezaNecesaria);
         if (proveedor) fd.append('proveedor', proveedor);

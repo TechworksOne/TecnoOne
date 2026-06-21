@@ -19,41 +19,50 @@ const GROUPS = [
     label: "Principal",
     items: [
       { to: "/dashboard", label: "Dashboard", icon: <Home size={17} />, roles: null, permission: "dashboard.ver" },
-      { to: "/perfil",    label: "Perfil",    icon: <User size={17} />, roles: null },
-    ],
-  },
-  {
-    label: "Operación",
-    items: [
-      { to: "/productos",    label: "Productos",    icon: <Box size={17} />,         roles: ["ADMINISTRADOR", "VENTAS"], permission: "productos.ver" },
-      { to: "/repuestos",    label: "Repuestos",    icon: <Settings size={17} />,    roles: null, permission: "repuestos.ver" },
-      // null = todos los roles autenticados
-      { to: "/compras",      label: "Compras",      icon: <ShoppingBag size={17} />, roles: ["ADMINISTRADOR"], permission: "compras.ver" },
-      { to: "/cotizaciones", label: "Cotizaciones", icon: <FileText size={17} />,    roles: ["ADMINISTRADOR", "VENTAS"], permission: "cotizaciones.ver" },
-      { to: "/ventas",       label: "Ventas",       icon: <CreditCard size={17} />,  roles: ["ADMINISTRADOR", "VENTAS"], permission: "ventas.ver" },
+      { to: "/perfil", label: "Perfil", icon: <User size={17} />, roles: null },
     ],
   },
   {
     label: "Servicio técnico",
     items: [
-      { to: "/reparaciones",       label: "Reparaciones",       icon: <Wrench size={17} />,        roles: ["ADMINISTRADOR", "TECNICO", "VENTAS"], permission: "reparaciones.ver" },
-      { to: "/flujo-reparaciones", label: "Flujo Rep.",         icon: <GitBranch size={17} />,     roles: null, permission: "flujo_reparaciones.ver" },
-      { to: "/ordenes-trabajo",    label: "Órdenes de Trabajo", icon: <ClipboardList size={17} />, roles: ["ADMINISTRADOR", "TECNICO"], permission: "ordenes_trabajo.ver" },
-      { to: "/agenda",             label: "Agenda entregas",    icon: <CalendarDays size={17} />,  roles: null, permission: "agenda.ver" },
-      { to: "/stickers-garantia",  label: "Stickers garantía",  icon: <Tag size={17} />,           roles: ["ADMINISTRADOR"], permission: "stickers.ver" },
+      { to: "/reparaciones", label: "Reparaciones", icon: <Wrench size={17} />, roles: ["ADMINISTRADOR", "TECNICO", "VENTAS"], permission: "reparaciones.ver" },
+      { to: "/flujo-reparaciones", label: "Flujo de Reparaciones", icon: <GitBranch size={17} />, roles: null, permission: "flujo_reparaciones.ver" },
+      { to: "/ordenes-trabajo", label: "Órdenes de Trabajo", icon: <ClipboardList size={17} />, roles: ["ADMINISTRADOR", "TECNICO"], permission: "ordenes_trabajo.ver" },
+      { to: "/agenda", label: "Agenda de Entregas", icon: <CalendarDays size={17} />, roles: null, permission: "agenda.ver" },
+      { to: "/stickers-garantia", label: "Stickers de Garantía", icon: <Tag size={17} />, roles: ["ADMINISTRADOR"], permission: "stickers.ver" },
+    ],
+  },
+  {
+    label: "Comercial",
+    items: [
+      { to: "/clientes", label: "Clientes", icon: <Users size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "clientes.ver" },
+      { to: "/cotizaciones", label: "Cotizaciones", icon: <FileText size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "cotizaciones.ver" },
+      { to: "/ventas", label: "Ventas", icon: <CreditCard size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "ventas.ver" },
+    ],
+  },
+  {
+    label: "Inventario y compras",
+    items: [
+      { to: "/productos", label: "Productos", icon: <Box size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "productos.ver" },
+      { to: "/repuestos", label: "Repuestos", icon: <Settings size={17} />, roles: null, permission: "repuestos.ver" },
+      { to: "/compras", label: "Compras", icon: <ShoppingBag size={17} />, roles: ["ADMINISTRADOR"], permission: "compras.ver" },
+      { to: "/proveedores", label: "Proveedores", icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"], permission: "proveedores.ver" },
+    ],
+  },
+  {
+    label: "Finanzas",
+    items: [
+      { to: "/caja-bancos", label: "Caja y Bancos", icon: <Wallet size={17} />, roles: null, permission: "caja.ver" },
+      { to: "/deudores", label: "Deudores", icon: <Receipt size={17} />, roles: ["ADMINISTRADOR"], permission: "deudores.ver" },
+      { to: "/reportes", label: "Reportes", icon: <BarChart3 size={17} />, roles: ["ADMINISTRADOR"], permission: "reportes.ver" },
     ],
   },
   {
     label: "Administración",
     items: [
-      { to: "/caja-bancos",    label: "Caja y Bancos",   icon: <Wallet size={17} />,    roles: null, permission: "caja.ver" },
-      { to: "/deudores",       label: "Deudores",        icon: <Receipt size={17} />,   roles: ["ADMINISTRADOR"], permission: "deudores.ver" },
-      { to: "/reportes",       label: "Reportes",        icon: <BarChart3 size={17} />, roles: ["ADMINISTRADOR"], permission: "reportes.ver" },
-      { to: "/clientes",       label: "Clientes",        icon: <Users size={17} />,     roles: ["ADMINISTRADOR", "VENTAS"], permission: "clientes.ver" },
-      { to: "/proveedores",    label: "Proveedores",     icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"], permission: "proveedores.ver" },
-      { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />,    roles: ["ADMINISTRADOR"], permission: "usuarios.administrar" },
-      { to: "/permisos",       label: "Permisos",        icon: <KeyRound size={17} />,  roles: ["ADMINISTRADOR"], permission: "permisos.administrar", adminOnly: true },
-      { to: "/auditoria",      label: "Auditoría",       icon: <History size={17} />,   roles: ["ADMINISTRADOR"], permission: "auditoria.ver" },
+      { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />, roles: ["ADMINISTRADOR"], permission: "usuarios.administrar" },
+      { to: "/permisos", label: "Permisos", icon: <KeyRound size={17} />, roles: ["ADMINISTRADOR"], permission: "permisos.administrar", adminOnly: true },
+      { to: "/auditoria", label: "Auditoría", icon: <History size={17} />, roles: ["ADMINISTRADOR"], permission: "auditoria.ver" },
       { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, roles: ["ADMINISTRADOR"], permission: "empresa.editar" },
     ],
   },

@@ -137,10 +137,36 @@ export const getAllCotizaciones = async (filters?: CotizacionFilters) => {
 // ============================================
 // OBTENER COTIZACIÓN POR ID
 // ============================================
-export const getCotizacionById = async (id: number): Promise<CotizacionData> => {
+export const getCotizacionById = async (
+  id: number
+): Promise<CotizacionData> => {
   try {
     const response = await api.get(`/cotizaciones/${id}`);
-    return response.data.data;
+    const cotizacion = response.data.data;
+
+    let itemsNormalizados: any[] = [];
+
+    if (Array.isArray(cotizacion?.items)) {
+      itemsNormalizados = cotizacion.items;
+    } else if (
+      typeof cotizacion?.items === 'string' &&
+      cotizacion.items.trim()
+    ) {
+      try {
+        const parsed = JSON.parse(cotizacion.items);
+
+        itemsNormalizados = Array.isArray(parsed)
+          ? parsed
+          : [];
+      } catch {
+        itemsNormalizados = [];
+      }
+    }
+
+    return {
+      ...cotizacion,
+      items: itemsNormalizados,
+    };
   } catch (error: any) {
     console.error('❌ Error al obtener cotización:', error);
     throw error;

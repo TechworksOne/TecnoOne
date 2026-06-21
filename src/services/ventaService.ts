@@ -194,6 +194,8 @@ export const registrarPago = async (
   ventaId: number,
   pago: {
     monto: number;
+    monto_recibido?: number;
+    cambio?: number;
     metodo: string;
     referencia?: string;
     comprobanteUrl?: string;
