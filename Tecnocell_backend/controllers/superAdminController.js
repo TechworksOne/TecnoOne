@@ -4,6 +4,7 @@ const { parsePagination } = require('../utils/pagination');
 const { validatePhone } = require('../utils/phoneValidation');
 const superAdminAudit = require('../services/superAdminAuditService');
 const subscriptionAccess = require('../services/subscriptionAccessService');
+const planAccess = require('../services/planAccessService');
 
 const ESTADOS_EMPRESA = new Set(['demo', 'prueba', 'activa', 'suspendida', 'cancelada']);
 const ORDER_FIELDS = {
@@ -514,6 +515,9 @@ exports.createEmpresa = async (req, res) => {
       return res.status(409).json({ success: false, message: 'Ya existe una empresa con ese slug o NIT' });
     }
 
+    const planCanonico =
+      await planAccess.resolverPlanCompatibilidad(plan, connection);
+
     const [result] = await connection.query(
       `INSERT INTO empresas (
         nombre, nombre_comercial, razon_social, nit, slug, estado, plan,
@@ -551,12 +555,14 @@ exports.createEmpresa = async (req, res) => {
     });
     const [subscriptionResult] = await connection.query(
       `INSERT INTO suscripciones (
-         empresa_id, plan, tipo, estado, fecha_inicio, fecha_vencimiento,
-         dias_gracia, fecha_fin_gracia, proxima_a_vencer_dias
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 7)`,
+         empresa_id, plan, plan_id, tipo, estado, fecha_inicio,
+         fecha_vencimiento, dias_gracia, fecha_fin_gracia,
+         proxima_a_vencer_dias
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 7)`,
       [
         result.insertId,
         plan,
+        planCanonico.id,
         tipoSuscripcion,
         estadoSuscripcion,
         fechaInicio,
@@ -567,6 +573,8 @@ exports.createEmpresa = async (req, res) => {
     );
     const subscriptionData = {
       plan,
+      plan_id: Number(planCanonico.id),
+      plan_codigo: planCanonico.codigo,
       tipo: tipoSuscripcion,
       estado: estadoSuscripcion,
       fecha_inicio: fechaInicio,

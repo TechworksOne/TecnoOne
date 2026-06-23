@@ -4,12 +4,16 @@ const { verifyToken } = require('../middleware/authMiddleware');
 const { verifySuperAdmin } = require('../middleware/superAdminMiddleware');
 const controller = require('../controllers/superAdminController');
 const subscriptionController = require('../controllers/subscriptionController');
+const planController = require('../controllers/planController');
 
 router.use(verifyToken);
 router.use(verifySuperAdmin);
 
 router.get('/me', controller.getMe);
+router.get('/planes', planController.getPlanes);
+router.get('/planes/:id', planController.getPlanById);
 router.get('/empresas', controller.getEmpresas);
+router.get('/empresas/:id/consumo-plan', planController.getEmpresaConsumoPlan);
 router.get('/empresas/:id', controller.getEmpresaById);
 router.post('/empresas', controller.createEmpresa);
 router.put('/empresas/:id', controller.updateEmpresa);
