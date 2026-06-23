@@ -291,6 +291,9 @@ async function renovarSuscripcionTransaccional(connection, {
     nuevoEstadoEmpresa = 'activa';
   }
 
+  // El snapshot debe reflejar el estado empresarial final.
+  next.estado_empresa = nuevoEstadoEmpresa;
+
   await connection.query(
     `UPDATE suscripciones
      SET plan = ?, tipo = 'comercial', estado = 'vigente',

@@ -62,7 +62,7 @@ export default function SuperAdminEmpresasPage() {
         <div className="overflow-x-auto">
           <table className="min-w-[1100px] w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500 dark:bg-slate-900">
-              <tr>{['Empresa', 'NIT', 'Empresa', 'Suscripción', 'Vencimiento', 'Días', 'Plan', 'Usuarios', 'Acciones'].map(item => <th key={item} className="px-4 py-3">{item}</th>)}</tr>
+              <tr>{['Empresa', 'NIT', 'Estado', 'Suscripción', 'Vencimiento', 'Días', 'Plan', 'Usuarios', 'Acciones'].map(item => <th key={item} className="px-4 py-3">{item}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
               {loading ? (
