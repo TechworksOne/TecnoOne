@@ -1,29 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const db = require('../config/database');
-
-// Estados empresariales que permiten utilizar la plataforma.
-const ESTADOS_EMPRESA_PERMITIDOS = new Set(['activa', 'prueba', 'demo']);
-
-function empresaNoDisponible(res, estado = '') {
-  const estadoNormalizado = String(estado || '').toLowerCase();
-
-  if (estadoNormalizado === 'suspendida') {
-    return res.status(403).json({
-      message: 'La empresa se encuentra suspendida',
-    });
-  }
-
-  if (estadoNormalizado === 'cancelada') {
-    return res.status(403).json({
-      message: 'La empresa se encuentra cancelada',
-    });
-  }
-
-  return res.status(403).json({
-    message: 'La empresa no se encuentra disponible',
-  });
-}
+const subscriptionAccess = require('../services/subscriptionAccessService');
 
 // Login
 const login = async (req, res) => {
@@ -95,10 +73,12 @@ const login = async (req, res) => {
         });
       }
 
-      const estadoEmpresa = String(user.empresa_estado || '').toLowerCase();
-
-      if (!ESTADOS_EMPRESA_PERMITIDOS.has(estadoEmpresa)) {
-        return empresaNoDisponible(res, estadoEmpresa);
+      const acceso = await subscriptionAccess.evaluarAccesoEmpresa(empresaId);
+      if (!acceso.permitido) {
+        return res.status(403).json({
+          code: acceso.code,
+          message: subscriptionAccess.mensajeAccesoDenegado(acceso.code),
+        });
       }
     }
 
