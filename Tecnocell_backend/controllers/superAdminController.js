@@ -3,6 +3,7 @@ const db = require('../config/database');
 const { parsePagination } = require('../utils/pagination');
 const { validatePhone } = require('../utils/phoneValidation');
 const superAdminAudit = require('../services/superAdminAuditService');
+const subscriptionAccess = require('../services/subscriptionAccessService');
 
 const ESTADOS_EMPRESA = new Set(['demo', 'prueba', 'activa', 'suspendida', 'cancelada']);
 const ORDER_FIELDS = {
@@ -57,8 +58,7 @@ function slugify(value) {
 }
 
 function validDate(value) {
-  return value === null || value === undefined || value === '' ||
-    /^\d{4}-\d{2}-\d{2}$/.test(String(value));
+  return subscriptionAccess.isValidDate(value);
 }
 
 function empresaSelect() {
@@ -68,8 +68,34 @@ function empresaSelect() {
            e.telefono, COALESCE(NULLIF(e.correo, ''), e.email) AS email,
            e.direccion, e.logo_url, e.color_principal, e.moneda_codigo,
            e.moneda_simbolo, e.zona_horaria, e.created_at, e.updated_at,
+           s.id AS suscripcion_id, s.tipo AS tipo_suscripcion,
+           CASE
+             WHEN s.id IS NULL THEN NULL
+             WHEN s.fecha_vencimiento IS NULL THEN
+               CASE WHEN s.tipo = 'prueba' THEN 'prueba' ELSE 'vigente' END
+             WHEN CURDATE() <= s.fecha_vencimiento THEN
+               CASE WHEN s.tipo = 'prueba' THEN 'prueba' ELSE 'vigente' END
+             WHEN CURDATE() <= COALESCE(s.fecha_fin_gracia, s.fecha_vencimiento)
+               THEN 'gracia'
+             ELSE 'vencida'
+           END AS estado_suscripcion,
+           s.plan AS suscripcion_plan,
+           s.fecha_inicio AS suscripcion_fecha_inicio,
+           s.fecha_vencimiento AS suscripcion_fecha_vencimiento,
+           s.dias_gracia, s.fecha_fin_gracia, s.duracion_meses,
+           s.proxima_a_vencer_dias,
+           CASE
+             WHEN s.fecha_vencimiento IS NULL THEN NULL
+             ELSE DATEDIFF(s.fecha_vencimiento, CURDATE())
+           END AS dias_restantes,
+           CASE
+             WHEN s.fecha_vencimiento IS NOT NULL
+              AND DATEDIFF(s.fecha_vencimiento, CURDATE()) BETWEEN 0 AND s.proxima_a_vencer_dias
+             THEN 1 ELSE 0
+           END AS proxima_a_vencer,
            COUNT(DISTINCT u.id) AS total_usuarios
     FROM empresas e
+    LEFT JOIN suscripciones s ON s.empresa_id = e.id
     LEFT JOIN users u
       ON u.empresa_id = e.id
      AND COALESCE(u.tipo_usuario, 'EMPRESA') = 'EMPRESA'
@@ -187,7 +213,7 @@ exports.getEmpresaById = async (req, res) => {
   }
 };
 
-exports.createEmpresa = async (req, res) => {
+const createEmpresaLegacy = async (req, res) => {
   try {
     const nombre = text(req.body?.nombre, 150);
     const slug = slugify(req.body?.slug || nombre);
@@ -438,6 +464,150 @@ exports.createEmpresaAdministrador = async (req, res) => {
     if (connection) try { await connection.rollback(); } catch (_) {}
     console.error('createEmpresaAdministrador error:', error);
     res.status(500).json({ success: false, message: 'Error al crear el administrador principal' });
+  } finally {
+    if (connection) connection.release();
+  }
+};
+
+exports.createEmpresa = async (req, res) => {
+  let connection;
+  try {
+    const nombre = text(req.body?.nombre, 150);
+    const slug = slugify(req.body?.slug || nombre);
+    const tipoSuscripcion = text(req.body?.tipo_suscripcion, 20)?.toLowerCase() || 'prueba';
+    const estado = tipoSuscripcion === 'prueba' ? 'demo' : 'activa';
+    const plan = text(req.body?.plan, 50) || 'demo';
+    const fechaInicio = text(req.body?.fecha_inicio, 10) || subscriptionAccess.todayString();
+    const fechaVencimiento = text(req.body?.fecha_vencimiento, 10);
+    const diasGracia = req.body?.dias_gracia === undefined ? 0 : Number(req.body.dias_gracia);
+
+    if (!nombre || !slug) {
+      return res.status(400).json({ success: false, message: 'Nombre y slug son requeridos' });
+    }
+    if (!['prueba', 'comercial'].includes(tipoSuscripcion)) {
+      return res.status(400).json({ success: false, message: 'Tipo de suscripción no válido' });
+    }
+    if (!subscriptionAccess.isValidDate(fechaInicio, { nullable: false })) {
+      return res.status(400).json({ success: false, message: 'fecha_inicio no es una fecha válida' });
+    }
+    if (!subscriptionAccess.isValidDate(fechaVencimiento)) {
+      return res.status(400).json({ success: false, message: 'fecha_vencimiento no es una fecha válida' });
+    }
+    if (!Number.isInteger(diasGracia) || diasGracia < 0) {
+      return res.status(400).json({ success: false, message: 'dias_gracia debe ser un entero mayor o igual a cero' });
+    }
+    if (fechaVencimiento && subscriptionAccess.diffDays(fechaInicio, fechaVencimiento) < 0) {
+      return res.status(400).json({ success: false, message: 'fecha_inicio no puede ser posterior a fecha_vencimiento' });
+    }
+
+    const phone = validatePhone(req.body?.telefono, { label: 'El teléfono de la empresa' });
+    if (!phone.ok) return res.status(400).json({ success: false, message: phone.message });
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+    const [[duplicate]] = await connection.query(
+      'SELECT id FROM empresas WHERE slug = ? OR (? IS NOT NULL AND nit = ?) LIMIT 1',
+      [slug, text(req.body?.nit, 30), text(req.body?.nit, 30)]
+    );
+    if (duplicate) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Ya existe una empresa con ese slug o NIT' });
+    }
+
+    const [result] = await connection.query(
+      `INSERT INTO empresas (
+        nombre, nombre_comercial, razon_social, nit, slug, estado, plan,
+        fecha_inicio, fecha_vencimiento, telefono, email, correo, direccion,
+        color_primario, color_principal, moneda_codigo, moneda_simbolo, zona_horaria
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        nombre,
+        text(req.body?.nombre_comercial, 150),
+        text(req.body?.razon_social, 180),
+        text(req.body?.nit, 30),
+        slug,
+        estado,
+        plan,
+        fechaInicio,
+        fechaVencimiento,
+        phone.value,
+        text(req.body?.email, 150),
+        text(req.body?.email, 150),
+        text(req.body?.direccion, 255),
+        text(req.body?.color_principal, 20) || '#2563eb',
+        text(req.body?.color_principal, 20) || '#2563eb',
+        text(req.body?.moneda_codigo, 10) || 'GTQ',
+        text(req.body?.moneda_simbolo, 10) || 'Q',
+        text(req.body?.zona_horaria, 80) || 'America/Guatemala',
+      ]
+    );
+
+    const fechaFinGracia = subscriptionAccess.calcularFechaFinGracia(fechaVencimiento, diasGracia);
+    const estadoSuscripcion = subscriptionAccess.calcularEstadoSuscripcion({
+      tipo: tipoSuscripcion,
+      fecha_vencimiento: fechaVencimiento,
+      fecha_fin_gracia: fechaFinGracia,
+      dias_gracia: diasGracia,
+    });
+    const [subscriptionResult] = await connection.query(
+      `INSERT INTO suscripciones (
+         empresa_id, plan, tipo, estado, fecha_inicio, fecha_vencimiento,
+         dias_gracia, fecha_fin_gracia, proxima_a_vencer_dias
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 7)`,
+      [
+        result.insertId,
+        plan,
+        tipoSuscripcion,
+        estadoSuscripcion,
+        fechaInicio,
+        fechaVencimiento,
+        diasGracia,
+        fechaFinGracia,
+      ]
+    );
+    const subscriptionData = {
+      plan,
+      tipo: tipoSuscripcion,
+      estado: estadoSuscripcion,
+      fecha_inicio: fechaInicio,
+      fecha_vencimiento: fechaVencimiento,
+      dias_gracia: diasGracia,
+      fecha_fin_gracia: fechaFinGracia,
+    };
+    await connection.query(
+      `INSERT INTO historial_suscripciones (
+         suscripcion_id, empresa_id, tipo_evento,
+         estado_empresa_nuevo, estado_suscripcion_nuevo,
+         fecha_inicio_nueva, fecha_vencimiento_nueva, dias_gracia_nuevo,
+         motivo, super_admin_id, origen, datos_nuevos
+       ) VALUES (?, ?, 'CREACION', ?, ?, ?, ?, ?, ?, ?, 'super_admin', ?)`,
+      [
+        subscriptionResult.insertId,
+        result.insertId,
+        estado,
+        estadoSuscripcion,
+        fechaInicio,
+        fechaVencimiento,
+        diasGracia,
+        'Creación de empresa y suscripción',
+        req.superAdmin.id,
+        JSON.stringify(subscriptionData),
+      ]
+    );
+    await connection.commit();
+
+    await superAdminAudit.registrar({
+      req,
+      accion: 'CREAR_EMPRESA',
+      entidad: 'EMPRESA',
+      entidadId: result.insertId,
+      datosNuevos: { ...req.body, suscripcion: subscriptionData },
+    });
+    return res.status(201).json({ success: true, data: { id: result.insertId, slug, estado } });
+  } catch (error) {
+    if (connection) try { await connection.rollback(); } catch (_) {}
+    console.error('createEmpresa superadmin error:', error);
+    return res.status(500).json({ success: false, message: 'Error al crear la empresa' });
   } finally {
     if (connection) connection.release();
   }

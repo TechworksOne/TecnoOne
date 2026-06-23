@@ -3,6 +3,7 @@ const router = express.Router();
 const { verifyToken } = require('../middleware/authMiddleware');
 const { verifySuperAdmin } = require('../middleware/superAdminMiddleware');
 const controller = require('../controllers/superAdminController');
+const subscriptionController = require('../controllers/subscriptionController');
 
 router.use(verifyToken);
 router.use(verifySuperAdmin);
@@ -14,5 +15,9 @@ router.post('/empresas', controller.createEmpresa);
 router.put('/empresas/:id', controller.updateEmpresa);
 router.patch('/empresas/:id/estado', controller.updateEmpresaEstado);
 router.post('/empresas/:id/administrador', controller.createEmpresaAdministrador);
+router.get('/empresas/:id/suscripcion', subscriptionController.getSuscripcion);
+router.patch('/empresas/:id/suscripcion', subscriptionController.updateSuscripcion);
+router.post('/empresas/:id/suscripcion/renovar', subscriptionController.renovarSuscripcion);
+router.get('/empresas/:id/suscripcion/historial', subscriptionController.getHistorial);
 
 module.exports = router;
