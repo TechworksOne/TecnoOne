@@ -6,6 +6,7 @@ const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePlanModule = require('../middleware/requirePlanModule');
+const requirePermission = require('../middleware/requirePermission');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
@@ -14,15 +15,15 @@ router.use(checkEmpresaActiva);
 router.use(requirePlanModule('taller_operativo'));
 
 // GET /api/ot/resumen  — KPI cards del dashboard (activas, por estado, carga técnico)
-router.get('/resumen',   otController.getResumenOT);
+router.get('/resumen', requirePermission('ordenes_trabajo.ver'), otController.getResumenOT);
 
 // GET /api/ot/historial — OTs canceladas y entregadas
-router.get('/historial', otController.getHistorialOT);
+router.get('/historial', requirePermission('ordenes_trabajo.ver'), otController.getHistorialOT);
 
 // GET /api/ot/tecnicos — lista de usuarios disponibles para asignar OT
-router.get('/tecnicos',  otController.getTecnicos);
+router.get('/tecnicos', requirePermission('ordenes_trabajo.ver'), otController.getTecnicos);
 
 // GET /api/ot — listado de OTs activas
-router.get('/',          otController.getOrdenesTrabajo);
+router.get('/', requirePermission('ordenes_trabajo.ver'), otController.getOrdenesTrabajo);
 
 module.exports = router;

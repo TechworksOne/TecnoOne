@@ -46,8 +46,16 @@ router.delete('/:id/asignar-tecnico', requirePermission('reparaciones.asignar_te
 
 // Fecha de entrega programada (Agenda)
 const agendaController = require('../controllers/agendaController');
-router.patch('/:id/fecha-entrega', agendaController.patchFechaEntrega);
-router.delete('/:id/fecha-entrega', agendaController.deleteFechaEntrega);
+router.patch(
+  '/:id/fecha-entrega',
+  requirePermission('agenda.editar'),
+  agendaController.patchFechaEntrega
+);
+router.delete(
+  '/:id/fecha-entrega',
+  requirePermission('agenda.editar'),
+  agendaController.deleteFechaEntrega
+);
 
 // Cambiar estado con imágenes — POST usa FormData desde ModalActualizarEstado
 router.post(

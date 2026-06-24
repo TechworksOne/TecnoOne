@@ -8,6 +8,7 @@ const productController = require('../controllers/productController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePermission = require('../middleware/requirePermission');
 const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
 
 const storage = multer.diskStorage({
@@ -51,15 +52,15 @@ router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
-router.get('/search', productController.searchProducts);
-router.get('/alerts/critical-stock', productController.getCriticalStockProducts);
-router.get('/', productController.getAllProducts);
-router.get('/:id', productController.getProductById);
-router.get('/:id/kardex', productController.getProductKardex);
+router.get('/search', requirePermission('productos.ver'), productController.searchProducts);
+router.get('/alerts/critical-stock', requirePermission('productos.ver'), productController.getCriticalStockProducts);
+router.get('/', requirePermission('productos.ver'), productController.getAllProducts);
+router.get('/:id', requirePermission('productos.ver'), productController.getProductById);
+router.get('/:id/kardex', requirePermission('productos.ver'), productController.getProductKardex);
 
-router.post('/', uploadImagenesProducto, productController.createProduct);
-router.put('/:id', uploadImagenesProducto, productController.updateProduct);
-router.patch('/:id/stock', productController.adjustStock);
-router.delete('/:id', productController.deleteProduct);
+router.post('/', requirePermission('productos.administrar'), uploadImagenesProducto, productController.createProduct);
+router.put('/:id', requirePermission('productos.administrar'), uploadImagenesProducto, productController.updateProduct);
+router.patch('/:id/stock', requirePermission('productos.administrar'), productController.adjustStock);
+router.delete('/:id', requirePermission('productos.administrar'), productController.deleteProduct);
 
 module.exports = router;

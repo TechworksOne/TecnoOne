@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
-const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
+const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePermission = require('../middleware/requirePermission');
 
 function legacyWriteDisabled(req, res) {
   return res.status(410).json({
@@ -21,10 +22,10 @@ router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
 // Obtener todos los usuarios (solo admin)
-router.get('/', verifyRole('admin'), userController.getAllUsers);
+router.get('/', requirePermission('usuarios.administrar'), userController.getAllUsers);
 
 // Obtener un usuario por ID
-router.get('/:id', userController.getUserById);
+router.get('/:id', requirePermission('usuarios.administrar'), userController.getUserById);
 
 // Crear nuevo usuario (solo admin)
 router.post('/', legacyWriteDisabled);

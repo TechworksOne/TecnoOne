@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
+const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
@@ -13,10 +13,7 @@ router.use(checkEmpresaActiva);
 router.get('/mis-permisos', permisoController.getMisPermisos);
 router.get('/mis-modulos', permisoController.getMisModulos);
 
-const administrar = [
-  verifyRole('ADMINISTRADOR', 'admin', 'superadmin'),
-  requirePermission('permisos.administrar'),
-];
+const administrar = [requirePermission('permisos.administrar')];
 
 router.get('/', ...administrar, permisoController.getCatalogo);
 router.get('/roles', ...administrar, permisoController.getRoles);

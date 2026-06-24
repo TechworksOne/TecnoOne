@@ -4,20 +4,21 @@ const customerController = require('../controllers/customerController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePermission = require('../middleware/requirePermission');
 
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
 // Rutas de lectura
-router.get('/', customerController.getAllCustomers);
-router.get('/search', customerController.searchCustomers);
-router.get('/:id', customerController.getCustomerById);
-router.get('/:id/purchases', customerController.getCustomerPurchases);
+router.get('/', requirePermission('clientes.ver'), customerController.getAllCustomers);
+router.get('/search', requirePermission('clientes.ver'), customerController.searchCustomers);
+router.get('/:id', requirePermission('clientes.ver'), customerController.getCustomerById);
+router.get('/:id/purchases', requirePermission('clientes.ver'), customerController.getCustomerPurchases);
 
 // Rutas de escritura
-router.post('/', customerController.createCustomer);
-router.put('/:id', customerController.updateCustomer);
-router.delete('/:id', customerController.deleteCustomer);
+router.post('/', requirePermission('clientes.crear'), customerController.createCustomer);
+router.put('/:id', requirePermission('clientes.crear'), customerController.updateCustomer);
+router.delete('/:id', requirePermission('clientes.crear'), customerController.deleteCustomer);
 
 module.exports = router;
