@@ -20,6 +20,7 @@ import * as ventaService from '../../services/ventaService';
 import type { VentaData, VentaEstadisticas } from '../../services/ventaService';
 import { formatDate } from '../../lib/format';
 import { printSaleReceipt } from '../../lib/printSaleReceipt';
+import { getImageUrl } from '../../utils/getImageUrl';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -64,7 +65,9 @@ function getDateRange(preset: string): { fecha_desde: string; fecha_hasta: strin
 export default function SalesPage() {
   const navigate = useNavigate();
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canEditPayments = hasPermission('ventas.editar');
+  const canCancelSales = hasPermission('ventas.anular');
   const { empresa, loadEmpresa } = useEmpresa();
 
   useEffect(() => {
@@ -102,6 +105,8 @@ export default function SalesPage() {
   const [pagoMonto, setPagoMonto] = useState('');
   const [pagoMetodo, setPagoMetodo] = useState('EFECTIVO');
   const [pagoRef, setPagoRef] = useState('');
+  const [pagoComprobanteUrl, setPagoComprobanteUrl] = useState('');
+  const [pagoComprobanteUploading, setPagoComprobanteUploading] = useState(false);
   const [pagoLoading, setPagoLoading] = useState(false);
 
   // ── Load ────────────────────────────────────────────────────────────────
@@ -157,6 +162,8 @@ export default function SalesPage() {
     setPagoMonto((saldo / 100).toFixed(2));
     setPagoMetodo('EFECTIVO');
     setPagoRef('');
+    setPagoComprobanteUrl('');
+    setPagoComprobanteUploading(false);
     setShowPagoModal(true);
   };
 
@@ -166,15 +173,131 @@ export default function SalesPage() {
     setShowAnularDialog(true);
   };
 
+  const handlePagoComprobanteChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.add('El comprobante debe ser una imagen', 'error');
+      event.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.add('El comprobante no debe superar los 5 MB', 'error');
+      event.target.value = '';
+      return;
+    }
+
+    setPagoComprobanteUploading(true);
+    setPagoComprobanteUrl('');
+
+    try {
+      const url = await ventaService.uploadComprobante(file);
+      setPagoComprobanteUrl(url);
+      toast.add('Boleta cargada correctamente', 'success');
+    } catch (error: any) {
+      toast.add(
+        error?.response?.data?.message ||
+          error?.message ||
+          'Error al subir la boleta',
+        'error',
+      );
+      event.target.value = '';
+    } finally {
+      setPagoComprobanteUploading(false);
+    }
+  };
+
+  const saldoPagoCentavos = selectedVenta
+    ? Number(
+        selectedVenta.saldo_pendiente ??
+        (
+          selectedVenta.total -
+          (selectedVenta.monto_pagado ?? 0)
+        )
+      )
+    : 0;
+
+  const saldoPagoQuetzales =
+    saldoPagoCentavos / 100;
+
+  const montoPagoIngresado =
+    Number.parseFloat(pagoMonto) || 0;
+
+  const pagoAplicado =
+    Math.min(
+      montoPagoIngresado,
+      saldoPagoQuetzales
+    );
+
+  const cambioPago =
+    pagoMetodo === 'EFECTIVO'
+      ? Math.max(
+          0,
+          montoPagoIngresado - saldoPagoQuetzales
+        )
+      : 0;
+
   const handleRegistrarPago = async () => {
     if (!selectedVenta) return;
-    if (!pagoMonto || parseFloat(pagoMonto) <= 0) { toast.add('Ingresa un monto válido', 'error'); return; }
+
+    if (!pagoMonto || parseFloat(pagoMonto) <= 0) {
+      toast.add('Ingresa un monto válido', 'error');
+      return;
+    }
+
+    if (
+      pagoMetodo !== 'EFECTIVO' &&
+      montoPagoIngresado > saldoPagoQuetzales + 0.005
+    ) {
+      toast.add(
+        `El monto no puede exceder el saldo pendiente de Q${saldoPagoQuetzales.toFixed(2)}`,
+        'error'
+      );
+      return;
+    }
+
+    if (pagoComprobanteUploading) {
+      toast.add('Espera a que termine de subir la boleta', 'error');
+      return;
+    }
+
+    if (
+      pagoMetodo === 'TRANSFERENCIA' &&
+      !pagoComprobanteUrl
+    ) {
+      toast.add(
+        'Debes adjuntar la imagen de la boleta de transferencia',
+        'error',
+      );
+      return;
+    }
+
     setPagoLoading(true);
     try {
       await ventaService.registrarPago(selectedVenta.id!, {
-        monto: parseFloat(pagoMonto),
+        monto:
+          pagoMetodo === 'EFECTIVO'
+            ? pagoAplicado
+            : montoPagoIngresado,
+
+        monto_recibido:
+          pagoMetodo === 'EFECTIVO'
+            ? montoPagoIngresado
+            : undefined,
+
+        cambio:
+          pagoMetodo === 'EFECTIVO'
+            ? cambioPago
+            : undefined,
+
         metodo: pagoMetodo,
         referencia: pagoRef || undefined,
+        comprobanteUrl: pagoComprobanteUrl || undefined,
         usuario_id: user?.id,
       });
       toast.add('Pago registrado correctamente', 'success');
@@ -434,7 +557,7 @@ export default function SalesPage() {
                             >
                               <Printer size={14} />
                             </button>
-                            {(v.estado === 'PENDIENTE' || v.estado === 'PARCIAL') && (
+                            {canEditPayments && (v.estado === 'PENDIENTE' || v.estado === 'PARCIAL') && (
                               <button
                                 onClick={() => openPago(v)}
                                 className="p-1.5 rounded hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-500 dark:text-emerald-400"
@@ -443,7 +566,7 @@ export default function SalesPage() {
                                 <CreditCard size={14} />
                               </button>
                             )}
-                            {v.estado !== 'ANULADA' && (
+                            {canCancelSales && v.estado !== 'ANULADA' && (
                               <button
                                 onClick={() => openAnular(v)}
                                 className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 dark:text-red-400"
@@ -486,10 +609,10 @@ export default function SalesPage() {
                   <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{formatDate(v.fecha_venta ?? v.created_at ?? '')} · {items.length} item{items.length !== 1 ? 's' : ''}</p>
                   <div className="flex gap-2 mt-3">
                     <button onClick={() => openDetail(v)} className="flex-1 py-1.5 text-xs rounded-lg border border-[var(--color-border)] text-[var(--color-primary)] hover:bg-[var(--color-active-bg)] transition-colors">Ver</button>
-                    {(v.estado === 'PENDIENTE' || v.estado === 'PARCIAL') && (
+                    {canEditPayments && (v.estado === 'PENDIENTE' || v.estado === 'PARCIAL') && (
                       <button onClick={() => openPago(v)} className="flex-1 py-1.5 text-xs rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors">Pagar</button>
                     )}
-                    {v.estado !== 'ANULADA' && (
+                    {canCancelSales && v.estado !== 'ANULADA' && (
                       <button onClick={() => openAnular(v)} className="flex-1 py-1.5 text-xs rounded-lg border border-red-200 dark:border-red-800 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">Anular</button>
                     )}
                   </div>
@@ -578,13 +701,53 @@ export default function SalesPage() {
               <div>
                 <p className="font-semibold text-[var(--color-text)] mb-2">Historial de Pagos</p>
                 <div className="space-y-1">
-                  {selectedVenta.pagos.map((p: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between bg-emerald-100 dark:bg-emerald-900/20 rounded px-3 py-2 text-xs">
-                      <span className="text-emerald-700 dark:text-emerald-400 font-medium">{METODO_LABEL[p.metodo] ?? p.metodo}</span>
-                      {p.referencia && <span className="text-[var(--color-text-muted)]">Ref: {p.referencia}</span>}
-                      <span className="font-bold text-emerald-700 dark:text-emerald-400">Q{(p.monto / 100).toFixed(2)}</span>
-                    </div>
-                  ))}
+                  {selectedVenta.pagos.map((p: any, i: number) => {
+                    const comprobante =
+                      p.comprobanteUrl ||
+                      p.comprobante_url ||
+                      '';
+
+                    return (
+                      <div
+                        key={i}
+                        className="bg-emerald-100 dark:bg-emerald-900/20 rounded px-3 py-2 text-xs"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+                            {METODO_LABEL[p.metodo] ?? p.metodo}
+                          </span>
+
+                          {p.referencia && (
+                            <span className="text-[var(--color-text-muted)]">
+                              Ref: {p.referencia}
+                            </span>
+                          )}
+
+                          <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                            Q{(p.monto / 100).toFixed(2)}
+                          </span>
+                        </div>
+
+                        {comprobante && (
+                          <a
+                            href={getImageUrl(comprobante)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 inline-block"
+                          >
+                            <img
+                              src={getImageUrl(comprobante)}
+                              alt="Boleta de pago"
+                              className="h-28 max-w-full rounded-lg border border-emerald-300 dark:border-emerald-800 object-contain"
+                            />
+                            <p className="mt-1 text-[11px] text-blue-500">
+                              Ver boleta completa
+                            </p>
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -600,7 +763,7 @@ export default function SalesPage() {
               <Button variant="ghost" onClick={() => handlePrint(selectedVenta)} className="flex-1">
                 <Printer size={14} /> Imprimir
               </Button>
-              {(selectedVenta.estado === 'PENDIENTE' || selectedVenta.estado === 'PARCIAL') && (
+              {canEditPayments && (selectedVenta.estado === 'PENDIENTE' || selectedVenta.estado === 'PARCIAL') && (
                 <Button
                   onClick={() => { setShowDetail(false); setTimeout(() => openPago(selectedVenta), 100); }}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -608,7 +771,7 @@ export default function SalesPage() {
                   <CreditCard size={14} /> Registrar Pago
                 </Button>
               )}
-              {selectedVenta.estado !== 'ANULADA' && (
+              {canCancelSales && selectedVenta.estado !== 'ANULADA' && (
                 <Button
                   variant="ghost"
                   onClick={() => { setShowDetail(false); setTimeout(() => openAnular(selectedVenta), 100); }}
@@ -632,7 +795,11 @@ export default function SalesPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">Monto a pagar (Q)</label>
+              <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">
+                {pagoMetodo === 'EFECTIVO'
+                  ? 'Efectivo recibido (Q)'
+                  : 'Monto a pagar (Q)'}
+              </label>
               <Input
                 type="number"
                 step="0.01"
@@ -643,11 +810,39 @@ export default function SalesPage() {
               />
             </div>
 
+            {pagoMetodo === 'EFECTIVO' && montoPagoIngresado > 0 && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                <div className="flex items-center justify-between text-[var(--color-text-sec)]">
+                  <span>Pago aplicado</span>
+                  <span className="font-semibold text-[var(--color-text)]">
+                    Q {pagoAplicado.toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between border-t border-emerald-200 pt-2 dark:border-emerald-900/50">
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                    Cambio
+                  </span>
+
+                  <span className="text-base font-bold text-emerald-700 dark:text-emerald-400">
+                    Q {cambioPago.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">Método de pago</label>
               <select
                 value={pagoMetodo}
-                onChange={e => setPagoMetodo(e.target.value)}
+                onChange={e => {
+                  const metodo = e.target.value;
+                  setPagoMetodo(metodo);
+
+                  if (metodo !== 'TRANSFERENCIA') {
+                    setPagoComprobanteUrl('');
+                  }
+                }}
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#48B9E6]/40 transition-colors"
                 style={{ background: 'var(--color-input-bg)', color: 'var(--color-text)', borderColor: 'var(--color-border)' }}
               >
@@ -659,12 +854,57 @@ export default function SalesPage() {
 
             {(pagoMetodo === 'TARJETA' || pagoMetodo === 'TRANSFERENCIA') && (
               <div>
-                <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">Referencia / Comprobante</label>
+                <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">
+                  Referencia
+                </label>
                 <Input
                   value={pagoRef}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPagoRef(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setPagoRef(e.target.value)
+                  }
                   placeholder="Número de referencia…"
                 />
+              </div>
+            )}
+
+            {pagoMetodo === 'TRANSFERENCIA' && (
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-[var(--color-text-sec)]">
+                  Foto de la boleta <span className="text-red-500">*</span>
+                </label>
+
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={handlePagoComprobanteChange}
+                  disabled={pagoComprobanteUploading || pagoLoading}
+                  className="block w-full text-xs text-[var(--color-text-sec)] file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white hover:file:bg-blue-700 disabled:opacity-50"
+                />
+
+                {pagoComprobanteUploading && (
+                  <p className="flex items-center gap-2 text-xs text-blue-500">
+                    <RefreshCw size={12} className="animate-spin" />
+                    Subiendo boleta...
+                  </p>
+                )}
+
+                {pagoComprobanteUrl && (
+                  <a
+                    href={getImageUrl(pagoComprobanteUrl)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-block"
+                  >
+                    <img
+                      src={getImageUrl(pagoComprobanteUrl)}
+                      alt="Vista previa de la boleta"
+                      className="h-32 max-w-full rounded-lg border border-[var(--color-border)] object-contain"
+                    />
+                    <p className="mt-1 text-xs text-blue-500">
+                      Abrir imagen completa
+                    </p>
+                  </a>
+                )}
               </div>
             )}
 
@@ -672,7 +912,7 @@ export default function SalesPage() {
               <Button variant="ghost" onClick={() => setShowPagoModal(false)} className="flex-1">Cancelar</Button>
               <Button
                 onClick={handleRegistrarPago}
-                disabled={pagoLoading}
+                disabled={pagoLoading || pagoComprobanteUploading}
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
               >
                 {pagoLoading ? <RefreshCw size={14} className="animate-spin" /> : <CreditCard size={14} />}
@@ -719,6 +959,7 @@ export default function SalesPage() {
       {/* ── Quote Picker ─────────────────────────────────────────────────── */}
       {showQuotePicker && (
         <QuotePicker
+          open={showQuotePicker}
           onClose={() => setShowQuotePicker(false)}
           onSelect={(quote: any) => {
             setShowQuotePicker(false);

@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
+const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const reportesController = require('../controllers/reportesController');
+const requirePermission = require('../middleware/requirePermission');
 
-const soloAdmin = [verifyToken, tenantScope, checkEmpresaActiva, verifyRole('ADMINISTRADOR', 'admin')];
+const soloAdmin = [verifyToken, tenantScope, checkEmpresaActiva, requirePermission('reportes.ver')];
 
 router.get('/resumen',               ...soloAdmin, reportesController.getResumen);
 router.get('/diario',                ...soloAdmin, reportesController.getDiario);

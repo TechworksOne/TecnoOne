@@ -10,6 +10,7 @@ import { useSales } from '../../store/useSales';
 import { useEmpresa } from '../../store/useEmpresa';
 import { formatMoney, formatDate } from '../../lib/format';
 import { printSaleReceipt } from '../../lib/printSaleReceipt';
+import { getImageUrl } from '../../utils/getImageUrl';
 
 export default function SaleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -216,11 +217,21 @@ export default function SaleDetailPage() {
                   )}
                   {payment.comprobanteUrl && (
                     <div className="mt-2">
-                      <img
-                        src={payment.comprobanteUrl}
-                        alt="Comprobante"
-                        className="h-32 rounded border"
-                      />
+                      <a
+                        href={getImageUrl(payment.comprobanteUrl)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-block"
+                      >
+                        <img
+                          src={getImageUrl(payment.comprobanteUrl)}
+                          alt="Comprobante"
+                          className="h-32 max-w-full rounded border object-contain"
+                        />
+                        <p className="mt-1 text-xs text-blue-600">
+                          Ver comprobante completo
+                        </p>
+                      </a>
                     </div>
                   )}
                 </div>

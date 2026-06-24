@@ -1,12 +1,10 @@
-const db = require('../config/database');
+const subscriptionAccess = require('../services/subscriptionAccessService');
 
-const ESTADOS_PERMITIDOS = new Set(['activa', 'prueba']);
-
-function empresaInactivaResponse(res, code = 'EMPRESA_INACTIVA') {
+function empresaInactivaResponse(res, code = 'EMPRESA_SUSPENDIDA') {
   return res.status(403).json({
     success: false,
     code,
-    message: 'La empresa no se encuentra activa. Contacta al administrador de TecnoOne.',
+    message: subscriptionAccess.mensajeAccesoDenegado(code),
   });
 }
 
@@ -22,49 +20,17 @@ async function checkEmpresaActiva(req, res, next) {
       return empresaInactivaResponse(res);
     }
 
-    const [rows] = await db.query(
-      `
-        SELECT
-          id,
-          nombre,
-          slug,
-          estado,
-          plan,
-          DATE_FORMAT(fecha_vencimiento, '%Y-%m-%d') AS fecha_vencimiento,
-          CASE
-            WHEN fecha_vencimiento IS NOT NULL AND fecha_vencimiento < CURDATE()
-            THEN 1
-            ELSE 0
-          END AS esta_vencida
-        FROM empresas
-        WHERE id = ?
-        LIMIT 1
-      `,
-      [empresaId]
-    );
-
-    if (rows.length === 0) {
-      return empresaInactivaResponse(res);
-    }
-
-    const empresa = rows[0];
-    const estado = String(empresa.estado || '').toLowerCase();
-
-    if (!ESTADOS_PERMITIDOS.has(estado)) {
-      return empresaInactivaResponse(res, 'EMPRESA_INACTIVA');
-    }
-
-    if (Number(empresa.esta_vencida) === 1) {
-      return empresaInactivaResponse(res, 'EMPRESA_VENCIDA');
+    const acceso = await subscriptionAccess.evaluarAccesoEmpresa(empresaId);
+    if (!acceso.permitido) {
+      return empresaInactivaResponse(res, acceso.code);
     }
 
     req.empresa = {
-      id: empresa.id,
-      nombre: empresa.nombre,
-      slug: empresa.slug,
-      estado: empresa.estado,
-      plan: empresa.plan,
-      fecha_vencimiento: empresa.fecha_vencimiento,
+      ...acceso.empresa,
+      suscripcion: acceso.suscripcion,
+      estado_suscripcion: acceso.estado_suscripcion,
+      dias_restantes: acceso.dias_restantes,
+      proxima_a_vencer: acceso.proxima_a_vencer,
     };
 
     return next();

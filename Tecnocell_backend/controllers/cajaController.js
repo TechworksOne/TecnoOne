@@ -144,8 +144,11 @@ exports.getCuentasBancarias = async (req, res) => {
       `SELECT * FROM cuentas_bancarias WHERE activa = TRUE${tenant.sql} ORDER BY nombre`,
       tenant.params
     );
-    const isAdmin = req.user?.role === 'admin' || (Array.isArray(req.user?.roles) && req.user.roles.includes('ADMINISTRADOR'));
-    const data = isAdmin
+    const canViewBalances =
+      req.user?.role === 'superadmin' ||
+      req.user?.permissions?.includes('*') ||
+      req.user?.permissions?.includes('bancos.administrar');
+    const data = canViewBalances
       ? cuentas
       : cuentas.map(({ id, nombre, tipo_cuenta, pos_asociado, activa }) => ({ id, nombre, tipo_cuenta, pos_asociado, activa }));
     res.json({ success: true, data });

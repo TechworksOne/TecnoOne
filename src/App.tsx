@@ -10,6 +10,7 @@ import routes from "./routes";
 import { useAuth } from "./store/useAuth";
 import { useEmpresa } from "./store/useEmpresa";
 import { useSidebar } from "./store/useSidebar";
+import SuperAdminRoutes from "./superAdminRoutes";
 
 /** Activa el cierre por inactividad solo cuando hay sesión */
 function IdleLogoutGuard() {
@@ -42,6 +43,7 @@ function TenantBrandingGuard() {
 
 export default function App() {
   const role = useAuth((state) => state.role);
+  const user = useAuth((state) => state.user);
   const initAuth = useAuth((state) => state.initAuth);
   const isOpen = useSidebar((state) => state.isOpen);
   const { pathname } = useLocation();
@@ -69,6 +71,15 @@ export default function App() {
     );
   }
 
+  if (user?.es_super_admin && user.tipo_usuario === 'PLATAFORMA') {
+    return (
+      <ToastProvider>
+        <IdleLogoutGuard />
+        <SuperAdminRoutes />
+      </ToastProvider>
+    );
+  }
+
   // Si hay usuario autenticado, mostrar la aplicación completa
   return (
     <ToastProvider>
@@ -88,6 +99,7 @@ export default function App() {
               ))}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/superadmin/*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </main>
         </div>

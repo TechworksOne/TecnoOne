@@ -569,30 +569,30 @@ function ModalAsignarTecnicoRepairs({
   const inputCls = 'w-full px-3 py-2 text-sm rounded-xl border bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40';
 
   const handleSave = async () => {
-    if (!selectedId) { setError('Selecciona un t\u00e9cnico'); return; }
+    if (!selectedId) { setError('Selecciona un técnico'); return; }
     try {
       setSaving(true); setError('');
       await asignarTecnico(repair.id, { tecnico_id: selectedId as number });
       onSuccess(); onClose();
     } catch (e: any) {
-      setError(e?.response?.data?.message || 'Error al asignar t\u00e9cnico');
+      setError(e?.response?.data?.message || 'Error al asignar técnico');
     } finally { setSaving(false); }
   };
 
   return (
-    <Modal open onClose={onClose} title={`Asignar T\u00e9cnico \u2014 ${repair.id}`}>
+    <Modal open onClose={onClose} title={`Asignar Técnico — ${repair.id}`}>
       <div className="space-y-4 text-sm">
         <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 space-y-1">
           <p className="text-xs text-slate-500 dark:text-slate-400">Cliente: <span className="font-semibold text-slate-800 dark:text-slate-200">{repair.clienteNombre}</span></p>
           <p className="text-xs text-slate-500 dark:text-slate-400">Equipo: <span className="text-slate-700 dark:text-slate-300">{[repair.recepcion.marca, repair.recepcion.modelo].filter(Boolean).join(' ')}</span></p>
         </div>
         <div>
-          <label className="block text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">T\u00e9cnico a asignar</label>
+          <label className="block text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">Técnico a asignar</label>
           <select className={inputCls} value={selectedId} onChange={e => { setSelectedId(e.target.value ? Number(e.target.value) : ''); setError(''); }}>
-            <option value="">\u2014 Seleccionar t\u00e9cnico \u2014</option>
+            <option value="">— Seleccionar técnico —</option>
             {tecnicos.map(t => (
               <option key={t.id} value={t.id}>
-                {(t.nombre_completo?.trim() && t.nombre_completo !== ' ') ? t.nombre_completo : t.username}{t.id === currentUserId ? ' (yo)' : ''} \u2014 {t.roles.join(', ')}
+                {(t.nombre_completo?.trim() && t.nombre_completo !== ' ') ? t.nombre_completo : t.username}{t.id === currentUserId ? ' (yo)' : ''} — {t.roles.join(', ')}
               </option>
             ))}
           </select>
@@ -606,7 +606,7 @@ function ModalAsignarTecnicoRepairs({
           <button onClick={onClose} className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Cancelar</button>
           <button onClick={handleSave} disabled={saving || !selectedId} className="px-4 py-2 text-xs font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-1.5">
             {saving ? <RefreshCw size={12} className="animate-spin" /> : <Check size={12} />}
-            {saving ? 'Asignando\u2026' : 'Asignar'}
+            {saving ? 'Asignando…' : 'Asignar'}
           </button>
         </div>
       </div>
@@ -641,6 +641,8 @@ function RepairCard({
   userIsAdmin: boolean;
 }) {
   const isCancelled = repair.estado === 'CANCELADA';
+  const isDelivered = repair.estado === 'ENTREGADA';
+  const canEditOperationalData = !isCancelled && !isDelivered;
   const saldo = calcSaldo(repair);
   const totalPagado = calcTotalPagado(repair);
   const isPaid = repair.total > 0 && saldo <= 0;
@@ -791,7 +793,7 @@ function RepairCard({
           <button onClick={() => onHistory(repair.id)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
             <History size={12} /> Ver Historial
           </button>
-          {!isCancelled && (
+          {canEditOperationalData && (
             <button onClick={onFlowManage} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800">
               <Clock size={12} /> Flujo
             </button>
@@ -802,7 +804,7 @@ function RepairCard({
           <button onClick={() => onPrintTicket(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800" title="Imprimir ticket térmico">
             <Printer size={12} /> Ticket
           </button>
-          {!isCancelled && (
+          {canEditOperationalData && (
             <button onClick={() => onEditPriority(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-800">
               <ChevronDown size={12} /> Prioridad
             </button>
@@ -817,9 +819,9 @@ function RepairCard({
               <Ban size={12} /> Cancelar
             </button>
           )}
-          {userIsAdmin && !isCancelled && (
+          {userIsAdmin && canEditOperationalData && (
             <button onClick={() => onAssignTech(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800">
-              <UserCheck size={12} /> {repair.tecnicoAsignadoId ? 'T\u00e9cnico' : 'Asignar'}
+              <UserCheck size={12} /> {repair.tecnicoAsignadoId ? 'Técnico' : 'Asignar'}
             </button>
           )}
         </div>
@@ -832,8 +834,9 @@ function RepairCard({
 export default function RepairsPage() {
   const navigate = useNavigate();
   const { repairs, deleteRepair, changeRepairState, updateRepair, searchRepairs, isLoading, validateStickerUniqueness } = useRepairs();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const userIsAdmin = isAdmin(user?.roles);
+  const canAssignTech = hasPermission('reparaciones.asignar_tecnico');
   const { empresa, loadEmpresa } = useEmpresa();
 
   const [searchQuery,    setSearchQuery]    = useState('');
@@ -1341,7 +1344,7 @@ const handleImprimirTicket = (r: Repair) => {
             onPayBalance={rep => setShowPayModal(rep)}
             onCancel={rep => setShowCancelModal(rep)}
             onAssignTech={rep => setShowAssignModal(rep)}
-            userIsAdmin={userIsAdmin}
+            userIsAdmin={canAssignTech}
           />
         ))}
       </div>
@@ -1358,7 +1361,8 @@ const handleImprimirTicket = (r: Repair) => {
       )}
 
       {/* Editar prioridad */}
-      {showPriorityModal && (
+      {showPriorityModal &&
+        !['ENTREGADA', 'CANCELADA'].includes(showPriorityModal.estado) && (
         <ModalEditarPrioridad
           repair={showPriorityModal}
           onClose={() => setShowPriorityModal(null)}
@@ -1385,7 +1389,8 @@ const handleImprimirTicket = (r: Repair) => {
       )}
 
       {/* Asignar técnico */}
-      {showAssignModal && (
+      {showAssignModal &&
+        !['ENTREGADA', 'CANCELADA'].includes(showAssignModal.estado) && (
         <ModalAsignarTecnicoRepairs
           repair={showAssignModal}
           tecnicos={tecnicos}
@@ -1402,6 +1407,8 @@ const handleImprimirTicket = (r: Repair) => {
         const totalPagado = calcTotalPagado(r);
         const isPaid = r.total > 0 && saldo <= 0;
         const isCancelled = r.estado === 'CANCELADA';
+        const isDelivered = r.estado === 'ENTREGADA';
+        const canEditOperationalData = !isCancelled && !isDelivered;
         return (
           <Modal
             open={showDetailModal}
@@ -1570,12 +1577,12 @@ const handleImprimirTicket = (r: Repair) => {
                 <button onClick={() => handleImprimirTicket(r)} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-amber-700 dark:text-amber-300 transition-colors">
                   <Printer size={13} /> Imprimir Ticket
                 </button>
-                {!isCancelled && (
+                {canEditOperationalData && (
                   <button onClick={() => navigate('/flujo-reparaciones')} className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white transition-colors">
                     <Clock size={13} /> Gestionar Flujo
                   </button>
                 )}
-                {!isCancelled && (
+                {canEditOperationalData && (
                   <button
                     onClick={() => { setShowDetailModal(false); setShowPriorityModal(r); }}
                     className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/40 hover:bg-violet-100 dark:hover:bg-violet-950/60 text-violet-700 dark:text-violet-300 transition-colors"

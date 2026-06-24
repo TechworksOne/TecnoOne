@@ -1,6 +1,7 @@
 // Controller: Órdenes de Trabajo (OT)
 // Gestiona la asignación de reparaciones a técnicos
 const db = require('../config/database');
+const auditoriaService = require('../services/auditoriaService');
 
 // Estados que ya no son trabajo activo
 const ESTADOS_INACTIVOS = ['CANCELADA', 'ENTREGADA'];
@@ -312,9 +313,6 @@ exports.asignarTecnico = async (req, res) => {
     const { id } = req.params;
     const { tecnico_id } = req.body;
 
-    if (!isAdmin(req.user)) {
-      return res.status(403).json({ success: false, message: 'Solo administradores pueden asignar técnicos' });
-    }
     if (!tecnico_id) {
       return res.status(400).json({ success: false, message: 'tecnico_id es requerido' });
     }
@@ -368,6 +366,15 @@ exports.asignarTecnico = async (req, res) => {
       [id, ...tenant.params]
     );
 
+    await auditoriaService.registrar({
+      req,
+      empresaId: req.tenant?.empresa_id,
+      accion: 'ASIGNAR_TECNICO',
+      entidad: 'REPARACION',
+      entidadId: id,
+      descripcion: `Técnico ${tecnico.name || tecnico.username || tecnico.id} asignado`,
+      datosNuevos: { tecnico_id: tecnico.id, tecnico_nombre: tecnico.name || tecnico.nombre_completo },
+    });
     res.json({
       success: true,
       message: 'Técnico asignado correctamente',
@@ -384,10 +391,6 @@ exports.asignarTecnico = async (req, res) => {
 exports.quitarAsignacion = async (req, res) => {
   try {
     const { id } = req.params;
-
-    if (!isAdmin(req.user)) {
-      return res.status(403).json({ success: false, message: 'Solo administradores pueden quitar asignaciones' });
-    }
 
     const tenant = repairTenantClause(req);
     const [[rep]] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`, [id, ...tenant.params]);

@@ -5,34 +5,33 @@ const flujoController = require('../controllers/flujoReparacionController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePlanModule = require('../middleware/requirePlanModule');
+const requirePermission = require('../middleware/requirePermission');
 
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
-
-// ========== RUTAS DE INGRESO DE EQUIPO (CHECKLIST) ==========
-// Guardar/actualizar checklist de ingreso con fotos
-router.post(
+router.use(requirePlanModule('taller_operativo'));
+// ========== ENDPOINT LEGACY DE CHECKLIST ==========
+// El checklist activo se gestiona mediante /api/check-equipo.
+router.all(
   '/:id/ingreso-equipo',
-  flujoController.uploadMiddleware,
-  flujoController.saveIngresoEquipo
+  flujoController.legacyIngresoEquipoDisabled
 );
 
-// Obtener checklist de ingreso
-router.get(
-  '/:id/ingreso-equipo',
-  flujoController.getIngresoEquipo
-);
+
 
 // ========== REPARACIONES DEL FLUJO ACTIVO ==========
 router.get(
   '/activas',
+  requirePermission('flujo_reparaciones.ver'),
   flujoController.getReparacionesFlujoActivo
 );
 
 // ========== HISTORIAL DE ENTREGADAS ==========
 router.get(
   '/entregadas',
+  requirePermission('flujo_reparaciones.ver'),
   flujoController.getEntregadas
 );
 
@@ -40,12 +39,14 @@ router.get(
 // Cambiar estado de reparación
 router.put(
   '/:id/estado',
+  requirePermission('flujo_reparaciones.editar'),
   flujoController.cambiarEstado
 );
 
 // Obtener historial completo de estados
 router.get(
   '/:id/historial',
+  requirePermission('flujo_reparaciones.ver'),
   flujoController.getHistorial
 );
 
@@ -53,18 +54,21 @@ router.get(
 // Asignar técnico
 router.put(
   '/:id/tecnico',
+  requirePermission('flujo_reparaciones.editar'),
   flujoController.asignarTecnico
 );
 
 // Cambiar prioridad
 router.put(
   '/:id/prioridad',
+  requirePermission('flujo_reparaciones.editar'),
   flujoController.cambiarPrioridad
 );
 
 // ========== REINGRESO POR GARANTÍA ==========
 router.post(
   '/:id/reingresar-garantia',
+  requirePermission('flujo_reparaciones.editar'),
   flujoController.reingresarGarantia
 );
 

@@ -1,0 +1,43 @@
+const express = require('express');
+const router = express.Router();
+const { verifyToken } = require('../middleware/authMiddleware');
+const { verifySuperAdmin } = require('../middleware/superAdminMiddleware');
+const controller = require('../controllers/superAdminController');
+const subscriptionController = require('../controllers/subscriptionController');
+const planController = require('../controllers/planController');
+
+router.use(verifyToken);
+router.use(verifySuperAdmin);
+
+router.get('/me', controller.getMe);
+router.get('/planes', planController.getPlanes);
+router.get('/planes/:id', planController.getPlanById);
+router.get('/empresas', controller.getEmpresas);
+router.get('/empresas/:id/consumo-plan', planController.getEmpresaConsumoPlan);
+router.get('/empresas/:id', controller.getEmpresaById);
+router.post('/empresas', controller.createEmpresa);
+router.put('/empresas/:id', controller.updateEmpresa);
+router.patch('/empresas/:id/estado', controller.updateEmpresaEstado);
+router.post('/empresas/:id/administrador', controller.createEmpresaAdministrador);
+router.get('/empresas/:id/suscripcion', subscriptionController.getSuscripcion);
+router.patch('/empresas/:id/suscripcion', subscriptionController.updateSuscripcion);
+router.patch(
+  '/empresas/:id/suscripcion/plan',
+  subscriptionController.cambiarPlanInmediato
+);
+
+router.patch(
+  '/empresas/:id/suscripcion/plan/programar',
+  subscriptionController.programarCambioPlan
+);
+
+router.delete(
+  '/empresas/:id/suscripcion/plan/programado',
+  subscriptionController.cancelarCambioPlanProgramado
+);
+
+
+router.post('/empresas/:id/suscripcion/renovar', subscriptionController.renovarSuscripcion);
+router.get('/empresas/:id/suscripcion/historial', subscriptionController.getHistorial);
+
+module.exports = router;

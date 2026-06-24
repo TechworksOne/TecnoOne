@@ -5,51 +5,136 @@ import { canAccessRoute } from '../../lib/permissions';
 
 interface Props {
   children: React.ReactNode;
-  /** Roles requeridos para acceder (si está vacío: sólo autenticación) */
   roles?: string[];
+  permission?: string;
+  moduleCode?: string;
 }
 
-/** Normaliza roles RBAC + campo role legado para compatibilidad hacia atrás */
-function getEffectiveRoles(user: { roles?: string[]; role?: string } | null): string[] {
-  const rbac    = Array.isArray(user?.roles) ? user!.roles : [];
-  const legacy  = (user?.role ?? '').toLowerCase();
-  const set     = new Set(rbac);
-  if (legacy === 'admin' || legacy === 'administrador') set.add('ADMINISTRADOR');
-  if (legacy === 'tecnico')                             set.add('TECNICO');
-  if (legacy === 'ventas' || legacy === 'employee')     set.add('VENTAS');
-  return [...set];
-}
+function getEffectiveRoles(
+  user: {
+    roles?: string[];
+    role?: string;
+  } | null
+): string[] {
+  const rbac =
+    Array.isArray(user?.roles)
+      ? user.roles
+      : [];
 
-export default function ProtectedRoute({ children, roles }: Props) {
-  const { user, role } = useAuth();
-  const location = useLocation();
+  const legacy =
+    (user?.role ?? '').toLowerCase();
 
-  // No autenticado → login
-  if (!role) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+  const roles = new Set(rbac);
+
+  if (
+    legacy === 'admin' ||
+    legacy === 'administrador'
+  ) {
+    roles.add('ADMINISTRADOR');
   }
 
-  // Verificar acceso por ruta/roles
-  const userRoles = getEffectiveRoles(user);
-  const canAccess = roles
-    ? roles.some(r => userRoles.includes(r))
-    : canAccessRoute(userRoles, location.pathname);
+  if (legacy === 'tecnico') {
+    roles.add('TECNICO');
+  }
 
-  if (!canAccess) {
+  if (
+    legacy === 'ventas' ||
+    legacy === 'employee'
+  ) {
+    roles.add('VENTAS');
+  }
+
+  if (legacy === 'superadmin') {
+    roles.add('SUPERADMIN');
+  }
+
+  return [...roles];
+}
+
+export default function ProtectedRoute({
+  children,
+  roles,
+  permission,
+  moduleCode,
+}: Props) {
+  const {
+    user,
+    role,
+    permissionsLoaded,
+    modulesLoaded,
+    hasPermission,
+    hasModule,
+  } = useAuth();
+
+  const location = useLocation();
+
+  if (!role) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center gap-4 px-6">
-        <div className="bg-red-50 rounded-2xl p-5">
-          <ShieldOff size={40} className="text-red-400 mx-auto" />
+      <Navigate
+        to="/login"
+        state={{ from: location }}
+        replace
+      />
+    );
+  }
+
+  if (
+    (permission && !permissionsLoaded) ||
+    (moduleCode && !modulesLoaded)
+  ) {
+    return (
+      <div className="min-h-[40vh] animate-pulse rounded-2xl bg-[var(--color-surface)]" />
+    );
+  }
+
+  const userRoles = getEffectiveRoles(user);
+
+  const permissionAccess = permission
+    ? hasPermission(permission)
+    : roles
+      ? roles.some(requiredRole =>
+          userRoles.includes(requiredRole)
+        )
+      : canAccessRoute(
+          userRoles,
+          location.pathname
+        );
+
+  const moduleAccess = moduleCode
+    ? hasModule(moduleCode)
+    : true;
+
+  if (!permissionAccess || !moduleAccess) {
+    const moduleDenied =
+      Boolean(moduleCode) &&
+      !moduleAccess;
+
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="rounded-2xl bg-red-50 p-5">
+          <ShieldOff
+            size={40}
+            className="mx-auto text-red-400"
+          />
         </div>
+
         <div>
-          <h2 className="text-lg font-bold text-slate-800">Acceso no autorizado</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            No tienes permisos para acceder a esta sección.
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
+            {moduleDenied
+              ? 'Módulo no incluido'
+              : 'Acceso no autorizado'}
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            {moduleDenied
+              ? 'Este módulo no está incluido en el plan contratado.'
+              : 'No tienes permisos para acceder a esta sección.'}
           </p>
         </div>
+
         <a
           href="/dashboard"
-          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl px-5 py-2.5 transition-colors"
+          className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
         >
           Volver al Dashboard
         </a>

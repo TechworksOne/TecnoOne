@@ -1,8 +1,10 @@
 import {
   ShoppingCart, Plus, Search, Package, Hash, X, Save,
   Building2, ChevronDown, Wrench, Loader2, CreditCard,
+  Landmark, Wallet, AlertTriangle, ExternalLink,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useToast } from "../../components/ui/Toast";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import { formatMoney } from "../../lib/format";
@@ -67,6 +69,7 @@ export default function NuevaCompraModal({
   const { suppliers, loadSuppliers } = useSuppliersStore();
   const { repuestos, loadRepuestos } = useRepuestosStore();
   const toast = useToast();
+  const navigate = useNavigate();
 
   const [saving, setSaving] = useState(false);
   const [searchProduct, setSearchProduct] = useState("");
@@ -78,18 +81,43 @@ export default function NuevaCompraModal({
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'transferencia' | 'tarjeta_credito'>('efectivo');
   const [tarjetaId, setTarjetaId] = useState<number | ''>('');
   const [tarjetas, setTarjetas] = useState<TarjetaCredito[]>([]);
+  const [cuentaId, setCuentaId] = useState<number | ''>('');
+  const [cuentas, setCuentas] = useState<purchaseService.CuentaPago[]>([]);
+  const [saldoCaja, setSaldoCaja] = useState(0);
+  const [loadingFuentes, setLoadingFuentes] = useState(false);
+  const [fuentesError, setFuentesError] = useState("");
 
   const isDirty = items.length > 0 || compraForm.proveedor_nombre !== "";
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-  // Load catalogs when opened
+  // Load catalogs and financial sources when opened
   useEffect(() => {
-    if (isOpen) {
-      loadProducts(1, 9999);
-      loadSuppliers();
-      loadRepuestos();
-      TarjetaService.getTarjetas().then(setTarjetas).catch(() => {});
-    }
+    if (!isOpen) return;
+
+    loadProducts(1, 9999);
+    loadSuppliers();
+    loadRepuestos();
+
+    setLoadingFuentes(true);
+    setFuentesError("");
+
+    purchaseService
+      .getFuentesPago()
+      .then((fuentes) => {
+        setSaldoCaja(Number(fuentes.saldo_caja || 0));
+        setCuentas(fuentes.cuentas || []);
+        setTarjetas(fuentes.tarjetas || []);
+      })
+      .catch((error) => {
+        setSaldoCaja(0);
+        setCuentas([]);
+        setTarjetas([]);
+        setFuentesError(
+          error.response?.data?.message ||
+          "No fue posible consultar los saldos disponibles"
+        );
+      })
+      .finally(() => setLoadingFuentes(false));
   }, [isOpen]);
 
   // Escape key
@@ -121,6 +149,8 @@ export default function NuevaCompraModal({
     setShowSupplierDrop(false);
     setMetodoPago('efectivo');
     setTarjetaId('');
+    setCuentaId('');
+    setFuentesError('');
   }
 
   function attemptClose() {
@@ -203,6 +233,41 @@ export default function NuevaCompraModal({
   const total = items.reduce((s, i) => s + i.cantidad * i.precio_unitario, 0);
   const totalUnidades = items.reduce((s, i) => s + i.cantidad, 0);
 
+  const cuentaSeleccionada = cuentas.find((cuenta) => cuenta.id === cuentaId);
+  const tarjetaSeleccionada = tarjetas.find((tarjeta) => tarjeta.id === tarjetaId);
+
+  const creditoDisponible = tarjetaSeleccionada
+    ? Math.max(
+        0,
+        TarjetaService.centsToQ(
+          Number(tarjetaSeleccionada.limite_credito || 0) -
+          Number(tarjetaSeleccionada.saldo_centavos || 0)
+        )
+      )
+    : null;
+
+  const saldoFuente =
+    metodoPago === 'efectivo'
+      ? saldoCaja
+      : metodoPago === 'transferencia'
+        ? cuentaSeleccionada?.saldo_actual ?? null
+        : creditoDisponible;
+
+  const fuenteSinSeleccionar =
+    (metodoPago === 'transferencia' && !cuentaId) ||
+    (metodoPago === 'tarjeta_credito' && !tarjetaId);
+
+  const fondosInsuficientes =
+    saldoFuente !== null &&
+    total > Number(saldoFuente) + 0.0001;
+
+  const pagoInvalido =
+    loadingFuentes ||
+    Boolean(fuentesError) ||
+    fuenteSinSeleccionar ||
+    fondosInsuficientes ||
+    total <= 0;
+
   // ── Search filter ────────────────────────────────────────────────────────
   const q = searchProduct.toLowerCase();
   const filteredProducts = products.filter(
@@ -224,10 +289,17 @@ export default function NuevaCompraModal({
       toast.add("El nombre del proveedor es requerido", "error");
       return;
     }
+
     if (items.length === 0) {
       toast.add("Debes agregar al menos un producto o repuesto", "error");
       return;
     }
+
+    if (total <= 0) {
+      toast.add("El total de la compra debe ser mayor que cero", "error");
+      return;
+    }
+
     for (const item of items) {
       if (item.aplica_serie && (!item.series[0] || !item.series[0].trim())) {
         toast.add(
@@ -237,42 +309,63 @@ export default function NuevaCompraModal({
         return;
       }
     }
+
+    if (fuentesError) {
+      toast.add(fuentesError, "error");
+      return;
+    }
+
+    if (loadingFuentes) {
+      toast.add("Espera mientras se consultan los saldos disponibles", "error");
+      return;
+    }
+
+    if (metodoPago === 'transferencia' && !cuentaId) {
+      toast.add("Selecciona una cuenta bancaria", "error");
+      return;
+    }
+
     if (metodoPago === 'tarjeta_credito' && !tarjetaId) {
-      toast.add('Selecciona una tarjeta de crédito', 'error');
+      toast.add("Selecciona una tarjeta de crédito", "error");
+      return;
+    }
+
+    if (fondosInsuficientes) {
+      toast.add(
+        `Fondos insuficientes. Disponible: ${formatMoney(Number(saldoFuente || 0))}`,
+        "error"
+      );
       return;
     }
 
     try {
       setSaving(true);
-      const productosItems = items.filter((i) => i.tipo_item === "producto");
-      const repuestosItems = items.filter((i) => i.tipo_item === "repuesto");
-      let creadas = 0;
 
-      if (productosItems.length > 0) {
-        await purchaseService.createCompraProductos({
-          ...compraForm,
-          items: productosItems.map((i) => ({
-            ...i,
-            series: i.aplica_serie ? i.series : [],
-          })),
-          metodo_pago: metodoPago,
-          tarjeta_id: metodoPago === 'tarjeta_credito' ? tarjetaId || undefined : undefined,
-        } as any);
-        creadas++;
-      }
-      if (repuestosItems.length > 0) {
-        await purchaseService.createCompraRepuestos({
-          ...compraForm,
-          items: repuestosItems.map((i) => ({ ...i, series: [] })),
-          metodo_pago: metodoPago,
-          tarjeta_id: metodoPago === 'tarjeta_credito' ? tarjetaId || undefined : undefined,
-        } as any);
-        creadas++;
-      }
+      await purchaseService.createCompra({
+        ...compraForm,
+        proveedor_id: compraForm.proveedor_id ?? undefined,
+        items: items.map((item) => ({
+          ...item,
+          series:
+            item.tipo_item === "producto" && item.aplica_serie
+              ? item.series
+              : [],
+        })),
+        metodo_pago: metodoPago,
+        tarjeta_id:
+          metodoPago === 'tarjeta_credito'
+            ? Number(tarjetaId)
+            : undefined,
+        cuenta_id:
+          metodoPago === 'transferencia'
+            ? Number(cuentaId)
+            : undefined,
+      });
 
       toast.add(
-        `✅ ${creadas} compra(s) registrada(s). Stock actualizado: +${totalUnidades} unidades`
+        `✅ Compra registrada. Stock actualizado: +${totalUnidades} unidades`
       );
+
       resetForm();
       onSuccess?.();
       onClose();
@@ -403,12 +496,19 @@ export default function NuevaCompraModal({
               </DField>
               <DField label="Teléfono">
                 <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={15}
                   className={inputCls}
                   value={compraForm.proveedor_telefono}
                   onChange={(e) =>
-                    setCompraForm({ ...compraForm, proveedor_telefono: e.target.value })
+                    setCompraForm({
+                      ...compraForm,
+                      proveedor_telefono: e.target.value.replace(/\D/g, '').slice(0, 15),
+                    })
                   }
-                  placeholder="2222-3333"
+                  placeholder="22223333"
                 />
               </DField>
               <DField label="NIT">
@@ -744,38 +844,250 @@ export default function NuevaCompraModal({
 
           {/* ── MÉTODO DE PAGO ───────────────────────────────────────────── */}
           <section className="space-y-3 border-t border-[rgba(72,185,230,0.14)] pt-5">
-            <h3 className="text-xs font-bold text-[#7F8A99] uppercase tracking-widest flex items-center gap-2">
-              <CreditCard size={13} /> Método de pago
-            </h3>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h3 className="text-xs font-bold text-[#7F8A99] uppercase tracking-widest flex items-center gap-2">
+                <CreditCard size={13} /> Método de pago
+              </h3>
+
+              <button
+                type="button"
+                onClick={() => navigate("/caja-bancos")}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#48B9E6] hover:text-[#7DD3FC] transition-colors"
+              >
+                Administrar caja y cuentas
+                <ExternalLink size={12} />
+              </button>
+            </div>
+
             <div className="flex gap-2 flex-wrap">
-              {(['efectivo', 'transferencia', 'tarjeta_credito'] as const).map(m => (
+              {(['efectivo', 'transferencia', 'tarjeta_credito'] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
-                  onClick={() => setMetodoPago(m)}
+                  onClick={() => {
+                    setMetodoPago(m);
+
+                    if (m !== 'transferencia') {
+                      setCuentaId('');
+                    }
+
+                    if (m !== 'tarjeta_credito') {
+                      setTarjetaId('');
+                    }
+                  }}
                   className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all border ${
                     metodoPago === m
                       ? 'bg-[#48B9E6]/20 border-[#48B9E6] text-[#48B9E6]'
                       : 'border-[rgba(72,185,230,0.18)] text-[#7F8A99] hover:border-[#48B9E6]/40 hover:text-[#B8C2D1]'
                   }`}
                 >
-                  {m === 'efectivo' ? 'Efectivo' : m === 'transferencia' ? 'Transferencia' : 'Tarjeta de Crédito'}
+                  {m === 'efectivo'
+                    ? 'Efectivo'
+                    : m === 'transferencia'
+                      ? 'Transferencia'
+                      : 'Tarjeta de Crédito'}
                 </button>
               ))}
             </div>
-            {metodoPago === 'tarjeta_credito' && (
-              <div>
-                <label className="block text-[10px] font-semibold text-[#7F8A99] uppercase tracking-widest mb-1.5">Tarjeta *</label>
-                <select
-                  value={tarjetaId}
-                  onChange={e => setTarjetaId(Number(e.target.value) || '')}
-                  className="w-full px-3.5 py-2.5 bg-[#0D1526] border border-[rgba(72,185,230,0.18)] rounded-xl text-sm text-[#F8FAFC] focus:outline-none focus:border-[#48B9E6] focus:ring-2 focus:ring-[#48B9E6]/20 transition-all"
-                >
-                  <option value="">— Seleccionar tarjeta —</option>
-                  {tarjetas.map(t => (
-                    <option key={t.id} value={t.id}>{TarjetaService.formatTarjeta(t)}</option>
-                  ))}
-                </select>
+
+            {loadingFuentes && (
+              <div className="flex items-center gap-2 rounded-xl border border-[rgba(72,185,230,0.18)] bg-[#0D1526] px-3.5 py-3 text-xs text-[#B8C2D1]">
+                <Loader2 size={14} className="animate-spin text-[#48B9E6]" />
+                Consultando saldos y crédito disponible...
+              </div>
+            )}
+
+            {fuentesError && !loadingFuentes && (
+              <div className="flex items-start gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3.5 py-3 text-xs text-red-200">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                <span>{fuentesError}</span>
+              </div>
+            )}
+
+            {!loadingFuentes && !fuentesError && metodoPago === 'efectivo' && (
+              <div
+                className={`rounded-xl border px-4 py-3 ${
+                  fondosInsuficientes
+                    ? 'border-red-400/30 bg-red-500/10'
+                    : 'border-[rgba(72,185,230,0.18)] bg-[#0D1526]'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Wallet size={16} className="text-[#48B9E6]" />
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest text-[#7F8A99]">
+                        Saldo disponible en caja
+                      </p>
+                      <p className="text-sm font-bold text-[#F8FAFC]">
+                        {formatMoney(saldoCaja)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {saldoCaja <= 0 && (
+                    <button
+                      type="button"
+                      onClick={() => navigate("/caja-bancos")}
+                      className="text-xs font-semibold text-[#48B9E6] hover:text-[#7DD3FC]"
+                    >
+                      Registrar ingreso
+                    </button>
+                  )}
+                </div>
+
+                {fondosInsuficientes && (
+                  <p className="mt-2 flex items-center gap-1.5 text-xs text-red-200">
+                    <AlertTriangle size={13} />
+                    La caja no tiene saldo suficiente para esta compra.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {!loadingFuentes && !fuentesError && metodoPago === 'transferencia' && (
+              <div className="space-y-2">
+                <label className="block text-[10px] font-semibold text-[#7F8A99] uppercase tracking-widest">
+                  Cuenta bancaria *
+                </label>
+
+                {cuentas.length > 0 ? (
+                  <>
+                    <select
+                      value={cuentaId}
+                      onChange={(e) => setCuentaId(Number(e.target.value) || '')}
+                      className="w-full px-3.5 py-2.5 bg-[#0D1526] border border-[rgba(72,185,230,0.18)] rounded-xl text-sm text-[#F8FAFC] focus:outline-none focus:border-[#48B9E6] focus:ring-2 focus:ring-[#48B9E6]/20 transition-all"
+                    >
+                      <option value="">— Seleccionar cuenta bancaria —</option>
+
+                      {cuentas.map((cuenta) => (
+                        <option key={cuenta.id} value={cuenta.id}>
+                          {cuenta.nombre} — {formatMoney(cuenta.saldo_actual)}
+                        </option>
+                      ))}
+                    </select>
+
+                    {cuentaSeleccionada && (
+                      <div
+                        className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 ${
+                          fondosInsuficientes
+                            ? 'border-red-400/30 bg-red-500/10'
+                            : 'border-[rgba(72,185,230,0.18)] bg-[#0D1526]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Landmark size={16} className="text-[#48B9E6]" />
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest text-[#7F8A99]">
+                              Saldo disponible
+                            </p>
+                            <p className="text-sm font-bold text-[#F8FAFC]">
+                              {formatMoney(cuentaSeleccionada.saldo_actual)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {fondosInsuficientes && (
+                          <span className="text-xs font-semibold text-red-200">
+                            Saldo insuficiente
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3">
+                    <p className="text-xs text-amber-100">
+                      No hay cuentas bancarias activas para realizar la transferencia.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/caja-bancos")}
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[#48B9E6] hover:text-[#7DD3FC]"
+                    >
+                      Registrar una cuenta bancaria
+                      <ExternalLink size={12} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!loadingFuentes && !fuentesError && metodoPago === 'tarjeta_credito' && (
+              <div className="space-y-2">
+                <label className="block text-[10px] font-semibold text-[#7F8A99] uppercase tracking-widest">
+                  Tarjeta *
+                </label>
+
+                {tarjetas.length > 0 ? (
+                  <>
+                    <select
+                      value={tarjetaId}
+                      onChange={(e) => setTarjetaId(Number(e.target.value) || '')}
+                      className="w-full px-3.5 py-2.5 bg-[#0D1526] border border-[rgba(72,185,230,0.18)] rounded-xl text-sm text-[#F8FAFC] focus:outline-none focus:border-[#48B9E6] focus:ring-2 focus:ring-[#48B9E6]/20 transition-all"
+                    >
+                      <option value="">— Seleccionar tarjeta —</option>
+
+                      {tarjetas.map((tarjeta) => {
+                        const disponible = Math.max(
+                          0,
+                          TarjetaService.centsToQ(
+                            Number(tarjeta.limite_credito || 0) -
+                            Number(tarjeta.saldo_centavos || 0)
+                          )
+                        );
+
+                        return (
+                          <option key={tarjeta.id} value={tarjeta.id}>
+                            {TarjetaService.formatTarjeta(tarjeta)} — Disponible {formatMoney(disponible)}
+                          </option>
+                        );
+                      })}
+                    </select>
+
+                    {tarjetaSeleccionada && creditoDisponible !== null && (
+                      <div
+                        className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 ${
+                          fondosInsuficientes
+                            ? 'border-red-400/30 bg-red-500/10'
+                            : 'border-[rgba(72,185,230,0.18)] bg-[#0D1526]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <CreditCard size={16} className="text-[#48B9E6]" />
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest text-[#7F8A99]">
+                              Crédito disponible
+                            </p>
+                            <p className="text-sm font-bold text-[#F8FAFC]">
+                              {formatMoney(creditoDisponible)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {fondosInsuficientes && (
+                          <span className="text-xs font-semibold text-red-200">
+                            Crédito insuficiente
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3">
+                    <p className="text-xs text-amber-100">
+                      No hay tarjetas de crédito activas registradas.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/caja-bancos")}
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[#48B9E6] hover:text-[#7DD3FC]"
+                    >
+                      Registrar una tarjeta
+                      <ExternalLink size={12} />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -833,7 +1145,8 @@ export default function NuevaCompraModal({
                 disabled={
                   saving ||
                   items.length === 0 ||
-                  !compraForm.proveedor_nombre.trim()
+                  !compraForm.proveedor_nombre.trim() ||
+                  pagoInvalido
                 }
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] hover:brightness-110 text-white shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100"
               >

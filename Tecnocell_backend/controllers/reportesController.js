@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { parsePagination, parseLimit } = require('../utils/pagination');
 
 // ===== HELPERS =====
 
@@ -448,7 +449,7 @@ exports.getProductosMasVendidos = async (req, res) => {
 
     const resultado = Object.values(productosAgg)
       .sort((a, b) => b.cantidad_vendida - a.cantidad_vendida)
-      .slice(0, parseInt(limit))
+      .slice(0, parseLimit(limit, { defaultLimit: 10, maxLimit: 100 }))
       .map(p => ({
         ...p,
         ingresos: p.ingresos / 100,
@@ -495,9 +496,12 @@ exports.getHistorialVentas = async (req, res) => {
 
     query += ' ORDER BY COALESCE(v.fecha_venta, v.created_at) DESC';
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { page: pageNum, limit: limitNum, offset } = parsePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
     query += ' LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), offset);
+    params.push(limitNum, offset);
 
     const [ventas] = await db.query(query, params);
     const costMaps = await getCostMaps(ventas, empresaId);
@@ -524,8 +528,8 @@ exports.getHistorialVentas = async (req, res) => {
     res.json({
       data: resultado,
       total: resultado.length,
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page: pageNum,
+      limit: limitNum,
       advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null
     });
   } catch (error) {

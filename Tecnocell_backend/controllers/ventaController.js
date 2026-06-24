@@ -1,5 +1,15 @@
 const db = require('../config/database');
+const { parsePagination } = require('../utils/pagination');
 const cajaController = require('./cajaController');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const {
+  imageFileFilter,
+  getSafeImageExtension,
+} = require('../utils/uploadSecurity');
+const { validatePhone } = require('../utils/phoneValidation');
+const auditoriaService = require('../services/auditoriaService');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -24,6 +34,70 @@ function ventaTenantClause(req, alias = 'v') {
     ? { sql: '', params: [] }
     : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
+
+const VENTAS_UPLOADS_BASE = path.join(
+  __dirname,
+  '..',
+  'uploads',
+  'ventas'
+);
+
+const uploadComprobante = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      try {
+        const empresaId = requireTenantEmpresaId(req);
+        const dir = path.join(
+          VENTAS_UPLOADS_BASE,
+          String(empresaId),
+          'comprobantes'
+        );
+
+        fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      } catch (error) {
+        cb(error);
+      }
+    },
+    filename: (req, file, cb) => {
+      const ext = getSafeImageExtension(file);
+      const random = Math.random().toString(36).slice(2, 10);
+
+      cb(null, `comprobante-${Date.now()}-${random}${ext}`);
+    },
+  }),
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+  },
+  fileFilter: imageFileFilter,
+});
+
+exports.uploadComprobante = uploadComprobante;
+
+exports.subirComprobante = async (req, res) => {
+  try {
+    const empresaId = requireTenantEmpresaId(req);
+
+    if (!req.file) {
+      return res.status(400).json({
+        message: 'Debes seleccionar una imagen de comprobante.',
+      });
+    }
+
+    const url = `/uploads/ventas/${empresaId}/comprobantes/${req.file.filename}`;
+
+    return res.status(201).json({
+      success: true,
+      data: { url },
+    });
+  } catch (error) {
+    console.error('Error al subir comprobante:', error);
+
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Error al subir el comprobante.',
+    });
+  }
+};
 
 // Valores permitidos para metodo_pago (deben coincidir con el ENUM de la DB)
 const VALID_METODOS_PAGO = [
@@ -58,152 +132,324 @@ function normalizeMetodoPago(metodo) {
  * POST /api/ventas
  */
 exports.createVenta = async (req, res) => {
+  let connection;
+
   try {
     const {
-      cliente_id, cliente_nombre, cliente_telefono, cliente_email,
-      cliente_nit, cliente_direccion, cotizacion_id, numero_cotizacion,
-      tipo_venta, items, subtotal, impuestos, descuento, total,
-      metodo_pago, pagos, monto_pagado, observaciones, notas_internas,
-      created_by, interes_tarjeta
+      cliente_id,
+      cliente_nombre,
+      cliente_telefono,
+      cliente_email,
+      cliente_nit,
+      cliente_direccion,
+      cotizacion_id,
+      numero_cotizacion,
+      tipo_venta,
+      items,
+      subtotal,
+      impuestos,
+      descuento,
+      total,
+      metodo_pago,
+      pagos,
+      monto_pagado,
+      observaciones,
+      notas_internas,
+      created_by,
+      interes_tarjeta,
     } = req.body;
+
+    const telefonoValidado = validatePhone(cliente_telefono, {
+      label: 'El teléfono del cliente',
+    });
+
+    if (!telefonoValidado.ok) {
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const clienteTelefonoNormalizado = telefonoValidado.value;
+
     const empresaId = requireTenantEmpresaId(req);
 
-    // Validaciones básicas
     if (!cliente_id || !cliente_nombre) {
-      return res.status(400).json({ error: 'Cliente es requerido' });
+      return res.status(400).json({
+        error: 'Cliente es requerido',
+      });
     }
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'La venta debe tener al menos un item' });
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        error: 'La venta debe tener al menos un item',
+      });
     }
 
-    if (!total || total <= 0) {
-      return res.status(400).json({ error: 'El total debe ser mayor a 0' });
+    if (!total || Number(total) <= 0) {
+      return res.status(400).json({
+        error: 'El total debe ser mayor a 0',
+      });
     }
 
     if (!metodo_pago) {
-      return res.status(400).json({ error: 'El método de pago es requerido' });
+      return res.status(400).json({
+        error: 'El método de pago es requerido',
+      });
     }
 
+    const metodoPagoNorm = normalizeMetodoPago(metodo_pago);
+
+    if (!metodoPagoNorm) {
+      return res.status(400).json({
+        error: `Método de pago inválido: "${metodo_pago}". Valores permitidos: ${VALID_METODOS_PAGO.join(', ')}`,
+      });
+    }
+
+    let pagosNormalizados = null;
+
+    if (pagos && Array.isArray(pagos)) {
+      pagosNormalizados = [];
+
+      for (const pago of pagos) {
+        const metodoPagoIndividual = normalizeMetodoPago(pago.metodo);
+
+        if (!metodoPagoIndividual) {
+          return res.status(400).json({
+            error: `Método de pago inválido en pago: "${pago.metodo}"`,
+          });
+        }
+
+        const montoPago = Number(pago.monto || 0);
+        const totalVenta = Number(total);
+        const esEfectivo =
+          metodoPagoIndividual === 'EFECTIVO';
+
+        pagosNormalizados.push({
+          ...pago,
+          metodo: metodoPagoIndividual,
+
+          // El monto aplicado nunca debe incluir el cambio.
+          monto: esEfectivo
+            ? Math.min(montoPago, totalVenta)
+            : montoPago,
+
+          // Datos informativos para recibo o auditoría.
+          monto_recibido: esEfectivo
+            ? Number(
+                pago.monto_recibido ??
+                montoPago
+              )
+            : null,
+
+          cambio: esEfectivo
+            ? Number(
+                pago.cambio ??
+                Math.max(0, montoPago - totalVenta)
+              )
+            : null,
+        });
+      }
+    }
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
     if (cliente_id && !isSuperadminTenant(req)) {
-      const [clientes] = await db.query(
-        'SELECT id FROM clientes WHERE id = ? AND empresa_id = ? AND activo = true',
+      const [clientes] = await connection.query(
+        `SELECT id
+         FROM clientes
+         WHERE id = ?
+           AND empresa_id = ?
+           AND activo = true
+         LIMIT 1`,
         [cliente_id, empresaId]
       );
 
       if (clientes.length === 0) {
-        return res.status(404).json({ error: 'Cliente no encontrado' });
+        const error = new Error('Cliente no encontrado');
+        error.statusCode = 404;
+        throw error;
       }
     }
 
-    // Normalizar y validar metodo_pago
-    const metodoPagoNorm = normalizeMetodoPago(metodo_pago);
-    if (!metodoPagoNorm) {
-      return res.status(400).json({
-        error: `Método de pago inválido: "${metodo_pago}". Valores permitidos: ${VALID_METODOS_PAGO.join(', ')}`
-      });
-    }
-
-    // Validar también los métodos de los pagos individuales (modo MIXTO)
-    if (pagos && Array.isArray(pagos)) {
-      for (const pago of pagos) {
-        if (!normalizeMetodoPago(pago.metodo)) {
-          return res.status(400).json({
-            error: `Método de pago inválido en pago: "${pago.metodo}"`
-          });
-        }
-      }
-    }
-
-    // Convertir items a JSON
     const itemsJSON = JSON.stringify(items);
-    const pagosJSON = pagos ? JSON.stringify(pagos) : null;
+    const pagosJSON = pagosNormalizados
+      ? JSON.stringify(pagosNormalizados)
+      : null;
+
+    const totalVentaAplicado = Number(total) || 0;
+
+    const montoPagadoNormalizado = pagosNormalizados
+      ? Math.min(
+          pagosNormalizados.reduce(
+            (acumulado, pago) =>
+              acumulado + Number(pago.monto || 0),
+            0
+          ),
+          totalVentaAplicado
+        )
+      : Math.min(
+          Number(monto_pagado || 0),
+          totalVentaAplicado
+        );
+
 
     const query = `
       INSERT INTO ventas (
-        empresa_id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
-        cliente_nit, cliente_direccion, cotizacion_id, numero_cotizacion,
-        tipo_venta, items, subtotal, impuestos, descuento, interes_tarjeta, total,
-        metodo_pago, pagos, monto_pagado, observaciones, notas_internas,
+        empresa_id,
+        cliente_id,
+        cliente_nombre,
+        cliente_telefono,
+        cliente_email,
+        cliente_nit,
+        cliente_direccion,
+        cotizacion_id,
+        numero_cotizacion,
+        tipo_venta,
+        items,
+        subtotal,
+        impuestos,
+        descuento,
+        interes_tarjeta,
+        total,
+        metodo_pago,
+        pagos,
+        monto_pagado,
+        observaciones,
+        notas_internas,
         created_by
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    const [result] = await db.query(query, [
+    const [result] = await connection.query(query, [
       empresaId,
-      cliente_id, cliente_nombre, cliente_telefono || null, cliente_email || null,
-      cliente_nit || null, cliente_direccion || null, cotizacion_id || null, numero_cotizacion || null,
-      tipo_venta || 'PRODUCTOS', itemsJSON, subtotal || 0, impuestos || 0, descuento || 0, 
-      interes_tarjeta || 0, total,
-      metodoPagoNorm, pagosJSON, monto_pagado || 0, observaciones || null, notas_internas || null,
-      created_by || null
+      cliente_id,
+      cliente_nombre,
+      clienteTelefonoNormalizado,
+      cliente_email || null,
+      cliente_nit || null,
+      cliente_direccion || null,
+      cotizacion_id || null,
+      numero_cotizacion || null,
+      tipo_venta || 'PRODUCTOS',
+      itemsJSON,
+      subtotal || 0,
+      impuestos || 0,
+      descuento || 0,
+      interes_tarjeta || 0,
+      total,
+      metodoPagoNorm,
+      pagosJSON,
+      montoPagadoNormalizado,
+      observaciones || null,
+      notas_internas || null,
+      created_by || null,
     ]);
 
-    // Descontar stock del inventario
-    await descontarStock(items, empresaId);
+    await descontarStock(
+      items,
+      empresaId,
+      connection
+    );
 
-    // Obtener la venta recién creada
-    const [newVenta] = await db.query('SELECT * FROM ventas WHERE id = ? AND empresa_id = ?', [result.insertId, empresaId]);
-    const venta = parseVentaJSON(newVenta[0]);
-
-    // Registrar movimiento en caja chica o bancos
-    if (metodo_pago && total > 0) {
-      try {
-        // Si hay múltiples pagos, procesarlos todos
-        if (pagos && Array.isArray(pagos)) {
-          for (const pago of pagos) {
-            await cajaController.registrarMovimientoVenta(
-              result.insertId,
-              pago.metodo,
-              pago.monto, // Ya viene en centavos desde el frontend
-              created_by || 'Sistema',
-              null, // connection
-              pago.pos_seleccionado || null,
-              pago.banco_id || null,
-              pago.referencia || null,
-              empresaId
-            );
-          }
-        } else {
-          // Pago único
+    if (metodoPagoNorm && Number(total) > 0) {
+      if (pagosNormalizados) {
+        for (const pago of pagosNormalizados) {
           await cajaController.registrarMovimientoVenta(
             result.insertId,
-            metodo_pago,
-            total,
+            pago.metodo,
+            pago.monto,
             created_by || 'Sistema',
-            null,
-            null,
-            null,
-            null,
+            connection,
+            pago.pos_seleccionado || null,
+            pago.banco_id || null,
+            pago.referencia || null,
             empresaId
           );
         }
-      } catch (error) {
-        console.error('Error al registrar movimiento en caja/bancos:', error);
-        // No fallar la venta si hay error en el registro de caja
+      } else {
+        await cajaController.registrarMovimientoVenta(
+          result.insertId,
+          metodoPagoNorm,
+          total,
+          created_by || 'Sistema',
+          connection,
+          null,
+          null,
+          null,
+          empresaId
+        );
       }
     }
 
-    res.status(201).json(venta);
+    const [newVenta] = await connection.query(
+      `SELECT *
+       FROM ventas
+       WHERE id = ?
+         AND empresa_id = ?
+       LIMIT 1`,
+      [result.insertId, empresaId]
+    );
+
+    const venta = parseVentaJSON(newVenta[0]);
+
+    await connection.commit();
+
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'CREAR',
+      entidad: 'VENTA',
+      entidadId: result.insertId,
+      descripcion: `Venta ${result.insertId} creada para ${cliente_nombre}`,
+      datosNuevos: { ...req.body, id: result.insertId },
+    });
+    return res.status(201).json(venta);
   } catch (error) {
-    console.error('Error al crear venta:', error);
-    if (error.statusCode) {
-      return res.status(error.statusCode).json({ error: error.message });
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error(
+          'Error al revertir creación de venta:',
+          rollbackError
+        );
+      }
     }
-    // Detectar error de ENUM de MySQL (1292 = Data truncated, 1265 = Warn truncated)
-    if (error.code === 'ER_WARN_DATA_TRUNCATED' || error.code === 'ER_BAD_NULL_ERROR' || error.errno === 1292 || error.errno === 1265) {
+
+    console.error('Error al crear venta:', error);
+
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        error: error.message,
+      });
+    }
+
+    if (
+      error.code === 'ER_WARN_DATA_TRUNCATED' ||
+      error.code === 'ER_BAD_NULL_ERROR' ||
+      error.errno === 1292 ||
+      error.errno === 1265
+    ) {
       return res.status(400).json({
         error: 'Valor inválido para la base de datos. Puede que el ENUM de metodo_pago necesite migración.',
         details: error.message,
-        migration_hint: 'Ejecute: ALTER TABLE ventas MODIFY COLUMN metodo_pago ENUM(\'EFECTIVO\',\'TARJETA\',\'TARJETA_BAC\',\'TARJETA_NEONET\',\'TARJETA_OTRA\',\'TRANSFERENCIA\',\'MIXTO\') DEFAULT NULL;'
+        migration_hint: 'Ejecute: ALTER TABLE ventas MODIFY COLUMN metodo_pago ENUM(\'EFECTIVO\',\'TARJETA\',\'TARJETA_BAC\',\'TARJETA_NEONET\',\'TARJETA_OTRA\',\'TRANSFERENCIA\',\'MIXTO\') DEFAULT NULL;',
       });
     }
-    res.status(500).json({ 
+
+    return res.status(500).json({
       error: 'Error al crear la venta',
-      details: error.message 
+      details: error.message,
     });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 };
+
 
 /**
  * Convertir cotización a venta
@@ -409,6 +655,15 @@ exports.createVentaFromQuote = async (req, res) => {
     const venta = parseVentaJSON(newVenta[0]);
 
     await connection.commit();
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'CREAR',
+      entidad: 'VENTA',
+      entidadId: venta.id,
+      descripcion: `Venta ${venta.id} creada desde cotización ${cotizacionId}`,
+      datosNuevos: venta,
+    });
     res.status(201).json(venta);
   } catch (error) {
     if (connection) {
@@ -495,10 +750,13 @@ exports.getAllVentas = async (req, res) => {
     // Ordenar por fecha más reciente
     query += ' ORDER BY COALESCE(v.fecha_venta, v.created_at) DESC';
 
-    // Paginación
-    const offset = (page - 1) * limit;
+    // Paginación segura
+    const { limit: limitNum, offset } = parsePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
     query += ' LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), parseInt(offset));
+    params.push(limitNum, offset);
 
     const [ventas] = await db.query(query, params);
     const ventasParsed = ventas.map(parseVentaJSON);
@@ -555,9 +813,43 @@ exports.getVentaById = async (req, res) => {
 exports.registrarPago = async (req, res) => {
   try {
     const { id } = req.params;
-    const { monto, metodo, referencia, comprobanteUrl, usuario_id } = req.body;
+    const {
+      monto,
+      monto_recibido,
+      cambio,
+      metodo,
+      referencia,
+      comprobanteUrl,
+      usuario_id
+    } = req.body;
     const tenant = ventaTenantClause(req);
     const empresaId = requireTenantEmpresaId(req);
+
+    const metodoNormalizado = String(metodo || '').trim().toUpperCase();
+    const comprobanteNormalizado =
+      typeof comprobanteUrl === 'string'
+        ? comprobanteUrl.trim()
+        : '';
+
+    if (
+      metodoNormalizado === 'TRANSFERENCIA' &&
+      !comprobanteNormalizado
+    ) {
+      return res.status(400).json({
+        error: 'Debes adjuntar la imagen de la boleta de transferencia',
+      });
+    }
+
+    if (
+      comprobanteNormalizado &&
+      !comprobanteNormalizado.startsWith(
+        `/uploads/ventas/${empresaId}/comprobantes/`
+      )
+    ) {
+      return res.status(400).json({
+        error: 'La ruta del comprobante no es válida',
+      });
+    }
 
     if (!monto || monto <= 0) {
       return res.status(400).json({ error: 'El monto debe ser mayor a 0' });
@@ -577,16 +869,57 @@ exports.registrarPago = async (req, res) => {
     }
     const ventaActual = ventasRows[0];
 
-    // Convertir monto a centavos (si viene en quetzales)
-    const montoCentavos = Math.round(parseFloat(monto) * 100);
+    // El monto recibido puede ser superior al saldo únicamente
+    // cuando el método es efectivo. A la venta y a caja se aplica
+    // solamente el saldo pendiente.
+    const montoIngresadoCentavos =
+      Math.round(parseFloat(monto) * 100);
 
-    // Validar que no exceda el saldo
-    const saldoPendiente = ventaActual.total - ventaActual.monto_pagado;
-    if (montoCentavos > saldoPendiente) {
-      return res.status(400).json({ 
-        error: `El monto (Q${(montoCentavos/100).toFixed(2)}) excede el saldo pendiente (Q${(saldoPendiente/100).toFixed(2)})` 
+    const saldoPendiente = Math.max(
+      0,
+      Number(ventaActual.total) -
+      Number(ventaActual.monto_pagado || 0)
+    );
+
+    const esEfectivo =
+      metodoNormalizado === 'EFECTIVO';
+
+    if (
+      !esEfectivo &&
+      montoIngresadoCentavos > saldoPendiente
+    ) {
+      return res.status(400).json({
+        error:
+          `El monto (Q${(montoIngresadoCentavos / 100).toFixed(2)}) ` +
+          `excede el saldo pendiente (Q${(saldoPendiente / 100).toFixed(2)})`
       });
     }
+
+    const montoAplicadoCentavos =
+      esEfectivo
+        ? Math.min(
+            montoIngresadoCentavos,
+            saldoPendiente
+          )
+        : montoIngresadoCentavos;
+
+    const montoRecibidoCentavos =
+      esEfectivo
+        ? Math.round(
+            parseFloat(
+              monto_recibido ?? monto
+            ) * 100
+          )
+        : montoAplicadoCentavos;
+
+    const cambioCentavos =
+      esEfectivo
+        ? Math.max(
+            0,
+            montoRecibidoCentavos -
+            montoAplicadoCentavos
+          )
+        : 0;
 
     // Agregar pago al array
     const pagosActuales = ventaActual.pagos
@@ -594,16 +927,27 @@ exports.registrarPago = async (req, res) => {
       : [];
 
     pagosActuales.push({
-      metodo,
-      monto: montoCentavos,
+      metodo: metodoNormalizado,
+      monto: montoAplicadoCentavos,
+      monto_recibido:
+        esEfectivo
+          ? montoRecibidoCentavos
+          : null,
+      cambio:
+        esEfectivo
+          ? cambioCentavos
+          : null,
       referencia: referencia || null,
-      comprobanteUrl: comprobanteUrl || null,
+      comprobanteUrl: comprobanteNormalizado || null,
       fecha: new Date().toISOString(),
       usuario_id: usuario_id || null
     });
 
-    const nuevoMontoPagado = ventaActual.monto_pagado + montoCentavos;
-    const metodoFinal = pagosActuales.length > 1 ? 'MIXTO' : metodo;
+    const nuevoMontoPagado = Number(ventaActual.monto_pagado || 0) + montoAplicadoCentavos;
+    const metodoFinal =
+      pagosActuales.length > 1
+        ? 'MIXTO'
+        : metodoNormalizado;
 
     await db.query(
       `UPDATE ventas SET pagos = ?, monto_pagado = ?, metodo_pago = ?, updated_by = ? WHERE id = ?${ventaTenantClause(req, 'ventas').sql}`,
@@ -614,8 +958,8 @@ exports.registrarPago = async (req, res) => {
     try {
       await cajaController.registrarMovimientoVenta(
         Number(id),
-        metodo,
-        montoCentavos,
+        metodoNormalizado,
+        montoAplicadoCentavos,
         usuario_id || 'Sistema',
         null,
         null,
@@ -634,6 +978,16 @@ exports.registrarPago = async (req, res) => {
     );
     const venta = parseVentaJSON(ventasUpdated[0]);
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'REGISTRAR_PAGO',
+      entidad: 'VENTA',
+      entidadId: id,
+      descripcion: `Pago registrado en venta ${id}`,
+      datosAnteriores: { monto_pagado: ventaActual.monto_pagado },
+      datosNuevos: { monto, metodo: metodoNormalizado, referencia, comprobanteUrl },
+    });
     res.json(venta);
   } catch (error) {
     console.error('Error al registrar pago:', error);
@@ -757,6 +1111,16 @@ exports.anularVenta = async (req, res) => {
 
     const venta = parseVentaJSON(ventasUpdated[0]);
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      accion: 'ANULAR',
+      entidad: 'VENTA',
+      entidadId: id,
+      descripcion: `Venta ${id} anulada`,
+      datosAnteriores: ventaActual,
+      datosNuevos: { estado: 'ANULADA', motivo },
+    });
     res.json(venta);
   } catch (error) {
     if (connection) {
@@ -823,63 +1187,94 @@ exports.getEstadisticas = async (req, res) => {
  * Helper: Descontar stock del inventario
  */
 async function descontarStock(items, empresaId, client = db) {
-  try {
-    for (const item of items) {
-      const itemId = item.refId || item.ref_id || item.id;
+  for (const item of items) {
+    const itemId = item.refId || item.ref_id || item.id;
+    const cantidad = Number(item.cantidad);
+    const source = String(item.source || item.tipo || '').toUpperCase();
 
-      if (!itemId) {
-        continue;
-      }
+    if (!itemId) {
+      const error = new Error('Uno de los artículos no tiene identificador de inventario');
+      error.statusCode = 400;
+      throw error;
+    }
 
-      const source = String(item.source || item.tipo || '').toUpperCase();
+    if (!Number.isInteger(cantidad) || cantidad <= 0) {
+      const error = new Error('La cantidad de cada artículo debe ser un número entero mayor a cero');
+      error.statusCode = 400;
+      throw error;
+    }
 
-      if (source === 'PRODUCTO' || source === 'PRODUCTOS') {
-        // Descontar de productos
+    if (source === 'PRODUCTO' || source === 'PRODUCTOS') {
+      const [result] = await client.query(
+        `UPDATE productos
+         SET stock = stock - ?
+         WHERE id = ?
+           AND empresa_id = ?
+           AND stock >= ?`,
+        [cantidad, itemId, empresaId, cantidad]
+      );
+
+      if (result.affectedRows === 0) {
         const [productos] = await client.query(
-          'SELECT id, stock FROM productos WHERE id = ? AND empresa_id = ?',
+          'SELECT id, nombre, stock FROM productos WHERE id = ? AND empresa_id = ? LIMIT 1',
           [itemId, empresaId]
         );
 
         if (productos.length === 0) {
-          throw new Error(`Producto ${itemId} no encontrado para esta empresa`);
+          const error = new Error(`Producto ${itemId} no encontrado para esta empresa`);
+          error.statusCode = 404;
+          throw error;
         }
 
-        const [result] = await client.query(
-          'UPDATE productos SET stock = stock - ? WHERE id = ? AND empresa_id = ?',
-          [item.cantidad, itemId, empresaId]
+        const producto = productos[0];
+        const error = new Error(
+          `Stock insuficiente para "${producto.nombre}". Disponible: ${producto.stock}, solicitado: ${cantidad}`
         );
+        error.statusCode = 409;
+        throw error;
+      }
 
-        if (result.affectedRows === 0) {
-          throw new Error(`Producto ${itemId} no encontrado para esta empresa`);
-        }
+      console.log(`Stock descontado: Producto ${itemId}, cantidad: ${cantidad}`);
+      continue;
+    }
 
-        console.log(`Stock descontado: Producto ${itemId}, cantidad: ${item.cantidad}`);
-      } else if (source === 'REPUESTO' || source === 'REPUESTOS') {
-        // Descontar de repuestos
+    if (source === 'REPUESTO' || source === 'REPUESTOS') {
+      const [result] = await client.query(
+        `UPDATE repuestos
+         SET stock = stock - ?
+         WHERE id = ?
+           AND empresa_id = ?
+           AND stock >= ?`,
+        [cantidad, itemId, empresaId, cantidad]
+      );
+
+      if (result.affectedRows === 0) {
         const [repuestos] = await client.query(
-          'SELECT id, stock FROM repuestos WHERE id = ? AND empresa_id = ?',
+          'SELECT id, nombre, stock FROM repuestos WHERE id = ? AND empresa_id = ? LIMIT 1',
           [itemId, empresaId]
         );
 
         if (repuestos.length === 0) {
-          throw new Error(`Repuesto ${itemId} no encontrado para esta empresa`);
+          const error = new Error(`Repuesto ${itemId} no encontrado para esta empresa`);
+          error.statusCode = 404;
+          throw error;
         }
 
-        const [result] = await client.query(
-          'UPDATE repuestos SET stock = stock - ? WHERE id = ? AND empresa_id = ?',
-          [item.cantidad, itemId, empresaId]
+        const repuesto = repuestos[0];
+        const error = new Error(
+          `Stock insuficiente para "${repuesto.nombre}". Disponible: ${repuesto.stock}, solicitado: ${cantidad}`
         );
-
-        if (result.affectedRows === 0) {
-          throw new Error(`Repuesto ${itemId} no encontrado para esta empresa`);
-        }
-
-        console.log(`Stock descontado: Repuesto ${itemId}, cantidad: ${item.cantidad}`);
+        error.statusCode = 409;
+        throw error;
       }
+
+      console.log(`Stock descontado: Repuesto ${itemId}, cantidad: ${cantidad}`);
+      continue;
     }
-  } catch (error) {
-    console.error('Error al descontar stock:', error);
-    throw error; // Propagar error para que la transacción falle
+
+    const error = new Error(`Tipo de artículo inválido: "${source || 'SIN TIPO'}"`);
+    error.statusCode = 400;
+    throw error;
   }
 }
 
@@ -911,10 +1306,23 @@ function parseVentaJSON(venta) {
     });
   }
 
-  // Parsear pagos
+  // Parsear pagos y normalizar nombres históricos del comprobante
   let pagos = [];
   if (venta.pagos) {
-    pagos = typeof venta.pagos === 'string' ? JSON.parse(venta.pagos) : venta.pagos;
+    const pagosRaw =
+      typeof venta.pagos === 'string'
+        ? JSON.parse(venta.pagos)
+        : venta.pagos;
+
+    pagos = Array.isArray(pagosRaw)
+      ? pagosRaw.map(pago => ({
+          ...pago,
+          comprobanteUrl:
+            pago.comprobanteUrl ||
+            pago.comprobante_url ||
+            null,
+        }))
+      : [];
   }
 
   return {

@@ -10,6 +10,7 @@ import { canViewCosts, isAdmin } from '../../lib/permissions';
 import { getInitialsFromName, getSafeImageUrl } from '../../lib/avatar';
 import API_URL from '../../services/config';
 import axios from 'axios';
+import FirmaCanvas from '../../components/repairs/FirmaCanvas';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,116 +81,6 @@ const cardStyle = {
   background: 'var(--color-surface)',
   borderColor: 'var(--color-border)',
 };
-
-// ─── Signature Pad ────────────────────────────────────────────────────────────
-
-function SignaturePad({
-  initialValue,
-  onChange,
-}: {
-  initialValue: string | null;
-  onChange: (dataUrl: string | null) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-  const lastPos = useRef<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    if (!initialValue || !canvasRef.current) return;
-    const img = new Image();
-    img.onload = () => {
-      const ctx = canvasRef.current?.getContext('2d');
-      if (ctx) ctx.drawImage(img, 0, 0);
-    };
-    img.src = initialValue;
-  }, []);
-
-  const getXY = (
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
-  ) => {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    if ('touches' in e) {
-      return {
-        x: (e.touches[0].clientX - rect.left) * scaleX,
-        y: (e.touches[0].clientY - rect.top) * scaleY,
-      };
-    }
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
-    };
-  };
-
-  const onStart = (
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
-  ) => {
-    e.preventDefault();
-    drawing.current = true;
-    lastPos.current = getXY(e);
-  };
-
-  const onMove = (
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
-  ) => {
-    e.preventDefault();
-    if (!drawing.current || !canvasRef.current) return;
-    const ctx = canvasRef.current.getContext('2d')!;
-    const pos = getXY(e);
-    ctx.beginPath();
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 1.8;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    if (lastPos.current) {
-      ctx.moveTo(lastPos.current.x, lastPos.current.y);
-      ctx.lineTo(pos.x, pos.y);
-    }
-    ctx.stroke();
-    lastPos.current = pos;
-    onChange(canvasRef.current.toDataURL('image/png'));
-  };
-
-  const onEnd = () => {
-    drawing.current = false;
-    lastPos.current = null;
-  };
-
-  const clear = () => {
-    if (!canvasRef.current) return;
-    const ctx = canvasRef.current.getContext('2d')!;
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    onChange(null);
-  };
-
-  return (
-    <div className="space-y-2">
-      <canvas
-        ref={canvasRef}
-        width={580}
-        height={130}
-        className="w-full rounded-xl border cursor-crosshair touch-none block"
-        style={{ background: '#ffffff', borderColor: 'var(--color-border)' }}
-        onMouseDown={onStart}
-        onMouseMove={onMove}
-        onMouseUp={onEnd}
-        onMouseLeave={onEnd}
-        onTouchStart={onStart}
-        onTouchMove={onMove}
-        onTouchEnd={onEnd}
-      />
-      <button
-        type="button"
-        onClick={clear}
-        className="text-xs font-semibold text-red-500 hover:underline cursor-pointer"
-      >
-        Limpiar firma
-      </button>
-    </div>
-  );
-}
 
 // ─── Avatar component ─────────────────────────────────────────────────────────
 
@@ -271,13 +162,22 @@ function ModalEditar({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
     setError('');
+
+    const telefono = form.telefono.trim();
+
+    if (telefono && !/^\d{8,15}$/.test(telefono)) {
+      setError('El teléfono debe contener entre 8 y 15 dígitos.');
+      return;
+    }
+
+    setSaving(true);
+
     try {
       const fd = new FormData();
       fd.append('nombres', form.nombres);
       fd.append('apellidos', form.apellidos);
-      fd.append('telefono', form.telefono);
+      fd.append('telefono', telefono);
       fd.append('direccion', form.direccion);
       if (form.foto) fd.append('foto_perfil', form.foto);
       // Always send firma so it is not overwritten with NULL
@@ -408,14 +308,26 @@ function ModalEditar({
                 />
               </div>
               <div>
-                <label className={labelCls}>Telefono</label>
+                <label className={labelCls}>Teléfono</label>
                 <input
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  maxLength={15}
                   value={form.telefono}
-                  onChange={e => set('telefono', e.target.value)}
-                  placeholder="Ej: 5555-1234"
+                  onChange={e =>
+                    set(
+                      'telefono',
+                      e.target.value.replace(/\D/g, '').slice(0, 15)
+                    )
+                  }
+                  placeholder="Ej: 55551234"
                   className={inputCls}
                   style={inputStyle}
                 />
+                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                  Solo números, entre 8 y 15 dígitos. {form.telefono.length}/15
+                </p>
               </div>
               <div>
                 <label className={labelCls}>Email</label>
@@ -448,10 +360,11 @@ function ModalEditar({
               <span className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
             </p>
             <p className="text-xs text-[var(--color-text-muted)] mb-2">
-              Dibuja tu firma en el area de abajo
+              Firma directamente o pulsa “Firmar en grande” en el teléfono
             </p>
-            <SignaturePad
+            <FirmaCanvas
               initialValue={form.firma}
+              fullscreenTitle="Firma digital"
               onChange={v => set('firma', v)}
             />
           </div>
@@ -579,7 +492,7 @@ export default function ProfilePage() {
     return (
       <div className="space-y-6">
         <div
-          className="h-52 rounded-3xl animate-pulse"
+          className="h-40 rounded-3xl animate-pulse"
           style={{ background: 'var(--color-surface)' }}
         />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -612,55 +525,73 @@ export default function ProfilePage() {
         className="rounded-3xl border overflow-hidden"
         style={cardStyle}
       >
-        {/* Gradient banner */}
-        <div className="h-32 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 relative">
+        {/* Compact profile banner */}
+        <div
+          className="relative overflow-hidden bg-[linear-gradient(115deg,#EAF4FF_0%,#DCEBFF_48%,#F8FBFF_100%)] px-5 py-6 dark:bg-[linear-gradient(115deg,#111827_0%,#172554_48%,#0f172a_100%)] sm:px-7 sm:py-7"
+        >
           <div
-            className="absolute inset-0 opacity-30"
+            className="pointer-events-none absolute inset-0 dark:hidden"
             style={{
               backgroundImage:
-                'radial-gradient(ellipse at 30% 50%, rgba(255,255,255,0.15) 0%, transparent 60%)',
+                'linear-gradient(rgba(37,99,235,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(37,99,235,0.035) 1px, transparent 1px), radial-gradient(circle at 18% 20%, rgba(56,189,248,0.09), transparent 32%)',
+              backgroundSize: '32px 32px, 32px 32px, 100% 100%',
             }}
           />
-        </div>
+          <div
+            className="pointer-events-none absolute inset-0 hidden dark:block"
+            style={{
+              backgroundImage:
+                'linear-gradient(rgba(125,211,252,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(125,211,252,0.045) 1px, transparent 1px), radial-gradient(circle at 18% 20%, rgba(56,189,248,0.16), transparent 32%)',
+              backgroundSize: '32px 32px, 32px 32px, 100% 100%',
+            }}
+          />
 
-        {/* Avatar + info + edit button */}
-        <div className="px-6 pb-6 -mt-14 flex flex-col sm:flex-row items-start sm:items-end gap-4">
-          <div className="relative shrink-0">
-            <AvatarImage
-              src={avatarSrc}
-              name={displayName}
-              className="w-28 h-28 rounded-2xl object-cover ring-4 text-3xl shadow-xl"
-              style={{ ringColor: 'var(--color-surface)' } as React.CSSProperties}
-            />
-          </div>
-
-          <div className="flex-1 min-w-0 sm:pb-1">
-            <h1 className="text-xl font-extrabold text-[var(--color-text)] truncate leading-tight">
-              {displayName}
-            </h1>
-            <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
-              @{profile.username}
-            </p>
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {profile.roles.length > 0 ? (
-                profile.roles.map(r => (
-                  <span key={r} className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${rolColor(r)}`}>
-                    {r}
-                  </span>
-                ))
-              ) : (
-                <span className="text-xs text-[var(--color-text-muted)]">Sin roles asignados</span>
-              )}
-            </div>
-          </div>
-
-          <div className="shrink-0 self-end sm:self-auto">
-            <button
-              onClick={() => setEditOpen(true)}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] text-white transition-colors shadow-sm cursor-pointer"
+          {/* Avatar + info + edit button */}
+          <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
+            <div
+              className="w-fit shrink-0 rounded-2xl bg-white/70 p-1 dark:bg-slate-900/70"
+              style={{
+                boxShadow: '0 0 28px rgba(56, 189, 248, 0.22)',
+              }}
             >
-              <Edit2 size={15} /> Editar perfil
-            </button>
+              <AvatarImage
+                src={avatarSrc}
+                name={displayName}
+                className="h-20 w-20 rounded-xl object-cover text-2xl ring-1 ring-sky-300/45 dark:ring-cyan-200/35 sm:h-24 sm:w-24"
+              />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-xl font-extrabold leading-tight text-slate-900 dark:text-white sm:text-2xl">
+                {displayName}
+              </h1>
+              <p className="mt-1 truncate text-sm text-slate-600 dark:text-slate-300">
+                @{profile.username}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {profile.roles.length > 0 ? (
+                  profile.roles.map(r => (
+                    <span
+                      key={r}
+                      className="rounded-full border border-sky-600/15 bg-white/55 px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:border-sky-300/20 dark:bg-sky-300/10 dark:text-sky-100"
+                    >
+                      {r}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Sin roles asignados</span>
+                )}
+              </div>
+            </div>
+
+            <div className="w-full shrink-0 sm:w-auto">
+              <button
+                onClick={() => setEditOpen(true)}
+                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[var(--color-primary)] px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[var(--color-primary-dark)] sm:w-auto"
+              >
+                <Edit2 size={15} /> Editar perfil
+              </button>
+            </div>
           </div>
         </div>
       </div>

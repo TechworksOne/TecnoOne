@@ -361,10 +361,22 @@ export default function SuppliersPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className={labelCls}>Telefono</label>
-                <input type="tel" placeholder="Ej: 2234-5678"
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={15}
+                  placeholder="Ej: 22345678"
                   value={currentSupplier.telefono}
-                  onChange={e => setField('telefono', e.target.value)}
-                  className={inputCls} style={inputStyle} />
+                  onChange={e =>
+                    setField(
+                      'telefono',
+                      e.target.value.replace(/\D/g, '').slice(0, 15),
+                    )
+                  }
+                  className={inputCls}
+                  style={inputStyle}
+                />
               </div>
               <div>
                 <label className={labelCls}>Email</label>

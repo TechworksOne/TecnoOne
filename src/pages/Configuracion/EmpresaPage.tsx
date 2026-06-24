@@ -338,11 +338,19 @@ export default function EmpresaPage() {
                 <Phone size={15} /> Teléfono
               </span>
               <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={form.telefono}
-                onChange={(event) => setField("telefono", event.target.value)}
+                onChange={(event) =>
+                  setField(
+                    "telefono",
+                    event.target.value.replace(/\D/g, "").slice(0, 15),
+                  )
+                }
                 className={inputCls}
                 style={inputStyle}
-                maxLength={50}
+                maxLength={15}
               />
             </label>
 

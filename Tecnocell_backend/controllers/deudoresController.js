@@ -1,4 +1,6 @@
 const db = require('../config/database');
+const { parseLimit } = require('../utils/pagination');
+const { validatePhone } = require('../utils/phoneValidation');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -121,6 +123,20 @@ exports.createDeudor = async (req, res) => {
       notas, created_by
     } = req.body;
 
+    const telefonoValidado = validatePhone(cliente_telefono, {
+      label: 'El teléfono del cliente',
+    });
+
+    if (!telefonoValidado.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const clienteTelefonoNormalizado = telefonoValidado.value;
+
     if (!cliente_nombre) {
       await connection.rollback();
       return res.status(400).json({ error: 'El nombre del cliente es requerido' });
@@ -178,7 +194,7 @@ exports.createDeudor = async (req, res) => {
           items_detalle, notas, estado, created_by)
        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDIENTE', ?)`,
       [
-        empresaId, cliente_id || null, cliente_nombre, cliente_telefono || null,
+        empresaId, cliente_id || null, cliente_nombre, clienteTelefonoNormalizado,
         descripcion || null, total, total,
         fecha_vencimiento || null,
         referencia_venta_id || null,
@@ -239,6 +255,7 @@ exports.createDeudor = async (req, res) => {
 exports.searchReparaciones = async (req, res) => {
   try {
     const { search = '', limit = 15 } = req.query;
+    const safeLimit = parseLimit(limit, { defaultLimit: 15, maxLimit: 50 });
     const like = `%${search}%`;
     const empresaId = requireTenantEmpresaId(req);
     const [rows] = await db.query(
@@ -254,7 +271,7 @@ exports.searchReparaciones = async (req, res) => {
          AND estado NOT IN ('CANCELADA')
        ORDER BY created_at DESC
        LIMIT ?`,
-      [like, like, like, like, empresaId, parseInt(limit)]
+      [like, like, like, like, empresaId, safeLimit]
     );
     res.json({ success: true, data: rows });
   } catch (error) {

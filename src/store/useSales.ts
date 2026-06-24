@@ -54,6 +54,7 @@ export const useSales = create<SalesState>((set, get) => ({
           metodo: pago.metodo,
           monto: ventaService.centavosAQuetzales(pago.monto),
           referencia: pago.referencia,
+          comprobanteUrl: pago.comprobanteUrl,
           fecha: pago.fecha || venta.fecha_venta || venta.created_at || new Date().toISOString()
         })),
         observaciones: venta.observaciones,

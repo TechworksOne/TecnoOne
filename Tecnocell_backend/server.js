@@ -7,6 +7,9 @@ const path = require('path');
 dotenv.config();
 
 const app = express();
+
+// Necesario para obtener la IP real detrás de Nginx/Docker en producción
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 // Middlewares
@@ -45,6 +48,9 @@ const agendaRoutes = require('./routes/agendaRoutes');
 const otRoutes = require('./routes/otRoutes');
 const tarjetaCreditoRoutes = require('./routes/tarjetaCreditoRoutes');
 const empresaRoutes = require('./routes/empresaRoutes');
+const auditoriaRoutes = require('./routes/auditoriaRoutes');
+const permisoRoutes = require('./routes/permisoRoutes');
+const superAdminRoutes = require('./routes/superAdminRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -71,6 +77,9 @@ app.use('/api/agenda', agendaRoutes);
 app.use('/api/ot', otRoutes);
 app.use('/api/tarjetas-credito', tarjetaCreditoRoutes);
 app.use('/api/empresa', empresaRoutes);
+app.use('/api/auditoria', auditoriaRoutes);
+app.use('/api/permisos', permisoRoutes);
+app.use('/api/superadmin', superAdminRoutes);
 // app.use('/api/dashboard', dashboardRoutes);
 app.use('/api', marcaLineaRoutes);
 

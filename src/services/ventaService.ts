@@ -129,6 +129,24 @@ export const formatearPrecio = (centavos: number): string => {
 // ============================================
 
 /**
+ * Subir comprobante de transferencia
+ */
+export const uploadComprobante = async (file: File): Promise<string> => {
+  const formData = new FormData();
+  formData.append('comprobante', file);
+
+  const response = await api.post('/ventas/comprobantes', formData);
+
+  const url = response.data?.data?.url;
+
+  if (!url) {
+    throw new Error('El servidor no devolvió la URL del comprobante.');
+  }
+
+  return url;
+};
+
+/**
  * Crear una nueva venta
  */
 export const createVenta = async (data: Omit<VentaData, 'id'>): Promise<VentaData> => {
@@ -176,6 +194,8 @@ export const registrarPago = async (
   ventaId: number,
   pago: {
     monto: number;
+    monto_recibido?: number;
+    cambio?: number;
     metodo: string;
     referencia?: string;
     comprobanteUrl?: string;
@@ -209,6 +229,7 @@ export const getEstadisticas = async (): Promise<VentaEstadisticas> => {
 };
 
 export default {
+  uploadComprobante,
   createVenta,
   createVentaFromQuote,
   getAllVentas,

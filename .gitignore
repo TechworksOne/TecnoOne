@@ -22,6 +22,10 @@ dist/
 *.bak_*
 *.corrupt_*
 *.sql
+!Tecnocell_backend/scripts/migration_auditoria_sprint_1_13.sql
+!Tecnocell_backend/scripts/migration_permisos_sprint_1_14.sql
+!Tecnocell_backend/scripts/migration_super_admin_sprint_1_15_1.sql
+!Tecnocell_backend/scripts/migration_suscripciones_sprint_1_15_2.sql
 !Tecnocell_backend/scripts/migration_empresas_config_saas_sprint_1_9_12.sql
 backups_codigo/
 backups_pre_pull_*

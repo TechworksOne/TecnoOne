@@ -1,54 +1,30 @@
 const express = require('express');
 const router = express.Router();
 const marcaLineaController = require('../controllers/marcaLineaController');
-const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
-const soloAdmin = [verifyToken, verifyRole('admin')];
+const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
+const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePermission = require('../middleware/requirePermission');
 
-// Autenticación deshabilitada temporalmente para desarrollo
-// router.use(verifyToken);
+router.use(verifyToken);
+router.use(tenantScope);
+router.use(checkEmpresaActiva);
 
-// ============================================
-// RUTAS DE MARCAS
-// ============================================
 
-// GET /api/marcas/con-lineas - Debe ir antes de /:id
-router.get('/marcas/con-lineas', marcaLineaController.getMarcasConLineas);
+// RUTAS DE MARCAS POR EMPRESA
+router.get('/marcas/con-lineas', requirePermission('productos.ver'), marcaLineaController.getMarcasConLineas);
+router.get('/marcas', requirePermission('productos.ver'), marcaLineaController.getAllMarcas);
+router.post('/marcas', requirePermission('catalogos.administrar'), marcaLineaController.createMarca);
+router.get('/marcas/:id', requirePermission('productos.ver'), marcaLineaController.getMarcaById);
+router.put('/marcas/:id', requirePermission('catalogos.administrar'), marcaLineaController.updateMarca);
+router.delete('/marcas/:id', requirePermission('catalogos.administrar'), marcaLineaController.deleteMarca);
+router.get('/marcas/:id/lineas', requirePermission('productos.ver'), marcaLineaController.getLineasByMarca);
 
-// GET /api/marcas - Obtener todas las marcas
-router.get('/marcas', marcaLineaController.getAllMarcas);
-
-// POST /api/marcas - Crear nueva marca
-router.post('/marcas', ...soloAdmin, marcaLineaController.createMarca);
-
-// GET /api/marcas/:id - Obtener marca por ID
-router.get('/marcas/:id', marcaLineaController.getMarcaById);
-
-// PUT /api/marcas/:id - Actualizar marca
-router.put('/marcas/:id', ...soloAdmin, marcaLineaController.updateMarca);
-
-// DELETE /api/marcas/:id - Eliminar marca
-router.delete('/marcas/:id', ...soloAdmin, marcaLineaController.deleteMarca);
-
-// GET /api/marcas/:id/lineas - Obtener líneas de una marca
-router.get('/marcas/:id/lineas', marcaLineaController.getLineasByMarca);
-
-// ============================================
-// RUTAS DE LÍNEAS
-// ============================================
-
-// GET /api/lineas/con-marca - Debe ir antes de /:id
-router.get('/lineas/con-marca', marcaLineaController.getLineasConMarca);
-
-// GET /api/lineas - Obtener todas las líneas
-router.get('/lineas', marcaLineaController.getAllLineas);
-
-// POST /api/lineas - Crear nueva línea
-router.post('/lineas', ...soloAdmin, marcaLineaController.createLinea);
-
-// PUT /api/lineas/:id - Actualizar línea
-router.put('/lineas/:id', ...soloAdmin, marcaLineaController.updateLinea);
-
-// DELETE /api/lineas/:id - Eliminar línea
-router.delete('/lineas/:id', ...soloAdmin, marcaLineaController.deleteLinea);
+// RUTAS DE LINEAS POR EMPRESA
+router.get('/lineas/con-marca', requirePermission('productos.ver'), marcaLineaController.getLineasConMarca);
+router.get('/lineas', requirePermission('productos.ver'), marcaLineaController.getAllLineas);
+router.post('/lineas', requirePermission('catalogos.administrar'), marcaLineaController.createLinea);
+router.put('/lineas/:id', requirePermission('catalogos.administrar'), marcaLineaController.updateLinea);
+router.delete('/lineas/:id', requirePermission('catalogos.administrar'), marcaLineaController.deleteLinea);
 
 module.exports = router;

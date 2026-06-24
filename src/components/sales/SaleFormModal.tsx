@@ -21,6 +21,7 @@ import * as repuestoService from '../../services/repuestoService';
 import * as customerService from '../../services/customerService';
 import * as ventaService from '../../services/ventaService';
 import API_URL from '../../services/config';
+import { getImageUrl } from '../../utils/getImageUrl';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
   const [montoRecibido, setMontoRecibido] = useState(0);
   const [referencia, setReferencia] = useState('');
   const [comprobanteUrl, setComprobanteUrl] = useState('');
+  const [isUploadingComprobante, setIsUploadingComprobante] = useState(false);
   const [pagosMixtos, setPagosMixtos] = useState<PaymentRowData[]>([
     { id: '1', metodo: 'EFECTIVO', monto: 0, referencia: '', comprobanteUrl: '' },
   ]);
@@ -242,37 +244,89 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
   };
 
   const handleAddItem = (item: any) => {
-    const existing = items.find(i => i.refId === item.id?.toString() && i.source === tipoItem);
+    const stockDisponible = Math.max(0, Number(item.stock ?? 0));
+
+    if (stockDisponible <= 0) {
+      toast.add('Este artículo no tiene stock disponible', 'error');
+      return;
+    }
+
+    const itemId = item.id?.toString() || item.sku;
+    const existing = items.find(
+      i => i.refId === itemId && i.source === tipoItem
+    );
+
     if (existing) {
+      if (existing.cantidad >= stockDisponible) {
+        toast.add(
+          `Solo hay ${stockDisponible} unidad(es) disponibles`,
+          'error'
+        );
+        return;
+      }
+
       setItems(items.map(i => {
-        if (i.refId === item.id?.toString() && i.source === tipoItem) {
-          const c = i.cantidad + 1;
-          return { ...i, cantidad: c, subtotal: c * i.precioUnit };
+        if (i.refId === itemId && i.source === tipoItem) {
+          const cantidad = i.cantidad + 1;
+
+          return {
+            ...i,
+            cantidad,
+            stockDisponible,
+            subtotal: cantidad * i.precioUnit,
+          };
         }
+
         return i;
       }));
     } else {
       const precio = tipoItem === 'PRODUCTO'
         ? Number(item.precio_venta)
         : Number(repuestoService.centavosAQuetzales(item.precio_publico));
+
       setItems([...items, {
         id: `${tipoItem}-${item.id}-${Date.now()}`,
-        refId: item.id?.toString() || item.sku,
+        refId: itemId,
         source: tipoItem,
         nombre: item.nombre,
         cantidad: 1,
         precioUnit: precio,
         subtotal: precio,
+        stockDisponible,
       }]);
     }
+
     setShowProductSearch(false);
-    setSearchTerm(''); setProductos([]); setRepuestos([]);
+    setSearchTerm('');
+    setProductos([]);
+    setRepuestos([]);
   };
 
   const handleUpdateCantidad = (index: number, cantidad: number) => {
     if (cantidad <= 0) return;
+
+    const item = items[index];
+    const stockDisponible = Number(item.stockDisponible);
+
+    if (
+      Number.isFinite(stockDisponible) &&
+      cantidad > stockDisponible
+    ) {
+      toast.add(
+        `Solo hay ${stockDisponible} unidad(es) disponibles`,
+        'error'
+      );
+      return;
+    }
+
     setItems(items.map((it, i) =>
-      i === index ? { ...it, cantidad, subtotal: cantidad * it.precioUnit } : it
+      i === index
+        ? {
+            ...it,
+            cantidad,
+            subtotal: cantidad * it.precioUnit,
+          }
+        : it
     ));
   };
 
@@ -285,12 +339,51 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
     else setMontoRecibido(total);
   };
 
-  const handleComprobanteChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleComprobanteChange = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const input = e.target;
+    const file = input.files?.[0];
+
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => setComprobanteUrl(reader.result as string);
-    reader.readAsDataURL(file);
+
+    const tiposPermitidos = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+    ];
+
+    if (!tiposPermitidos.includes(file.type)) {
+      toast.add('Solo se permiten imágenes JPG, PNG o WEBP', 'error');
+      input.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.add('El comprobante no debe superar los 5 MB', 'error');
+      input.value = '';
+      return;
+    }
+
+    setIsUploadingComprobante(true);
+    setComprobanteUrl('');
+
+    try {
+      const url = await ventaService.uploadComprobante(file);
+      setComprobanteUrl(url);
+      toast.add('Comprobante cargado correctamente', 'success');
+    } catch (error: any) {
+      const message =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        error.message ||
+        'Error al subir el comprobante';
+
+      toast.add(message, 'error');
+      input.value = '';
+    } finally {
+      setIsUploadingComprobante(false);
+    }
   };
 
   const cambio = montoRecibido - total;
@@ -299,6 +392,11 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
 
   // ── Validation ───────────────────────────────────────────────────────────
   const validateSale = (): boolean => {
+    if (isUploadingComprobante) {
+      toast.add('Espera a que termine de subir el comprobante', 'error');
+      return false;
+    }
+
     if (origenVenta === 'DIRECTA' && !cliente) { toast.add('Debes seleccionar un cliente', 'error'); return false; }
     if (origenVenta === 'COTIZACION' && !quoteId) { toast.add('Debes seleccionar una cotización', 'error'); return false; }
     if (items.length === 0) { toast.add('No hay items en la venta', 'error'); return false; }
@@ -340,10 +438,24 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
           banco_id: p.metodo === 'TRANSFERENCIA' ? bancoSeleccionado : null,
         }));
       } else {
-        const montoPago = metodo === 'EFECTIVO' ? montoRecibido : total;
+        // El pago aplicado es el total de la venta.
+        // El efectivo recibido y el cambio son informativos.
+        const montoPago = totalConInteres;
+        const montoRecibidoCentavos =
+          metodo === 'EFECTIVO'
+            ? ventaService.quetzalesACentavos(montoRecibido)
+            : null;
+        const cambioCentavos =
+          metodo === 'EFECTIVO'
+            ? ventaService.quetzalesACentavos(
+                Math.max(0, montoRecibido - totalConInteres)
+              )
+            : null;
         pagosArray = [{
           metodo,
           monto: ventaService.quetzalesACentavos(montoPago),
+          monto_recibido: montoRecibidoCentavos,
+          cambio: cambioCentavos,
           referencia: referencia || null,
           comprobante_url: comprobanteUrl || null,
           fecha: now,
@@ -656,10 +768,28 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">Comprobante (Imagen)</label>
-                  <input type="file" accept="image/*" capture="environment" onChange={handleComprobanteChange}
-                    className="block w-full text-sm text-[var(--color-text-sec)] file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border file:border-[var(--color-border)] file:text-xs file:font-medium file:bg-[var(--color-surface-soft)] file:text-[var(--color-text-sec)]" />
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    capture="environment"
+                    onChange={handleComprobanteChange}
+                    disabled={isUploadingComprobante}
+                    className="block w-full text-sm text-[var(--color-text-sec)] disabled:opacity-60 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border file:border-[var(--color-border)] file:text-xs file:font-medium file:bg-[var(--color-surface-soft)] file:text-[var(--color-text-sec)]"
+                  />
+                  {isUploadingComprobante && (
+                    <p className="mt-1 text-xs text-[var(--color-primary)]">
+                      Subiendo comprobante...
+                    </p>
+                  )}
                 </div>
-                {comprobanteUrl && <img src={comprobanteUrl} alt="Comprobante" className="h-32 rounded-lg border" style={{ borderColor: 'var(--color-border)' }} />}
+                {comprobanteUrl && (
+                  <img
+                    src={getImageUrl(comprobanteUrl)}
+                    alt="Comprobante"
+                    className="h-32 rounded-lg border object-contain"
+                    style={{ borderColor: 'var(--color-border)' }}
+                  />
+                )}
               </div>
             )}
 
@@ -925,6 +1055,7 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
       {/* ── Quote picker (for COTIZACION origin) ─────────────────────── */}
       {showQuotePicker && (
         <QuotePicker
+          open={showQuotePicker}
           onClose={() => setShowQuotePicker(false)}
           onSelect={handleSelectQuote}
         />

@@ -20,6 +20,8 @@ import {
   Building2,
   History,
   Tag,
+  Edit,
+  Trash2,
 } from 'lucide-react';
 
 import Button from '../../components/ui/Button';
@@ -671,10 +673,6 @@ export function RepuestosPage() {
                 <Button variant="ghost" onClick={() => handleToggleActive(selectedRepuesto)}
                   className={`text-sm border rounded-xl px-4 py-2 ${selectedRepuesto.activo ? 'border-orange-200 dark:border-amber-900/50 text-orange-600 dark:text-amber-400 hover:bg-orange-50 dark:hover:bg-[#202124]' : 'border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-[#202124]'}`}>
                   {selectedRepuesto.activo ? 'Desactivar' : 'Activar'}
-                </Button>
-                <Button variant="ghost" onClick={() => { setShowDetailModal(false); handleDuplicateRepuesto(selectedRepuesto); }} className="text-sm border border-slate-200 rounded-xl px-4 py-2">
-                  <Copy size={13} className="mr-1.5" />
-                  Duplicar
                 </Button>
                 <Button variant="ghost" onClick={() => { setShowDetailModal(false); handleDeleteRepuesto(selectedRepuesto.id); }} className="text-sm border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-[#202124] rounded-xl px-4 py-2">
                   <Trash2 size={13} className="mr-1.5" />

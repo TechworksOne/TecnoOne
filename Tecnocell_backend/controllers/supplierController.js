@@ -1,4 +1,6 @@
 const db = require('../config/database');
+const { parseLimit } = require('../utils/pagination');
+const { validatePhone } = require('../utils/phoneValidation');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -55,7 +57,7 @@ exports.getAllSuppliers = async (req, res) => {
     }
 
     query += ' GROUP BY p.id ORDER BY p.nombre LIMIT ?';
-    params.push(parseInt(limit));
+    params.push(parseLimit(limit, { defaultLimit: 50, maxLimit: 100 }));
 
     const [suppliers] = await db.query(query, params);
 
@@ -224,6 +226,19 @@ exports.createSupplier = async (req, res) => {
       notas
     } = req.body;
 
+    const telefonoValidado = validatePhone(telefono, {
+      label: 'El teléfono del proveedor',
+    });
+
+    if (!telefonoValidado.ok) {
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const telefonoNormalizado = telefonoValidado.value;
+
     if (!nombre) {
       return res.status(400).json({
         success: false,
@@ -236,7 +251,7 @@ exports.createSupplier = async (req, res) => {
       `INSERT INTO proveedores
         (empresa_id, nombre, contacto, telefono, email, direccion, nit, empresa, sitio_web, notas, activo)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)`,
-      [empresaId, nombre, contacto, telefono, email, direccion, nit, empresa, sitio_web, notas]
+      [empresaId, nombre, contacto, telefonoNormalizado, email, direccion, nit, empresa, sitio_web, notas]
     );
 
     res.status(201).json({
@@ -273,12 +288,25 @@ exports.updateSupplier = async (req, res) => {
       activo
     } = req.body;
 
+    const telefonoValidado = validatePhone(telefono, {
+      label: 'El teléfono del proveedor',
+    });
+
+    if (!telefonoValidado.ok) {
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const telefonoNormalizado = telefonoValidado.value;
+
     const updates = [];
     const values = [];
 
     if (nombre !== undefined) { updates.push('nombre = ?'); values.push(nombre); }
     if (contacto !== undefined) { updates.push('contacto = ?'); values.push(contacto); }
-    if (telefono !== undefined) { updates.push('telefono = ?'); values.push(telefono); }
+    if (telefono !== undefined) { updates.push('telefono = ?'); values.push(telefonoNormalizado); }
     if (email !== undefined) { updates.push('email = ?'); values.push(email); }
     if (direccion !== undefined) { updates.push('direccion = ?'); values.push(direccion); }
     if (nit !== undefined) { updates.push('nit = ?'); values.push(nit); }

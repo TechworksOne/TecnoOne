@@ -253,9 +253,16 @@ export function CustomerSelector({ selectedCustomer, onCustomerChange, className
                 Teléfono
               </label>
               <Input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={15}
                 value={selectedCustomer.clienteTelefono || ''}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
-                  handleManualInput('clienteTelefono', e.target.value)
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  handleManualInput(
+                    'clienteTelefono',
+                    e.target.value.replace(/\D/g, '').slice(0, 15),
+                  )
                 }
                 placeholder="Número de teléfono"
                 className="h-12 rounded-xl border-2 border-gray-200 focus:border-blue-500"

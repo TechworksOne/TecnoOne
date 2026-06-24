@@ -1,4 +1,6 @@
 const db = require('../config/database');
+const { parseLimit } = require('../utils/pagination');
+const { validatePhone } = require('../utils/phoneValidation');
 
 const METODOS_PAGO_PERMITIDOS = new Set(['efectivo', 'tarjeta', 'transferencia']);
 
@@ -45,7 +47,7 @@ const getAllCustomers = async (req, res) => {
     addTenantCondition(req, conditions, params);
 
     const [customers] = await db.query(
-      `SELECT 
+      `SELECT
         c.*,
         TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS nombre_completo,
         TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS name,
@@ -87,9 +89,9 @@ const getAllCustomers = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener clientes:', error);
-    res.status(error.statusCode || 500).json({ 
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: 'Error al obtener clientes' 
+      message: 'Error al obtener clientes'
     });
   }
 };
@@ -99,10 +101,10 @@ const searchCustomers = async (req, res) => {
   try {
     const query = String(req.query.query || '').trim();
 
-    const rawLimit = Number(req.query.limit);
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0
-      ? Math.min(rawLimit, 20)
-      : (query ? 20 : 5);
+    const limit = parseLimit(req.query.limit, {
+      defaultLimit: query ? 20 : 5,
+      maxLimit: 20,
+    });
 
     const conditions = ['c.activo = true'];
     const params = [];
@@ -134,9 +136,9 @@ const searchCustomers = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al buscar clientes:', error);
-    res.status(error.statusCode || 500).json({ 
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: 'Error al buscar clientes' 
+      message: 'Error al buscar clientes'
     });
   }
 };
@@ -159,9 +161,9 @@ const getCustomerById = async (req, res) => {
     );
 
     if (customers.length === 0) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: 'Cliente no encontrado' 
+        message: 'Cliente no encontrado'
       });
     }
 
@@ -171,9 +173,9 @@ const getCustomerById = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener cliente:', error);
-    res.status(error.statusCode || 500).json({ 
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: 'Error al obtener cliente' 
+      message: 'Error al obtener cliente'
     });
   }
 };
@@ -184,14 +186,28 @@ const createCustomer = async (req, res) => {
     console.log('📥 Datos recibidos en backend:', req.body);
     const { nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas, empresa_id } = req.body;
 
+    const telefonoValidado = validatePhone(telefono, {
+      required: true,
+      label: 'El teléfono del cliente',
+    });
+
+    if (!telefonoValidado.ok) {
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const telefonoNormalizado = telefonoValidado.value;
+
     console.log('📋 nombre extraído:', nombre, 'tipo:', typeof nombre);
 
     // Validar datos requeridos
     if (!nombre || nombre.trim() === '') {
       console.log('❌ Validación falló: nombre vacío o undefined');
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: 'El nombre es requerido' 
+        message: 'El nombre es requerido'
       });
     }
 
@@ -203,15 +219,15 @@ const createCustomer = async (req, res) => {
 
     // Insertar cliente
     const [result] = await db.query(
-      `INSERT INTO clientes (empresa_id, nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas) 
+      `INSERT INTO clientes (empresa_id, nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         empresaId,
-        nombre, 
-        apellido || null, 
-        telefono || null, 
-        nit || null, 
-        email || null, 
+        nombre,
+        apellido || null,
+        telefonoNormalizado,
+        nit || null,
+        email || null,
         direccion || null,
         metodoPagoPreferido,
         notas || null
@@ -229,7 +245,7 @@ const createCustomer = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error al crear cliente:', error);
-    res.status(error.statusCode || 500).json({ 
+    res.status(error.statusCode || 500).json({
       success: false,
       message: error.statusCode === 400 ? error.message : 'Error al crear cliente',
       error: error.message
@@ -242,6 +258,20 @@ const updateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
     const { nombre, apellido, telefono, nit, email, direccion, metodo_pago_preferido, notas } = req.body;
+
+    const telefonoValidado = validatePhone(telefono, {
+      required: true,
+      label: 'El teléfono del cliente',
+    });
+
+    if (!telefonoValidado.ok) {
+      return res.status(400).json({
+        success: false,
+        message: telefonoValidado.message,
+      });
+    }
+
+    const telefonoNormalizado = telefonoValidado.value;
     const metodoPagoPreferido = normalizeMetodoPagoPreferido(metodo_pago_preferido);
 
     // Verificar que el cliente existe
@@ -250,20 +280,20 @@ const updateCustomer = async (req, res) => {
     addTenantCondition(req, conditions, params);
     const [customers] = await db.query(`SELECT c.id FROM clientes c WHERE ${conditions.join(' AND ')}`, params);
     if (customers.length === 0) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: 'Cliente no encontrado' 
+        message: 'Cliente no encontrado'
       });
     }
 
     // Actualizar cliente
     const updateConditions = ['id = ?'];
     const updateParams = [
-        nombre, 
-        apellido || null, 
-        telefono || null, 
-        nit || null, 
-        email || null, 
+        nombre,
+        apellido || null,
+        telefonoNormalizado,
+        nit || null,
+        email || null,
         direccion || null,
         metodoPagoPreferido,
         notas || null,
@@ -275,21 +305,21 @@ const updateCustomer = async (req, res) => {
     }
 
     await db.query(
-      `UPDATE clientes 
+      `UPDATE clientes
        SET nombre = ?, apellido = ?, telefono = ?, nit = ?, email = ?, direccion = ?, metodo_pago_preferido = ?, notas = ?
        WHERE ${updateConditions.join(' AND ')}`,
       updateParams
     );
 
-    res.json({ 
+    res.json({
       success: true,
-      message: 'Cliente actualizado exitosamente' 
+      message: 'Cliente actualizado exitosamente'
     });
   } catch (error) {
     console.error('Error al actualizar cliente:', error);
-    res.status(error.statusCode || 500).json({ 
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: error.statusCode === 400 ? error.message : 'Error al actualizar cliente' 
+      message: error.statusCode === 400 ? error.message : 'Error al actualizar cliente'
     });
   }
 };
@@ -308,21 +338,21 @@ const deleteCustomer = async (req, res) => {
     const [result] = await db.query(`UPDATE clientes SET activo = false WHERE ${conditions.join(' AND ')}`, params);
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: 'Cliente no encontrado' 
+        message: 'Cliente no encontrado'
       });
     }
 
-    res.json({ 
+    res.json({
       success: true,
-      message: 'Cliente desactivado exitosamente' 
+      message: 'Cliente desactivado exitosamente'
     });
   } catch (error) {
     console.error('Error al eliminar cliente:', error);
-    res.status(error.statusCode || 500).json({ 
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: 'Error al eliminar cliente' 
+      message: 'Error al eliminar cliente'
     });
   }
 };
@@ -344,9 +374,9 @@ const getCustomerPurchases = async (req, res) => {
         message: 'Cliente no encontrado'
       });
     }
-    
+
     const [purchases] = await db.query(
-      `SELECT 
+      `SELECT
         v.id,
         v.numero_venta as reference,
         v.fecha_venta as date,
@@ -374,12 +404,12 @@ const getCustomerPurchases = async (req, res) => {
        ORDER BY date DESC`,
       [id, ...ventasTenantParams, id]
     );
-    
+
     // Parsear items JSON y formatear datos
     const formattedPurchases = purchases.map(purchase => {
       let products = [];
       let itemCount = 0;
-      
+
       try {
         if (purchase.items) {
           const itemsArray = JSON.parse(purchase.items);
@@ -394,7 +424,7 @@ const getCustomerPurchases = async (req, res) => {
       } catch (e) {
         console.error('Error parsing items JSON:', e);
       }
-      
+
       return {
         id: purchase.id,
         reference: purchase.reference,
@@ -415,7 +445,7 @@ const getCustomerPurchases = async (req, res) => {
     });
   } catch (error) {
     console.error('Error al obtener compras del cliente:', error);
-    res.status(error.statusCode || 500).json({ 
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener compras del cliente',
       error: error.message

@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { parsePagination, parseLimit } = require('../utils/pagination');
 const fs = require('fs');
 const path = require('path');
 
@@ -48,12 +49,11 @@ const saveBase64Image = (base64String, productoId, index) => {
 // Obtener todos los productos con sus imágenes y paginación
 exports.getAllProducts = async (req, res) => {
   try {
-    const { categoria, activo, conStock, search, page = 1, limit = 20 } = req.query;
-    
-    // Convertir a números
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const offset = (pageNum - 1) * limitNum;
+    const { categoria, activo, conStock, search } = req.query;
+    const { page: pageNum, limit: limitNum, offset } = parsePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
     
     let query = `
       SELECT 
@@ -569,80 +569,124 @@ exports.deleteProduct = async (req, res) => {
 // Ajustar stock con registro en kardex
 exports.adjustStock = async (req, res) => {
   const connection = await db.getConnection();
-  
+
   try {
     await connection.beginTransaction();
-    
+
     const { id } = req.params;
-    const { cantidad, tipo = 'ajuste', nota, usuario_id } = req.body;
-    
-    if (cantidad === undefined) {
+    const { cantidad, tipo = 'ajuste', nota } = req.body;
+
+    const cantidadAjuste = Number(cantidad);
+
+    if (!Number.isInteger(cantidadAjuste) || cantidadAjuste === 0) {
       await connection.rollback();
-      return res.status(400).json({ 
-        success: false, 
-        message: 'La cantidad es requerida' 
+
+      return res.status(400).json({
+        success: false,
+        message: 'La cantidad debe ser un número entero distinto de cero'
       });
     }
-    
-    // Obtener stock actual
+
+    const tipoNormalizado =
+      String(tipo || 'ajuste').trim().slice(0, 30) || 'ajuste';
+
+    const notaNormalizada =
+      nota === undefined || nota === null
+        ? null
+        : String(nota).trim().slice(0, 500) || null;
+
     const tenant = productTenantClause(req, 'p');
+
     const [products] = await connection.query(
-      `SELECT stock FROM productos p WHERE p.id = ?${tenant.sql} FOR UPDATE`,
+      `SELECT p.stock, p.empresa_id
+       FROM productos p
+       WHERE p.id = ?${tenant.sql}
+       FOR UPDATE`,
       [id, ...tenant.params]
     );
-    
+
     if (products.length === 0) {
       await connection.rollback();
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Producto no encontrado' 
+
+      return res.status(404).json({
+        success: false,
+        message: 'Producto no encontrado'
       });
     }
-    
-    const stockAnterior = products[0].stock;
-    const stockNuevo = stockAnterior + cantidad;
-    
+
+    const empresaId = Number(products[0].empresa_id);
+    const stockAnterior = Number(products[0].stock);
+    const stockNuevo = stockAnterior + cantidadAjuste;
+
     if (stockNuevo < 0) {
       await connection.rollback();
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Stock insuficiente' 
+
+      return res.status(400).json({
+        success: false,
+        message: 'Stock insuficiente'
       });
     }
-    
-    // Actualizar stock
-    const updateTenant = productTenantClause(req, 'productos');
+
+    const updateTenant =
+      productTenantClause(req, 'productos');
+
     await connection.query(
-      `UPDATE productos SET stock = ? WHERE id = ?${updateTenant.sql}`,
+      `UPDATE productos
+       SET stock = ?
+       WHERE id = ?${updateTenant.sql}`,
       [stockNuevo, id, ...updateTenant.params]
     );
-    
-    // Registrar en kardex
+
+    const usuarioId =
+      req.user?.id ??
+      req.user?.userId ??
+      null;
+
     await connection.query(
-      `INSERT INTO kardex 
-        (producto_id, tipo, cantidad, cantidad_anterior, cantidad_nueva, nota, usuario_id) 
-      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, tipo, cantidad, stockAnterior, stockNuevo, nota, usuario_id]
+      `INSERT INTO kardex (
+        empresa_id,
+        producto_id,
+        tipo,
+        cantidad,
+        cantidad_anterior,
+        cantidad_nueva,
+        nota,
+        usuario_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        empresaId,
+        id,
+        tipoNormalizado,
+        cantidadAjuste,
+        stockAnterior,
+        stockNuevo,
+        notaNormalizada,
+        usuarioId
+      ]
     );
-    
+
     await connection.commit();
-    
-    res.json({
+
+    return res.json({
       success: true,
       message: 'Stock ajustado exitosamente',
       data: {
         stock_anterior: stockAnterior,
         stock_nuevo: stockNuevo,
-        diferencia: cantidad
+        diferencia: cantidadAjuste
       }
     });
   } catch (error) {
-    await connection.rollback();
+    try {
+      await connection.rollback();
+    } catch (_) {}
+
     console.error('Error al ajustar stock:', error);
-    res.status(error.statusCode || 500).json({ 
-      success: false, 
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
       message: 'Error al ajustar stock',
-      error: error.message 
+      error: error.message
     });
   } finally {
     connection.release();
@@ -683,17 +727,21 @@ exports.getProductKardex = async (req, res) => {
       });
     }
 
+    const safeLimit = parseLimit(limit, { defaultLimit: 50, maxLimit: 100 });
+
     const [kardex] = await db.query(
       `SELECT
         k.*,
         u.username as usuario_nombre
       FROM kardex k
-      INNER JOIN productos p ON p.id = k.producto_id
+      INNER JOIN productos p
+        ON p.id = k.producto_id
+       AND p.empresa_id = k.empresa_id
       LEFT JOIN users u ON k.usuario_id = u.id
       WHERE k.producto_id = ?${tenant.sql}
       ORDER BY k.created_at DESC
       LIMIT ?`,
-      [id, ...tenant.params, parseInt(limit)]
+      [id, ...tenant.params, safeLimit]
     );
     
     res.json({

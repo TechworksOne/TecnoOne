@@ -1,40 +1,57 @@
 const db = require('../config/database');
 
+function getTenantEmpresaId(req) {
+  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
+}
+
+function requireTenantEmpresaId(req) {
+  const empresaId = getTenantEmpresaId(req);
+
+  if (empresaId === null || empresaId === undefined || empresaId === '') {
+    const error = new Error('Empresa requerida');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return empresaId;
+}
+
 // Obtener todas las categorías con sus subcategorías
 exports.getAllCategories = async (req, res) => {
   try {
-    // Obtener categorías
+    const empresaId = requireTenantEmpresaId(req);
+
     const [categories] = await db.query(
-      'SELECT * FROM categorias WHERE activo = true ORDER BY orden, nombre'
+      'SELECT * FROM categorias WHERE empresa_id = ? AND activo = true ORDER BY orden, nombre',
+      [empresaId]
     );
 
-    // Obtener subcategorías
     const [subcategories] = await db.query(
-      'SELECT * FROM subcategorias WHERE activo = true ORDER BY orden, nombre'
+      'SELECT * FROM subcategorias WHERE empresa_id = ? AND activo = true ORDER BY orden, nombre',
+      [empresaId]
     );
 
-    // Estructurar las categorías con sus subcategorías
     const categoryStructure = {};
     categories.forEach(cat => {
       categoryStructure[cat.nombre] = subcategories
-        .filter(sub => sub.categoria_id === cat.id)
+        .filter(sub => Number(sub.categoria_id) === Number(cat.id))
         .map(sub => sub.nombre);
     });
 
     res.json({
       success: true,
       data: {
-        categories: categories,
-        subcategories: subcategories,
-        categoryStructure: categoryStructure
-      }
+        categories,
+        subcategories,
+        categoryStructure,
+      },
     });
   } catch (error) {
     console.error('Error al obtener categorías:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error al obtener categorías',
-      error: error.message 
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode === 403 ? error.message : 'Error al obtener categorías',
+      error: error.message,
     });
   }
 };
@@ -42,44 +59,45 @@ exports.getAllCategories = async (req, res) => {
 // Crear nueva categoría
 exports.createCategory = async (req, res) => {
   try {
+    const empresaId = requireTenantEmpresaId(req);
     const { nombre, icono, orden } = req.body;
 
     if (!nombre) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'El nombre de la categoría es requerido' 
+      return res.status(400).json({
+        success: false,
+        message: 'El nombre de la categoría es requerido',
       });
     }
 
     const [result] = await db.query(
-      'INSERT INTO categorias (nombre, icono, orden) VALUES (?, ?, ?)',
-      [nombre, icono || null, orden || 0]
+      'INSERT INTO categorias (empresa_id, nombre, icono, orden) VALUES (?, ?, ?, ?)',
+      [empresaId, nombre, icono || null, orden || 0]
+    );
+
+    const [[created]] = await db.query(
+      'SELECT * FROM categorias WHERE id = ? AND empresa_id = ?',
+      [result.insertId, empresaId]
     );
 
     res.status(201).json({
       success: true,
       message: 'Categoría creada exitosamente',
-      data: {
-        id: result.insertId,
-        nombre,
-        icono,
-        orden
-      }
+      data: created,
     });
   } catch (error) {
     console.error('Error al crear categoría:', error);
-    
+
     if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ 
-        success: false, 
-        message: 'Ya existe una categoría con ese nombre' 
+      return res.status(409).json({
+        success: false,
+        message: 'Ya existe una categoría con ese nombre en esta empresa',
       });
     }
 
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error al crear categoría',
-      error: error.message 
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode === 403 ? error.message : 'Error al crear categoría',
+      error: error.message,
     });
   }
 };
@@ -87,44 +105,57 @@ exports.createCategory = async (req, res) => {
 // Crear nueva subcategoría
 exports.createSubcategory = async (req, res) => {
   try {
+    const empresaId = requireTenantEmpresaId(req);
     const { categoria_id, nombre, orden } = req.body;
 
     if (!categoria_id || !nombre) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'El ID de categoría y nombre son requeridos' 
+      return res.status(400).json({
+        success: false,
+        message: 'El ID de categoría y nombre son requeridos',
+      });
+    }
+
+    const [[categoria]] = await db.query(
+      'SELECT id FROM categorias WHERE id = ? AND empresa_id = ? AND activo = true',
+      [categoria_id, empresaId]
+    );
+
+    if (!categoria) {
+      return res.status(404).json({
+        success: false,
+        message: 'Categoría no encontrada para esta empresa',
       });
     }
 
     const [result] = await db.query(
-      'INSERT INTO subcategorias (categoria_id, nombre, orden) VALUES (?, ?, ?)',
-      [categoria_id, nombre, orden || 0]
+      'INSERT INTO subcategorias (empresa_id, categoria_id, nombre, orden) VALUES (?, ?, ?, ?)',
+      [empresaId, categoria_id, nombre, orden || 0]
+    );
+
+    const [[created]] = await db.query(
+      'SELECT * FROM subcategorias WHERE id = ? AND empresa_id = ?',
+      [result.insertId, empresaId]
     );
 
     res.status(201).json({
       success: true,
       message: 'Subcategoría creada exitosamente',
-      data: {
-        id: result.insertId,
-        categoria_id,
-        nombre,
-        orden
-      }
+      data: created,
     });
   } catch (error) {
     console.error('Error al crear subcategoría:', error);
-    
+
     if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ 
-        success: false, 
-        message: 'Ya existe una subcategoría con ese nombre en esta categoría' 
+      return res.status(409).json({
+        success: false,
+        message: 'Ya existe una subcategoría con ese nombre en esta categoría',
       });
     }
 
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error al crear subcategoría',
-      error: error.message 
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode === 403 ? error.message : 'Error al crear subcategoría',
+      error: error.message,
     });
   }
 };
@@ -132,23 +163,31 @@ exports.createSubcategory = async (req, res) => {
 // Obtener subcategorías de una categoría
 exports.getSubcategories = async (req, res) => {
   try {
+    const empresaId = requireTenantEmpresaId(req);
     const { categoryId } = req.params;
 
     const [subcategories] = await db.query(
-      'SELECT * FROM subcategorias WHERE categoria_id = ? AND activo = true ORDER BY orden, nombre',
-      [categoryId]
+      `SELECT s.*
+       FROM subcategorias s
+       INNER JOIN categorias c ON c.id = s.categoria_id AND c.empresa_id = s.empresa_id
+       WHERE s.categoria_id = ?
+         AND s.empresa_id = ?
+         AND s.activo = true
+         AND c.activo = true
+       ORDER BY s.orden, s.nombre`,
+      [categoryId, empresaId]
     );
 
     res.json({
       success: true,
-      data: subcategories
+      data: subcategories,
     });
   } catch (error) {
     console.error('Error al obtener subcategorías:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error al obtener subcategorías',
-      error: error.message 
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode === 403 ? error.message : 'Error al obtener subcategorías',
+      error: error.message,
     });
   }
 };
@@ -156,6 +195,7 @@ exports.getSubcategories = async (req, res) => {
 // Actualizar categoría
 exports.updateCategory = async (req, res) => {
   try {
+    const empresaId = requireTenantEmpresaId(req);
     const { id } = req.params;
     const { nombre, icono, orden, activo } = req.body;
 
@@ -180,29 +220,36 @@ exports.updateCategory = async (req, res) => {
     }
 
     if (updates.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No hay datos para actualizar' 
+      return res.status(400).json({
+        success: false,
+        message: 'No hay datos para actualizar',
       });
     }
 
-    values.push(id);
+    values.push(id, empresaId);
 
-    await db.query(
-      `UPDATE categorias SET ${updates.join(', ')} WHERE id = ?`,
+    const [result] = await db.query(
+      `UPDATE categorias SET ${updates.join(', ')} WHERE id = ? AND empresa_id = ?`,
       values
     );
 
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Categoría no encontrada para esta empresa',
+      });
+    }
+
     res.json({
       success: true,
-      message: 'Categoría actualizada exitosamente'
+      message: 'Categoría actualizada exitosamente',
     });
   } catch (error) {
     console.error('Error al actualizar categoría:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error al actualizar categoría',
-      error: error.message 
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode === 403 ? error.message : 'Error al actualizar categoría',
+      error: error.message,
     });
   }
 };
@@ -210,6 +257,7 @@ exports.updateCategory = async (req, res) => {
 // Actualizar subcategoría
 exports.updateSubcategory = async (req, res) => {
   try {
+    const empresaId = requireTenantEmpresaId(req);
     const { id } = req.params;
     const { nombre, orden, activo } = req.body;
 
@@ -230,29 +278,36 @@ exports.updateSubcategory = async (req, res) => {
     }
 
     if (updates.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No hay datos para actualizar' 
+      return res.status(400).json({
+        success: false,
+        message: 'No hay datos para actualizar',
       });
     }
 
-    values.push(id);
+    values.push(id, empresaId);
 
-    await db.query(
-      `UPDATE subcategorias SET ${updates.join(', ')} WHERE id = ?`,
+    const [result] = await db.query(
+      `UPDATE subcategorias SET ${updates.join(', ')} WHERE id = ? AND empresa_id = ?`,
       values
     );
 
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subcategoría no encontrada para esta empresa',
+      });
+    }
+
     res.json({
       success: true,
-      message: 'Subcategoría actualizada exitosamente'
+      message: 'Subcategoría actualizada exitosamente',
     });
   } catch (error) {
     console.error('Error al actualizar subcategoría:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error al actualizar subcategoría',
-      error: error.message 
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode === 403 ? error.message : 'Error al actualizar subcategoría',
+      error: error.message,
     });
   }
 };
@@ -260,23 +315,31 @@ exports.updateSubcategory = async (req, res) => {
 // Eliminar categoría (soft delete)
 exports.deleteCategory = async (req, res) => {
   try {
+    const empresaId = requireTenantEmpresaId(req);
     const { id } = req.params;
 
-    await db.query(
-      'UPDATE categorias SET activo = false WHERE id = ?',
-      [id]
+    const [result] = await db.query(
+      'UPDATE categorias SET activo = false WHERE id = ? AND empresa_id = ?',
+      [id, empresaId]
     );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Categoría no encontrada para esta empresa',
+      });
+    }
 
     res.json({
       success: true,
-      message: 'Categoría desactivada exitosamente'
+      message: 'Categoría desactivada exitosamente',
     });
   } catch (error) {
     console.error('Error al desactivar categoría:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error al desactivar categoría',
-      error: error.message 
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode === 403 ? error.message : 'Error al desactivar categoría',
+      error: error.message,
     });
   }
 };
@@ -284,23 +347,31 @@ exports.deleteCategory = async (req, res) => {
 // Eliminar subcategoría (soft delete)
 exports.deleteSubcategory = async (req, res) => {
   try {
+    const empresaId = requireTenantEmpresaId(req);
     const { id } = req.params;
 
-    await db.query(
-      'UPDATE subcategorias SET activo = false WHERE id = ?',
-      [id]
+    const [result] = await db.query(
+      'UPDATE subcategorias SET activo = false WHERE id = ? AND empresa_id = ?',
+      [id, empresaId]
     );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subcategoría no encontrada para esta empresa',
+      });
+    }
 
     res.json({
       success: true,
-      message: 'Subcategoría desactivada exitosamente'
+      message: 'Subcategoría desactivada exitosamente',
     });
   } catch (error) {
     console.error('Error al desactivar subcategoría:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error al desactivar subcategoría',
-      error: error.message 
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode === 403 ? error.message : 'Error al desactivar subcategoría',
+      error: error.message,
     });
   }
 };

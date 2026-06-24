@@ -5,25 +5,32 @@ const compraController = require('../controllers/compraController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePermission = require('../middleware/requirePermission');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
+// Fuentes financieras disponibles para registrar compras
+router.get('/fuentes-pago', requirePermission('compras.crear'), compraController.getFuentesPago);
+
 // Rutas de compras de PRODUCTOS
-router.post('/productos', compraController.createCompraProductos);
+router.post('/productos', requirePermission('compras.crear'), compraController.createCompraProductos);
 
 // Rutas de compras de REPUESTOS
-router.post('/repuestos', compraController.createCompraRepuestos);
+router.post('/repuestos', requirePermission('compras.crear'), compraController.createCompraRepuestos);
 
-// Rutas generales (ambos tipos)
-router.get('/', compraController.getAllCompras);
+// Compra atómica de productos, repuestos o ambos
+router.post('/', requirePermission('compras.crear'), compraController.createCompra);
+
+// Rutas generales
+router.get('/', requirePermission('compras.ver'), compraController.getAllCompras);
 
 // Rutas de series
-router.get('/series/producto/:productoId', compraController.getSeriesByProducto);
+router.get('/series/producto/:productoId', requirePermission('compras.ver'), compraController.getSeriesByProducto);
 
-router.get('/:id', compraController.getCompraById);
-router.post('/:id/anular', compraController.anularCompra);
+router.get('/:id', requirePermission('compras.ver'), compraController.getCompraById);
+router.post('/:id/anular', requirePermission('compras.anular'), compraController.anularCompra);
 
 module.exports = router;

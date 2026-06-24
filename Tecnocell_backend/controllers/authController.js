@@ -1,21 +1,29 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const db = require('../config/database');
+const subscriptionAccess = require('../services/subscriptionAccessService');
 
 // Login
 const login = async (req, res) => {
   try {
     const { email, username, password } = req.body;
-    const identifier = username || email; // Aceptar username o email
+    const identifier = username || email;
 
-    // Validar datos
     if (!identifier || !password) {
-      return res.status(400).json({ message: 'Usuario/Email y contraseña son requeridos' });
+      return res.status(400).json({
+        message: 'Usuario/Email y contraseña son requeridos',
+      });
     }
 
-    // Buscar usuario en la base de datos por username o email
     const [users] = await db.query(
-      'SELECT * FROM users WHERE username = ? OR email = ?',
+      `SELECT
+         u.*,
+         e.id AS empresa_existente_id,
+         e.estado AS empresa_estado
+       FROM users u
+       LEFT JOIN empresas e ON e.id = u.empresa_id
+       WHERE u.username = ? OR u.email = ?
+       LIMIT 1`,
       [identifier, identifier]
     );
 
@@ -25,52 +33,107 @@ const login = async (req, res) => {
 
     const user = users[0];
 
-    // Bloquear usuarios inactivos
-    if (!user.active) {
-      return res.status(401).json({ message: 'Tu cuenta está inactiva. Contacta al administrador.' });
-    }
-
-    // Verificar contraseña
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
       return res.status(401).json({ message: 'Credenciales inválidas' });
     }
 
-    // Obtener perfil y roles del sistema de roles nuevo
+    if (!Boolean(user.active)) {
+      return res.status(403).json({
+        message: 'Tu cuenta está inactiva. Contacta al administrador.',
+      });
+    }
+
+    const empresaId = user.empresa_id ?? null;
+    const tipoUsuario = String(user.tipo_usuario || 'EMPRESA').toUpperCase();
+    const esSuperAdmin = Number(user.es_super_admin) === 1;
+
+    if (tipoUsuario === 'PLATAFORMA' || esSuperAdmin) {
+      const plataformaValida =
+        tipoUsuario === 'PLATAFORMA' &&
+        esSuperAdmin &&
+        empresaId === null;
+
+      if (!plataformaValida) {
+        return res.status(403).json({
+          message: 'La cuenta de plataforma no tiene una configuración válida',
+        });
+      }
+    } else {
+      const usuarioEmpresarialValido =
+        tipoUsuario === 'EMPRESA' &&
+        !esSuperAdmin &&
+        empresaId !== null &&
+        user.empresa_existente_id !== null;
+
+      if (!usuarioEmpresarialValido) {
+        return res.status(403).json({
+          message: 'El usuario no tiene una empresa válida asignada',
+        });
+      }
+
+      const acceso = await subscriptionAccess.evaluarAccesoEmpresa(empresaId);
+      if (!acceso.permitido) {
+        return res.status(403).json({
+          code: acceso.code,
+          message: subscriptionAccess.mensajeAccesoDenegado(acceso.code),
+        });
+      }
+    }
+
     const [[perfil]] = await db.query(
-      'SELECT nombres, apellidos, telefono, dpi, direccion, foto_perfil, firma FROM user_profiles WHERE user_id = ?',
+      `SELECT
+         nombres,
+         apellidos,
+         telefono,
+         dpi,
+         direccion,
+         foto_perfil,
+         firma
+       FROM user_profiles
+       WHERE user_id = ?`,
       [user.id]
     );
+
     const [rolesRows] = await db.query(
-      `SELECT r.nombre FROM roles r
+      `SELECT r.nombre
+       FROM roles r
        INNER JOIN user_roles ur ON ur.role_id = r.id
        WHERE ur.user_id = ?`,
       [user.id]
     );
-    const rolesArray = rolesRows.map(r => r.nombre);
-    const empresaId = user.empresa_id ?? null;
 
-    // Generar token JWT (incluye roles para middleware)
+    const rolesArray = rolesRows.map((role) => role.nombre);
+    const rol = esSuperAdmin ? 'superadmin' : user.role;
+
     const token = jwt.sign(
       {
+        userId: user.id,
+        empresaId,
+        tipoUsuario,
+        esSuperAdmin,
+        rol,
+
+        // Alias de compatibilidad.
         id: user.id,
         email: user.email,
         username: user.username,
         name: user.name,
-        role: user.role,
+        role: rol,
         roles: rolesArray,
-        empresa_id: empresaId
+        empresa_id: empresaId,
       },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
 
-    // Actualizar ultimo_login
-    await db.query('UPDATE users SET ultimo_login = NOW() WHERE id = ?', [user.id]);
+    await db.query(
+      'UPDATE users SET ultimo_login = NOW() WHERE id = ?',
+      [user.id]
+    );
 
-    // Enviar respuesta (sin enviar la contraseña)
-    res.json({
+    return res.json({
       message: 'Login exitoso',
       token,
       user: {
@@ -78,16 +141,17 @@ const login = async (req, res) => {
         username: user.username,
         email: user.email,
         name: user.name,
-        role: user.role,
+        role: rol,
         roles: rolesArray,
         empresa_id: empresaId,
+        tipo_usuario: tipoUsuario,
+        es_super_admin: esSuperAdmin,
         perfil: perfil || null,
-      }
+      },
     });
-
   } catch (error) {
     console.error('Error en login:', error);
-    res.status(500).json({ message: 'Error en el servidor' });
+    return res.status(500).json({ message: 'Error en el servidor' });
   }
 };
 
@@ -96,20 +160,14 @@ const logout = (req, res) => {
   res.json({ message: 'Logout exitoso' });
 };
 
-// Verificar token
+// Verificar token.
+// La validación criptográfica y la revalidación contra MariaDB ya fueron
+// realizadas por authMiddleware.verifyToken.
 const verifyToken = (req, res) => {
-  const token = req.headers['authorization']?.split(' ')[1];
-
-  if (!token) {
-    return res.status(403).json({ message: 'Token no proporcionado' });
-  }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    res.json({ valid: true, user: decoded });
-  } catch (error) {
-    res.status(401).json({ valid: false, message: 'Token inválido' });
-  }
+  return res.json({
+    valid: true,
+    user: req.user,
+  });
 };
 
 // GET /api/auth/me — devuelve el usuario autenticado con perfil y roles
@@ -118,7 +176,9 @@ const getMe = async (req, res) => {
     const userId = req.user.id;
 
     const [[user]] = await db.query(
-      'SELECT id, username, email, name, role, empresa_id, active, ultimo_login, created_at, updated_at FROM users WHERE id = ?',
+      `SELECT id, username, email, name, role, empresa_id, active,
+              tipo_usuario, es_super_admin, ultimo_login, created_at, updated_at
+       FROM users WHERE id = ?`,
       [userId]
     );
     if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
@@ -139,8 +199,10 @@ const getMe = async (req, res) => {
         username: user.username,
         email: user.email,
         name: user.name,
-        role: user.role,
+        role: Number(user.es_super_admin) === 1 ? 'superadmin' : user.role,
         empresa_id: user.empresa_id ?? null,
+        tipo_usuario: user.tipo_usuario || 'EMPRESA',
+        es_super_admin: Number(user.es_super_admin) === 1,
         active: Boolean(user.active),
         ultimo_login: user.ultimo_login,
         created_at: user.created_at,
@@ -159,6 +221,7 @@ const getMe = async (req, res) => {
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 
@@ -170,15 +233,12 @@ const uploadMe = multer({
       cb(null, dir);
     },
     filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase();
+      const ext = getSafeImageExtension(file);
       cb(null, `perfil${ext}`);
     },
   }),
   limits: { fileSize: 5 * 1024 * 1024, fieldSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (/^image\//.test(file.mimetype)) cb(null, true);
-    else cb(new Error('Solo se permiten imágenes'));
-  },
+  fileFilter: imageFileFilter,
 });
 
 const updateMePerfil = async (req, res) => {
@@ -187,14 +247,45 @@ const updateMePerfil = async (req, res) => {
     console.log('[updateMePerfil] body keys:', Object.keys(req.body));
     console.log('[updateMePerfil] firma recibida:', req.body.firma ? `[data URL, length=${req.body.firma.length}]` : req.body.firma);
     const { telefono, direccion, nombres, apellidos, firma } = req.body;
+
+    const telefonoFueEnviado = telefono !== undefined;
+    let telefonoNormalizado = null;
+
+    if (telefonoFueEnviado) {
+      if (typeof telefono !== 'string') {
+        return res.status(400).json({
+          message: 'El teléfono debe contener únicamente números.',
+        });
+      }
+
+      telefonoNormalizado = telefono.trim();
+
+      if (telefonoNormalizado && !/^\d{8,15}$/.test(telefonoNormalizado)) {
+        return res.status(400).json({
+          message: 'El teléfono debe contener entre 8 y 15 dígitos.',
+        });
+      }
+    }
+
     const updateFields = [];
     const updateValues = [];
 
     if (nombres !== undefined) { updateFields.push('nombres = ?'); updateValues.push(nombres || null); }
     if (apellidos !== undefined) { updateFields.push('apellidos = ?'); updateValues.push(apellidos || null); }
-    if (telefono !== undefined) { updateFields.push('telefono = ?'); updateValues.push(telefono || null); }
+    if (telefonoFueEnviado) {
+      updateFields.push('telefono = ?');
+      updateValues.push(telefonoNormalizado || null);
+    }
     if (direccion !== undefined) { updateFields.push('direccion = ?'); updateValues.push(direccion || null); }
-    if (firma !== undefined) { updateFields.push('firma = ?'); updateValues.push(firma || null); }
+    const firmaFueEnviada =
+      firma !== undefined &&
+      firma !== null &&
+      String(firma).trim() !== '';
+
+    if (firmaFueEnviada) {
+      updateFields.push('firma = ?');
+      updateValues.push(String(firma).trim());
+    }
     if (req.file) {
       const foto_perfil = `/uploads/usuarios/${userId}/perfil/${req.file.filename}`;
       updateFields.push('foto_perfil = ?');

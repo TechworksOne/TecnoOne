@@ -4,6 +4,7 @@ const interactionController = require('../controllers/interactionController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePermission = require('../middleware/requirePermission');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
@@ -11,15 +12,15 @@ router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
 // Crear nueva interacción
-router.post('/', interactionController.createInteraction);
+router.post('/', requirePermission('clientes.crear'), interactionController.createInteraction);
 
 // Obtener interacciones de un cliente
-router.get('/cliente/:cliente_id', interactionController.getCustomerInteractions);
+router.get('/cliente/:cliente_id', requirePermission('clientes.ver'), interactionController.getCustomerInteractions);
 
 // Obtener resumen de un cliente
-router.get('/cliente/:cliente_id/resumen', interactionController.getCustomerSummary);
+router.get('/cliente/:cliente_id/resumen', requirePermission('clientes.ver'), interactionController.getCustomerSummary);
 
 // Obtener estadísticas de interacciones
-router.get('/stats', interactionController.getInteractionStats);
+router.get('/stats', requirePermission('clientes.ver'), interactionController.getInteractionStats);
 
 module.exports = router;

@@ -333,6 +333,34 @@ export default function ChecklistIngresoModal({
     tipoEquipo === 'Tablet'      ? checksTablet      :
     (tipoEquipo === 'Laptop' || tipoEquipo === 'Computadora') ? checksComputadora : [];
 
+  const todosEspecificosMarcados =
+    checksToRender.length > 0 &&
+    checksToRender.every(item => item.checked);
+
+  const toggleTodosEspecificos = () => {
+    if (isCancelled || checksToRender.length === 0) return;
+
+    const nuevoEstado = !todosEspecificosMarcados;
+    markDirty();
+
+    if (tipoEquipo === 'Telefono') {
+      setChecksTelefono(prev =>
+        prev.map(item => ({ ...item, checked: nuevoEstado }))
+      );
+    } else if (tipoEquipo === 'Tablet') {
+      setChecksTablet(prev =>
+        prev.map(item => ({ ...item, checked: nuevoEstado }))
+      );
+    } else if (
+      tipoEquipo === 'Laptop' ||
+      tipoEquipo === 'Computadora'
+    ) {
+      setChecksComputadora(prev =>
+        prev.map(item => ({ ...item, checked: nuevoEstado }))
+      );
+    }
+  };
+
   const tipoLabel =
     tipoEquipo === 'Telefono'    ? 'Teléfono'        :
     tipoEquipo === 'Tablet'      ? 'Tablet'          :
@@ -487,13 +515,26 @@ export default function ChecklistIngresoModal({
               {/* ── 3. CHECKS ESPECÍFICOS ─────────────────────────────────── */}
               {checksToRender.length > 0 && (
                 <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden">
-                  <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">
-                      Checks Específicos
-                    </h3>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
-                      {tipoLabel}
-                    </span>
+                  <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                        Checks Específicos
+                      </h3>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+                        {tipoLabel}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isCancelled}
+                      onClick={toggleTodosEspecificos}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/30 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {todosEspecificosMarcados
+                        ? 'Desmarcar todos'
+                        : 'Marcar todos'}
+                    </button>
                   </div>
                   <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {checksToRender.map(item => {

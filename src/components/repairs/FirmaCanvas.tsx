@@ -2,8 +2,14 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import { Check, RotateCcw, PenLine, Maximize2, X } from 'lucide-react';
 
 interface FirmaCanvasProps {
-  /** Se llama con base64 PNG cuando el cliente confirma la firma, o null al limpiar */
+  /** Se llama con base64 PNG cuando se confirma la firma, o null al limpiar */
   onChange: (base64: string | null) => void;
+
+  /** Firma previamente guardada */
+  initialValue?: string | null;
+
+  /** Título mostrado en el modo de pantalla completa */
+  fullscreenTitle?: string;
 }
 
 // ── Canvas helpers ────────────────────────────────────────────────────────────
@@ -42,9 +48,138 @@ function getCoords(e: PointerEvent, canvas: HTMLCanvasElement) {
   return { x: e.clientX - rect.left, y: e.clientY - rect.top };
 }
 
+function exportNormalizedSignature(
+  canvas: HTMLCanvasElement
+): string | null {
+  const sourceCtx = canvas.getContext('2d');
+
+  if (!sourceCtx || !canvas.width || !canvas.height) {
+    return null;
+  }
+
+  const pixels = sourceCtx.getImageData(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  let minX = canvas.width;
+  let minY = canvas.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const index = (y * canvas.width + x) * 4;
+
+      const red = pixels.data[index];
+      const green = pixels.data[index + 1];
+      const blue = pixels.data[index + 2];
+      const alpha = pixels.data[index + 3];
+
+      const esTrazo =
+        alpha > 10 &&
+        (
+          red < 245 ||
+          green < 245 ||
+          blue < 245
+        );
+
+      if (!esTrazo) continue;
+
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return null;
+  }
+
+  const strokeWidth = maxX - minX + 1;
+  const strokeHeight = maxY - minY + 1;
+
+  const sourcePadding = Math.max(
+    16,
+    Math.round(
+      Math.max(strokeWidth, strokeHeight) * 0.08
+    )
+  );
+
+  const sourceX = Math.max(0, minX - sourcePadding);
+  const sourceY = Math.max(0, minY - sourcePadding);
+
+  const sourceWidth = Math.min(
+    canvas.width - sourceX,
+    strokeWidth + sourcePadding * 2
+  );
+
+  const sourceHeight = Math.min(
+    canvas.height - sourceY,
+    strokeHeight + sourcePadding * 2
+  );
+
+  const targetWidth = 900;
+  const targetHeight = 260;
+  const targetPadding = 20;
+
+  const output = document.createElement('canvas');
+  output.width = targetWidth;
+  output.height = targetHeight;
+
+  const outputCtx = output.getContext('2d');
+
+  if (!outputCtx) {
+    return null;
+  }
+
+  outputCtx.fillStyle = '#ffffff';
+  outputCtx.fillRect(
+    0,
+    0,
+    targetWidth,
+    targetHeight
+  );
+
+  outputCtx.imageSmoothingEnabled = true;
+  outputCtx.imageSmoothingQuality = 'high';
+
+  const scale = Math.min(
+    (targetWidth - targetPadding * 2) / sourceWidth,
+    (targetHeight - targetPadding * 2) / sourceHeight
+  );
+
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+
+  const drawX = (targetWidth - drawWidth) / 2;
+  const drawY = (targetHeight - drawHeight) / 2;
+
+  outputCtx.drawImage(
+    canvas,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    drawX,
+    drawY,
+    drawWidth,
+    drawHeight
+  );
+
+  return output.toDataURL('image/png');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function FirmaCanvas({ onChange }: FirmaCanvasProps) {
+export default function FirmaCanvas({
+  onChange,
+  initialValue = null,
+  fullscreenTitle = 'Firma del cliente',
+}: FirmaCanvasProps) {
   // ── Refs ───────────────────────────────────────────────────────────────────
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const fsCanvasRef   = useRef<HTMLCanvasElement>(null);
@@ -56,13 +191,36 @@ export default function FirmaCanvas({ onChange }: FirmaCanvasProps) {
   // ── State ──────────────────────────────────────────────────────────────────
   const [mainIsEmpty,     setMainIsEmpty]     = useState(true);
   const [fsIsEmpty,       setFsIsEmpty]       = useState(true);
-  const [confirmedBase64, setConfirmedBase64] = useState<string | null>(null);
-  const [showFullscreen,  setShowFullscreen]  = useState(false);
+  const [confirmedBase64, setConfirmedBase64] =
+    useState<string | null>(initialValue);
+
+  const [showFullscreen, setShowFullscreen] =
+    useState(false);
+
+  useEffect(() => {
+    setConfirmedBase64(initialValue ?? null);
+  }, [initialValue]);
 
   // ── Init main canvas ───────────────────────────────────────────────────────
   const initMain = useCallback(() => {
     if (mainCanvasRef.current) setupCanvas(mainCanvasRef.current, 2.5);
   }, []);
+
+  useEffect(() => {
+    if (confirmedBase64) return;
+
+    const timer = window.setTimeout(() => {
+      if (
+        mainCanvasRef.current &&
+        !mainHasStroke.current
+      ) {
+        initMain();
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [confirmedBase64, initMain]);
+
 
   useEffect(() => {
     initMain();
@@ -148,7 +306,12 @@ export default function FirmaCanvas({ onChange }: FirmaCanvasProps) {
 
   const mainConfirm = () => {
     if (mainIsEmpty) return;
-    const b64 = mainCanvasRef.current!.toDataURL('image/png');
+    const b64 = exportNormalizedSignature(
+      mainCanvasRef.current!
+    );
+
+    if (!b64) return;
+
     setConfirmedBase64(b64);
     onChange(b64);
   };
@@ -164,7 +327,12 @@ export default function FirmaCanvas({ onChange }: FirmaCanvasProps) {
 
   const fsUsarFirma = () => {
     if (fsIsEmpty) return;
-    const b64 = fsCanvasRef.current!.toDataURL('image/png');
+    const b64 = exportNormalizedSignature(
+      fsCanvasRef.current!
+    );
+
+    if (!b64) return;
+
     setConfirmedBase64(b64);
     onChange(b64);
     setShowFullscreen(false);
@@ -232,7 +400,7 @@ export default function FirmaCanvas({ onChange }: FirmaCanvasProps) {
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={mainClear}
@@ -244,9 +412,9 @@ export default function FirmaCanvas({ onChange }: FirmaCanvasProps) {
               <button
                 type="button"
                 onClick={() => setShowFullscreen(true)}
-                className="flex items-center justify-center gap-1 py-2.5 text-xs font-semibold rounded-xl border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors"
+                className="col-span-2 sm:col-span-1 sm:order-none order-first flex items-center justify-center gap-1.5 py-3 sm:py-2.5 text-xs font-semibold rounded-xl border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors"
               >
-                <Maximize2 size={13} /> Pantalla completa
+                <Maximize2 size={14} /> Firmar en grande
               </button>
               <button
                 type="button"
@@ -276,7 +444,7 @@ export default function FirmaCanvas({ onChange }: FirmaCanvasProps) {
               </div>
               <div>
                 <p className="text-sm font-bold text-slate-800 dark:text-slate-100 leading-tight">
-                  Firma del cliente
+                  {fullscreenTitle}
                 </p>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
                   Firme con el dedo en el área de abajo
@@ -305,7 +473,12 @@ export default function FirmaCanvas({ onChange }: FirmaCanvasProps) {
               <canvas
                 ref={fsCanvasRef}
                 className="w-full touch-none cursor-crosshair block"
-                style={{ height: '65vh', background: '#ffffff', touchAction: 'none', display: 'block' }}
+                style={{
+                  height: 'min(65dvh, 560px)',
+                  background: '#ffffff',
+                  touchAction: 'none',
+                  display: 'block',
+                }}
                 onPointerDown={fsDown}
                 onPointerMove={fsMove}
                 onPointerUp={fsUp}
