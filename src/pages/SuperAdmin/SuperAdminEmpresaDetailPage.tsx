@@ -220,24 +220,7 @@ export default function SuperAdminEmpresaDetailPage() {
     setHistorial(historialData);
     setPlanes(planesData);
 
-    const available =
-      planesData.filter(
-        plan =>
-          plan.activo &&
-          plan.asignable
-      );
-
-    const nextPlan =
-      available.find(
-        plan =>
-          plan.id !==
-          suscripcionData.plan_id
-      ) ||
-      available[0];
-
-    setSelectedPlanId(
-      nextPlan?.id || ''
-    );
+    setSelectedPlanId('');
 
     const minimumDate =
       tomorrowString();
@@ -902,9 +885,19 @@ export default function SuperAdminEmpresaDetailPage() {
             El cambio inmediato modifica módulos y límites ahora. El cambio programado conserva el plan actual hasta la fecha efectiva.
           </p>
 
+          <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3 text-sm dark:bg-slate-900">
+            <span className="text-slate-500">
+              Plan vigente:
+            </span>{' '}
+            <strong>
+              {currentPlan?.nombre ||
+                suscripcion.plan}
+            </strong>
+          </div>
+
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <label className="text-sm font-semibold">
-              Nuevo plan
+              Plan destino
 
               <select
                 value={
@@ -923,7 +916,17 @@ export default function SuperAdminEmpresaDetailPage() {
                 }
                 className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-transparent px-3 dark:border-slate-700"
               >
-                {assignablePlans.map(
+                <option value="">
+                  Seleccione un plan destino
+                </option>
+
+                {assignablePlans
+                  .filter(
+                    plan =>
+                      plan.id !==
+                      suscripcion.plan_id
+                  )
+                  .map(
                   plan => (
                     <option
                       key={plan.id}
@@ -979,7 +982,7 @@ export default function SuperAdminEmpresaDetailPage() {
             <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 p-4 text-sm dark:border-slate-800 sm:grid-cols-4">
               <div>
                 <p className="text-xs uppercase text-slate-500">
-                  Plan
+                  Plan destino
                 </p>
                 <p className="font-bold">
                   {
