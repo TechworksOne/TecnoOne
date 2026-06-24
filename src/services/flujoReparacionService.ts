@@ -37,74 +37,9 @@ api.interceptors.response.use(
   }
 );
 
-// ========== INGRESO DE EQUIPO (CHECKLIST) ==========
+// El checklist de ingreso se gestiona en /api/check-equipo.
 
-export interface ChecklistData {
-  checks: {
-    // Teléfono
-    equipoEnciende?: boolean;
-    daFlash?: boolean;
-    bocinaSuperior?: boolean;
-    bocinaInferior?: boolean;
-    faceId?: boolean;
-    touchId?: boolean;
-    camara05x?: boolean;
-    camara10x?: boolean;
-    camara30x?: boolean;
-    camaraFrontal?: boolean;
-    microfono?: boolean;
-    vibracion?: boolean;
-    wifi?: boolean;
-    bluetooth?: boolean;
-    pantallaCompleta?: boolean;
-    tactil?: boolean;
-    botonSubirVolumen?: boolean;
-    botonBajarVolumen?: boolean;
-    botonPower?: boolean;
-    puertoCarga?: boolean;
-    cargaInalambrica?: boolean;
-    entradaAudifono?: boolean;
-    
-    // Tablet
-    bocinas?: boolean;
-    bateria?: boolean;
-    
-    // Computadora
-    pantalla?: boolean;
-    teclado?: boolean;
-    touchpad?: boolean;
-    puertosUSB?: boolean;
-    puertoHDMI?: boolean;
-    camara?: boolean;
-    cargador?: boolean;
-    ventilador?: boolean;
-  };
-  observaciones?: string;
-}
 
-export const saveIngresoEquipo = async (reparacionId: string, data: ChecklistData, fotos?: File[]) => {
-  const formData = new FormData();
-  formData.append('checks', JSON.stringify(data.checks));
-  
-  if (data.observaciones) {
-    formData.append('observaciones', data.observaciones);
-  }
-  
-  if (fotos && fotos.length > 0) {
-    fotos.forEach(foto => {
-      formData.append('fotos', foto);
-    });
-  }
-  
-  // No establecer Content-Type manualmente — el browser/axios lo genera con el boundary correcto
-  const response = await api.post(`/flujo-reparaciones/${reparacionId}/ingreso-equipo`, formData);
-  return response.data;
-};
-
-export const getIngresoEquipo = async (reparacionId: string) => {
-  const response = await api.get(`/flujo-reparaciones/${reparacionId}/ingreso-equipo`);
-  return response.data;
-};
 
 // ========== GESTIÓN DE ESTADOS ==========
 

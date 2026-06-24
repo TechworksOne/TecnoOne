@@ -71,161 +71,12 @@ async function validateReparacionForTenant(connectionOrDb, reparacionId, req) {
 }
 
 // ========== GUARDAR/ACTUALIZAR CHECKLIST DE INGRESO DE EQUIPO ==========
-exports.saveIngresoEquipo = async (req, res) => {
-  const connection = await db.getConnection();
-  
-  try {
-    await connection.beginTransaction();
-    
-    const { id: reparacionId } = req.params;
-    const { checks, observaciones } = req.body;
-    
-    // Validaciones
-    if (!checks) {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: 'Debe proporcionar los checks del equipo'
-      });
-    }
-    
-    // Verificar que la reparación existe
-    const reparacion = await validateReparacionForTenant(connection, reparacionId, req);
-    
-    if (!reparacion) {
-      await connection.rollback();
-      return res.status(404).json({
-        success: false,
-        message: 'Reparación no encontrada'
-      });
-    }
-    
-    const tipoEquipo = reparacion.tipo_equipo;
-    
-    // Procesar fotos si fueron subidas
-    const fotos = [];
-    if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
-        fotos.push({
-          filename: file.filename,
-          url_path: `/uploads/reparaciones/${reparacionId}/ingreso/${file.filename}`,
-          size: file.size,
-          mimetype: file.mimetype
-        });
-      }
-    }
-    
-    // Verificar si ya existe un checklist para esta reparación
-    const [existing] = await connection.query(
-      'SELECT id FROM ingreso_equipo_checklist WHERE reparacion_id = ?',
-      [reparacionId]
-    );
-    
-    if (existing.length > 0) {
-      // Actualizar existente
-      await connection.query(
-        `UPDATE ingreso_equipo_checklist 
-         SET checks = ?, fotos = ?, observaciones = ?, updated_at = NOW()
-         WHERE reparacion_id = ?`,
-        [
-          JSON.stringify(checks),
-          fotos.length > 0 ? JSON.stringify(fotos) : null,
-          observaciones,
-          reparacionId
-        ]
-      );
-    } else {
-      // Crear nuevo
-      await connection.query(
-        `INSERT INTO ingreso_equipo_checklist 
-         (reparacion_id, tipo_equipo, checks, fotos, observaciones)
-         VALUES (?, ?, ?, ?, ?)`,
-        [
-          reparacionId,
-          tipoEquipo,
-          JSON.stringify(checks),
-          fotos.length > 0 ? JSON.stringify(fotos) : null,
-          observaciones
-        ]
-      );
-    }
-    
-    await connection.commit();
-    
-    res.status(200).json({
-      success: true,
-      message: 'Checklist de ingreso guardado exitosamente',
-      data: {
-        reparacion_id: reparacionId,
-        checks: checks,
-        fotos: fotos,
-        observaciones: observaciones
-      }
-    });
-    
-  } catch (error) {
-    await connection.rollback();
-    console.error('❌ Error al guardar checklist de ingreso:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al guardar checklist de ingreso',
-      error: error.message
-    });
-  } finally {
-    connection.release();
-  }
-};
-
-// ========== OBTENER CHECKLIST DE INGRESO DE EQUIPO ==========
-exports.getIngresoEquipo = async (req, res) => {
-  try {
-    const { id: reparacionId } = req.params;
-
-    const reparacion = await validateReparacionForTenant(db, reparacionId, req);
-    if (!reparacion) {
-      return res.status(404).json({
-        success: false,
-        message: 'Reparacion no encontrada'
-      });
-    }
-    
-    const [checklist] = await db.query(
-      `SELECT 
-        ic.*,
-        r.tipo_equipo,
-        r.marca,
-        r.modelo
-       FROM ingreso_equipo_checklist ic
-       INNER JOIN reparaciones r ON ic.reparacion_id = r.id
-       WHERE ic.reparacion_id = ? AND r.empresa_id = ?`,
-      [reparacionId, reparacion.empresa_id]
-    );
-    
-    if (checklist.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'No se encontró checklist de ingreso para esta reparación'
-      });
-    }
-    
-    // Parsear JSON
-    const data = checklist[0];
-    data.checks = JSON.parse(data.checks);
-    data.fotos = data.fotos ? JSON.parse(data.fotos) : [];
-    
-    res.json({
-      success: true,
-      data: data
-    });
-    
-  } catch (error) {
-    console.error('❌ Error al obtener checklist de ingreso:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener checklist de ingreso',
-      error: error.message
-    });
-  }
+exports.legacyIngresoEquipoDisabled = (req, res) => {
+  return res.status(410).json({
+    success: false,
+    code: 'LEGACY_CHECKLIST_ENDPOINT_DISABLED',
+    message: 'Este endpoint fue reemplazado por /api/check-equipo.'
+  });
 };
 
 // ========== CAMBIAR ESTADO DE REPARACIÓN ==========
@@ -459,7 +310,11 @@ exports.getReparacionesFlujoActivo = async (req, res) => {
     let query = `
       SELECT 
         r.*,
-        (SELECT COUNT(*) FROM ingreso_equipo_checklist WHERE reparacion_id = r.id) as tiene_checklist
+        EXISTS (
+            SELECT 1
+            FROM check_equipo ce
+            WHERE ce.reparacion_id = r.id
+          ) AS tiene_checklist
       FROM reparaciones r
       WHERE r.estado NOT IN (${ESTADOS_EXCLUIDOS_FLUJO.map(() => '?').join(',')})${tenant.sql}
     `;

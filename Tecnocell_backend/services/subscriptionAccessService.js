@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const planAccess = require('./planAccessService');
 
 const ESTADOS_EMPRESA_CON_ACCESO = new Set(['activa', 'demo', 'prueba']);
 const ESTADOS_SUSCRIPCION_CON_ACCESO = new Set(['prueba', 'vigente', 'gracia']);
@@ -203,7 +204,25 @@ async function evaluarAccesoEmpresa(empresaId, {
   connection = db,
   hoy = todayString(),
   sincronizar = true,
+  aplicarCambioProgramado = true,
 } = {}) {
+  if (aplicarCambioProgramado) {
+    if (connection === db) {
+      await planAccess
+        .aplicarCambioPlanProgramadoVencido(
+          empresaId,
+          { hoy }
+        );
+    } else {
+      await planAccess
+        .aplicarCambioPlanProgramadoTransaccional(
+          connection,
+          empresaId,
+          { hoy }
+        );
+    }
+  }
+
   const contexto = await obtenerContextoEmpresa(empresaId, connection);
   if (sincronizar) await sincronizarEstadoDerivado(contexto, connection, hoy);
   return { ...contexto, ...evaluarAcceso(contexto, hoy) };

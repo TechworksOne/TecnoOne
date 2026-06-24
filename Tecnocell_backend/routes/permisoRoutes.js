@@ -11,6 +11,7 @@ router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
 router.get('/mis-permisos', permisoController.getMisPermisos);
+router.get('/mis-modulos', permisoController.getMisModulos);
 
 const administrar = [
   verifyRole('ADMINISTRADOR', 'admin', 'superadmin'),

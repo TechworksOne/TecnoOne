@@ -5,24 +5,20 @@ const flujoController = require('../controllers/flujoReparacionController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePlanModule = require('../middleware/requirePlanModule');
 
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
-
-// ========== RUTAS DE INGRESO DE EQUIPO (CHECKLIST) ==========
-// Guardar/actualizar checklist de ingreso con fotos
-router.post(
+router.use(requirePlanModule('taller_operativo'));
+// ========== ENDPOINT LEGACY DE CHECKLIST ==========
+// El checklist activo se gestiona mediante /api/check-equipo.
+router.all(
   '/:id/ingreso-equipo',
-  flujoController.uploadMiddleware,
-  flujoController.saveIngresoEquipo
+  flujoController.legacyIngresoEquipoDisabled
 );
 
-// Obtener checklist de ingreso
-router.get(
-  '/:id/ingreso-equipo',
-  flujoController.getIngresoEquipo
-);
+
 
 // ========== REPARACIONES DEL FLUJO ACTIVO ==========
 router.get(

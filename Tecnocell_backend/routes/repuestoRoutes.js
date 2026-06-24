@@ -4,10 +4,12 @@ const repuestoController = require('../controllers/repuestoController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePlanModule = require('../middleware/requirePlanModule');
 
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
+router.use(requirePlanModule('taller_operativo'));
 
 // GET /api/repuestos/stock-bajo - Debe ir antes de /:id
 router.get('/stock-bajo', repuestoController.getStockBajo);

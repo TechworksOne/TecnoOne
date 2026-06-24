@@ -6,11 +6,13 @@ const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
+const requirePlanModule = require('../middleware/requirePlanModule');
 
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
+router.use(requirePlanModule('reparaciones'));
 // Rutas CRUD
 router.get('/', requirePermission('reparaciones.ver'), reparacionController.getAllReparaciones);
 router.get('/:id/historial-completo', requirePermission('reparaciones.ver'), reparacionController.getHistorialCompleto);

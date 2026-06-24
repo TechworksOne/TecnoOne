@@ -5,10 +5,12 @@ const equipoController = require('../controllers/equipoController');
 const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePlanModule = require('../middleware/requirePlanModule');
 
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
+router.use(requirePlanModule('taller_operativo'));
 
 const soloAdmin = [verifyRole('admin', 'ADMINISTRADOR')];
 

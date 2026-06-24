@@ -52,10 +52,51 @@ export interface EmpresaGlobal {
   } | null;
 }
 
+
+export interface PlanCatalogo {
+  id: number;
+  codigo: string;
+  nombre: string;
+  descripcion: string | null;
+  precio_mensual: number;
+  precio_anual: number | null;
+  moneda: string;
+  max_usuarios: number | null;
+  max_sucursales: number | null;
+  activo: boolean;
+  es_publico: boolean;
+  asignable: boolean;
+  orden: number;
+  total_modulos?: number;
+  total_empresas?: number;
+}
+
 export interface Suscripcion {
   id: number;
   empresa_id: number;
   plan: string;
+  plan_id: number | null;
+  plan_detalle: PlanCatalogo | null;
+  plan_programado: {
+    id: number;
+    codigo: string;
+    nombre: string;
+    cambio_efectivo_en?: string | null;
+  } | null;
+  plan_programado_id?: number | null;
+  cambio_plan_efectivo_en?: string | null;
+  modulos_habilitados?: string[];
+  consumo?: {
+    usuarios_totales?: number;
+    usuarios_activos?: number;
+    usuarios_inactivos?: number;
+    usuarios_limite?: number | null;
+    usuarios_disponibles?: number | null;
+    porcentaje_usuarios?: number | null;
+    sucursales_usadas?: number | null;
+    sucursales_limite?: number | null;
+  } | null;
+
   tipo: 'prueba' | 'comercial';
   estado: 'prueba' | 'vigente' | 'gracia' | 'vencida';
   fecha_inicio: string;
@@ -121,6 +162,59 @@ export const superAdminService = {
     const { data } = await api.post(`/empresas/${id}/administrador`, payload);
     return data.data;
   },
+
+  async getPlanes(): Promise<PlanCatalogo[]> {
+    const { data } = await api.get('/planes');
+    return data.data;
+  },
+
+  async cambiarPlanInmediato(
+    id: string | number,
+    payload: {
+      plan_id: number;
+      motivo?: string;
+    }
+  ): Promise<Suscripcion> {
+    const { data } = await api.patch(
+      `/empresas/${id}/suscripcion/plan`,
+      payload
+    );
+
+    return data.data;
+  },
+
+  async programarCambioPlan(
+    id: string | number,
+    payload: {
+      plan_id: number;
+      fecha_efectiva: string;
+      motivo?: string;
+    }
+  ): Promise<Suscripcion> {
+    const { data } = await api.patch(
+      `/empresas/${id}/suscripcion/plan/programar`,
+      payload
+    );
+
+    return data.data;
+  },
+
+  async cancelarCambioPlanProgramado(
+    id: string | number,
+    motivo?: string
+  ): Promise<Suscripcion> {
+    const { data } = await api.delete(
+      `/empresas/${id}/suscripcion/plan/programado`,
+      {
+        data: {
+          motivo,
+        },
+      }
+    );
+
+    return data.data;
+  },
+
   async getSuscripcion(id: string | number): Promise<Suscripcion> {
     const { data } = await api.get(`/empresas/${id}/suscripcion`);
     return data.data;

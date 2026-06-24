@@ -367,106 +367,315 @@ exports.updateEmpresaEstado = async (req, res) => {
 };
 
 exports.createEmpresaAdministrador = async (req, res) => {
-  let connection;
+  let connection = null;
+  let committed = false;
+
   try {
-    const username = text(req.body?.username, 50);
-    const email = text(req.body?.email, 100);
-    const password = String(req.body?.password || '');
-    const nombres = text(req.body?.nombres, 100);
-    const apellidos = text(req.body?.apellidos, 100);
-    if (!username || !email || !nombres || password.length < 8) {
+    const username = text(
+      req.body?.username,
+      50
+    );
+
+    const email = text(
+      req.body?.email,
+      100
+    );
+
+    const password = String(
+      req.body?.password || ''
+    );
+
+    const nombres = text(
+      req.body?.nombres,
+      100
+    );
+
+    const apellidos = text(
+      req.body?.apellidos,
+      100
+    );
+
+    if (
+      !username ||
+      !email ||
+      !nombres ||
+      password.length < 8
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Usuario, correo, nombre y contraseña de al menos 8 caracteres son requeridos',
+        message:
+          'Usuario, correo, nombre y contraseña de al menos 8 caracteres son requeridos',
       });
     }
-    const phone = validatePhone(req.body?.telefono, { label: 'El teléfono del administrador' });
+
+    const phone = validatePhone(
+      req.body?.telefono,
+      {
+        label:
+          'El teléfono del administrador'
+      }
+    );
+
     if (!phone.ok) {
-      return res.status(400).json({ success: false, message: phone.message });
+      return res.status(400).json({
+        success: false,
+        message: phone.message
+      });
     }
 
     connection = await db.getConnection();
     await connection.beginTransaction();
-    const [[empresa]] = await connection.query(
-      'SELECT id, nombre, estado FROM empresas WHERE id = ? FOR UPDATE',
-      [req.params.id]
-    );
+
+    const [[empresa]] =
+      await connection.query(
+        `SELECT
+           id,
+           nombre,
+           estado
+         FROM empresas
+         WHERE id = ?
+         FOR UPDATE`,
+        [req.params.id]
+      );
+
     if (!empresa) {
       await connection.rollback();
-      return res.status(404).json({ success: false, message: 'Empresa no encontrada' });
-    }
-    if (String(empresa.estado).toLowerCase() === 'cancelada') {
-      await connection.rollback();
-      return res.status(409).json({ success: false, message: 'No se puede agregar un administrador a una empresa cancelada' });
+
+      return res.status(404).json({
+        success: false,
+        message: 'Empresa no encontrada'
+      });
     }
 
-    const [[duplicate]] = await connection.query(
-      'SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1',
-      [username, email]
-    );
+    if (
+      String(empresa.estado).toLowerCase() ===
+      'cancelada'
+    ) {
+      await connection.rollback();
+
+      return res.status(409).json({
+        success: false,
+        message:
+          'No se puede agregar un administrador a una empresa cancelada'
+      });
+    }
+
+    const [[duplicate]] =
+      await connection.query(
+        `SELECT id
+         FROM users
+         WHERE username = ?
+            OR email = ?
+         LIMIT 1`,
+        [username, email]
+      );
+
     if (duplicate) {
       await connection.rollback();
-      return res.status(409).json({ success: false, message: 'El usuario o correo ya está registrado' });
-    }
-    const [[role]] = await connection.query(
-      "SELECT id FROM roles WHERE UPPER(nombre) = 'ADMINISTRADOR' LIMIT 1"
-    );
-    if (!role) throw new Error('No existe el rol ADMINISTRADOR');
 
-    const [[existingAdmin]] = await connection.query(
-      `SELECT u.id
-       FROM users u
-       INNER JOIN user_roles ur ON ur.user_id = u.id
-       WHERE u.empresa_id = ? AND ur.role_id = ?
-       LIMIT 1`,
-      [empresa.id, role.id]
-    );
+      return res.status(409).json({
+        success: false,
+        message:
+          'El usuario o correo ya está registrado'
+      });
+    }
+
+    const [[role]] =
+      await connection.query(
+        `SELECT id
+         FROM roles
+         WHERE UPPER(nombre) = 'ADMINISTRADOR'
+         LIMIT 1`
+      );
+
+    if (!role) {
+      const error = new Error(
+        'No existe el rol ADMINISTRADOR'
+      );
+
+      error.statusCode = 500;
+      throw error;
+    }
+
+    const [[existingAdmin]] =
+      await connection.query(
+        `SELECT u.id
+         FROM users u
+         INNER JOIN user_roles ur
+           ON ur.user_id = u.id
+         WHERE u.empresa_id = ?
+           AND ur.role_id = ?
+         LIMIT 1`,
+        [empresa.id, role.id]
+      );
+
     if (existingAdmin) {
       await connection.rollback();
-      return res.status(409).json({ success: false, message: 'La empresa ya tiene un administrador principal' });
+
+      return res.status(409).json({
+        success: false,
+        message:
+          'La empresa ya tiene un administrador principal'
+      });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    const [userResult] = await connection.query(
-      `INSERT INTO users (
-        username, email, password, name, role, tipo_usuario,
-        es_super_admin, empresa_id, active
-      ) VALUES (?, ?, ?, ?, 'admin', 'EMPRESA', 0, ?, 1)`,
-      [username, email, passwordHash, [nombres, apellidos].filter(Boolean).join(' '), empresa.id]
+    await planAccess.validarLimiteUsuarios(
+      empresa.id,
+      connection
     );
-    await connection.query(
-      `INSERT INTO user_profiles (user_id, nombres, apellidos, telefono, direccion)
-       VALUES (?, ?, ?, ?, ?)`,
-      [userResult.insertId, nombres, apellidos, phone.value, text(req.body?.direccion, 255)]
-    );
-    await connection.query(
-      'INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)',
-      [userResult.insertId, role.id]
-    );
-    await connection.query(
-      `INSERT IGNORE INTO rol_permisos (empresa_id, rol_id, permiso_id)
-       SELECT ?, ?, id FROM permisos`,
-      [empresa.id, role.id]
-    );
-    await connection.commit();
 
-    await superAdminAudit.registrar({
-      req,
-      accion: 'CREAR_ADMIN_EMPRESA',
-      entidad: 'USUARIO',
-      entidadId: userResult.insertId,
-      datosNuevos: { empresa_id: empresa.id, username, email, nombres, apellidos },
-    });
-    res.status(201).json({
+    const passwordHash =
+      await bcrypt.hash(
+        password,
+        10
+      );
+
+    const [userResult] =
+      await connection.query(
+        `INSERT INTO users (
+           username,
+           email,
+           password,
+           name,
+           role,
+           tipo_usuario,
+           es_super_admin,
+           empresa_id,
+           active
+         )
+         VALUES (
+           ?, ?, ?, ?,
+           'admin',
+           'EMPRESA',
+           0,
+           ?,
+           1
+         )`,
+        [
+          username,
+          email,
+          passwordHash,
+          [nombres, apellidos]
+            .filter(Boolean)
+            .join(' '),
+          empresa.id
+        ]
+      );
+
+    await connection.query(
+      `INSERT INTO user_profiles (
+         user_id,
+         nombres,
+         apellidos,
+         telefono,
+         direccion
+       )
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        userResult.insertId,
+        nombres,
+        apellidos,
+        phone.value,
+        text(
+          req.body?.direccion,
+          255
+        )
+      ]
+    );
+
+    await connection.query(
+      `INSERT INTO user_roles (
+         user_id,
+         role_id
+       )
+       VALUES (?, ?)`,
+      [
+        userResult.insertId,
+        role.id
+      ]
+    );
+
+    await connection.query(
+      `INSERT IGNORE INTO rol_permisos (
+         empresa_id,
+         rol_id,
+         permiso_id
+       )
+       SELECT ?, ?, id
+       FROM permisos`,
+      [
+        empresa.id,
+        role.id
+      ]
+    );
+
+    await connection.commit();
+    committed = true;
+
+    try {
+      await superAdminAudit.registrar({
+        req,
+        accion: 'CREAR_ADMIN_EMPRESA',
+        entidad: 'USUARIO',
+        entidadId: userResult.insertId,
+        datosNuevos: {
+          empresa_id: empresa.id,
+          username,
+          email,
+          nombres,
+          apellidos
+        },
+      });
+    } catch (auditError) {
+      console.error(
+        'Auditoría createEmpresaAdministrador error:',
+        auditError
+      );
+    }
+
+    return res.status(201).json({
       success: true,
-      data: { id: userResult.insertId, empresa_id: empresa.id, username, email },
+      data: {
+        id: userResult.insertId,
+        empresa_id: empresa.id,
+        username,
+        email
+      },
     });
   } catch (error) {
-    if (connection) try { await connection.rollback(); } catch (_) {}
-    console.error('createEmpresaAdministrador error:', error);
-    res.status(500).json({ success: false, message: 'Error al crear el administrador principal' });
+    if (connection && !committed) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    const planLimit =
+      planAccess.planLimitErrorResponse(error);
+
+    if (planLimit) {
+      return res
+        .status(planLimit.status)
+        .json(planLimit.body);
+    }
+
+    console.error(
+      'createEmpresaAdministrador error:',
+      error
+    );
+
+    return res.status(
+      Number(error.statusCode || 500)
+    ).json({
+      success: false,
+      message:
+        error.statusCode
+          ? error.message
+          : 'Error al crear el administrador principal'
+    });
   } finally {
-    if (connection) connection.release();
+    if (connection) {
+      connection.release();
+    }
   }
 };
 

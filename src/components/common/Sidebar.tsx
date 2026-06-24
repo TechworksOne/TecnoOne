@@ -25,11 +25,11 @@ const GROUPS = [
   {
     label: "Servicio técnico",
     items: [
-      { to: "/reparaciones", label: "Reparaciones", icon: <Wrench size={17} />, roles: ["ADMINISTRADOR", "TECNICO", "VENTAS"], permission: "reparaciones.ver" },
-      { to: "/flujo-reparaciones", label: "Flujo de Reparaciones", icon: <GitBranch size={17} />, roles: null, permission: "flujo_reparaciones.ver" },
-      { to: "/ordenes-trabajo", label: "Órdenes de Trabajo", icon: <ClipboardList size={17} />, roles: ["ADMINISTRADOR", "TECNICO"], permission: "ordenes_trabajo.ver" },
-      { to: "/agenda", label: "Agenda de Entregas", icon: <CalendarDays size={17} />, roles: null, permission: "agenda.ver" },
-      { to: "/stickers-garantia", label: "Stickers de Garantía", icon: <Tag size={17} />, roles: ["ADMINISTRADOR"], permission: "stickers.ver" },
+      { to: "/reparaciones", label: "Reparaciones", icon: <Wrench size={17} />, roles: ["ADMINISTRADOR", "TECNICO", "VENTAS"], permission: "reparaciones.ver", moduleCode: "reparaciones" },
+      { to: "/flujo-reparaciones", label: "Flujo de Reparaciones", icon: <GitBranch size={17} />, roles: null, permission: "flujo_reparaciones.ver", moduleCode: "taller_operativo" },
+      { to: "/ordenes-trabajo", label: "Órdenes de Trabajo", icon: <ClipboardList size={17} />, roles: ["ADMINISTRADOR", "TECNICO"], permission: "ordenes_trabajo.ver", moduleCode: "taller_operativo" },
+      { to: "/agenda", label: "Agenda de Entregas", icon: <CalendarDays size={17} />, roles: null, permission: "agenda.ver", moduleCode: "taller_operativo" },
+      { to: "/stickers-garantia", label: "Stickers de Garantía", icon: <Tag size={17} />, roles: ["ADMINISTRADOR"], permission: "stickers.ver", moduleCode: "taller_operativo" },
     ],
   },
   {
@@ -44,7 +44,7 @@ const GROUPS = [
     label: "Inventario y compras",
     items: [
       { to: "/productos", label: "Productos", icon: <Box size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "productos.ver" },
-      { to: "/repuestos", label: "Repuestos", icon: <Settings size={17} />, roles: null, permission: "repuestos.ver" },
+      { to: "/repuestos", label: "Repuestos", icon: <Settings size={17} />, roles: null, permission: "repuestos.ver", moduleCode: "taller_operativo" },
       { to: "/compras", label: "Compras", icon: <ShoppingBag size={17} />, roles: ["ADMINISTRADOR"], permission: "compras.ver" },
       { to: "/proveedores", label: "Proveedores", icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"], permission: "proveedores.ver" },
     ],
@@ -76,7 +76,13 @@ function getInitials(name: string): string {
 
 export default function Sidebar() {
   const { isOpen, toggle } = useSidebar();
-  const { user, permissions, permissionsLoaded } = useAuth();
+  const {
+    user,
+    permissions,
+    permissionsLoaded,
+    modules,
+    modulesLoaded,
+  } = useAuth();
   const { empresa, loadEmpresa } = useEmpresa();
   const location = useLocation();
 
@@ -196,14 +202,61 @@ export default function Sidebar() {
       >
         {GROUPS.map((group, gi) => {
           const visible = group.items.filter(item => {
-            const permission = 'permission' in item ? item.permission : undefined;
-            const adminOnly = 'adminOnly' in item ? item.adminOnly : false;
-            if (adminOnly && !effectiveRoles.has('ADMINISTRADOR') && legacyRole !== 'superadmin') return false;
-            if (permission) {
-              return permissionsLoaded &&
-                (legacyRole === 'superadmin' || permissions.includes('*') || permissions.includes(permission));
+            const permission =
+              'permission' in item
+                ? item.permission
+                : undefined;
+
+            const moduleCode =
+              'moduleCode' in item
+                ? item.moduleCode
+                : undefined;
+
+            const adminOnly =
+              'adminOnly' in item
+                ? item.adminOnly
+                : false;
+
+            if (moduleCode) {
+              if (!modulesLoaded) {
+                return false;
+              }
+
+              const moduleAllowed =
+                legacyRole === 'superadmin' ||
+                modules.includes('*') ||
+                modules.includes(moduleCode);
+
+              if (!moduleAllowed) {
+                return false;
+              }
             }
-            return !item.roles || item.roles.some(r => effectiveRoles.has(r));
+
+            if (
+              adminOnly &&
+              !effectiveRoles.has('ADMINISTRADOR') &&
+              legacyRole !== 'superadmin'
+            ) {
+              return false;
+            }
+
+            if (permission) {
+              return (
+                permissionsLoaded &&
+                (
+                  legacyRole === 'superadmin' ||
+                  permissions.includes('*') ||
+                  permissions.includes(permission)
+                )
+              );
+            }
+
+            return (
+              !item.roles ||
+              item.roles.some(role =>
+                effectiveRoles.has(role)
+              )
+            );
           });
           if (visible.length === 0) return null;
 

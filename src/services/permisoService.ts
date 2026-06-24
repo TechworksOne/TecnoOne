@@ -35,6 +35,14 @@ export const permisoService = {
     const { data } = await api.get('/permisos/mis-permisos');
     return data.data;
   },
+
+    async getMisModulos(): Promise<string[]> {
+      const { data } = await api.get('/permisos/mis-modulos');
+
+      return Array.isArray(data?.data?.modulos)
+        ? data.data.modulos
+        : [];
+    },
   async getCatalogo(): Promise<Permiso[]> {
     const { data } = await api.get('/permisos');
     return data.data;

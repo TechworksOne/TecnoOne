@@ -21,6 +21,22 @@ router.patch('/empresas/:id/estado', controller.updateEmpresaEstado);
 router.post('/empresas/:id/administrador', controller.createEmpresaAdministrador);
 router.get('/empresas/:id/suscripcion', subscriptionController.getSuscripcion);
 router.patch('/empresas/:id/suscripcion', subscriptionController.updateSuscripcion);
+router.patch(
+  '/empresas/:id/suscripcion/plan',
+  subscriptionController.cambiarPlanInmediato
+);
+
+router.patch(
+  '/empresas/:id/suscripcion/plan/programar',
+  subscriptionController.programarCambioPlan
+);
+
+router.delete(
+  '/empresas/:id/suscripcion/plan/programado',
+  subscriptionController.cancelarCambioPlanProgramado
+);
+
+
 router.post('/empresas/:id/suscripcion/renovar', subscriptionController.renovarSuscripcion);
 router.get('/empresas/:id/suscripcion/historial', subscriptionController.getHistorial);
 

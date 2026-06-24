@@ -5,6 +5,16 @@ const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 
+function legacyWriteDisabled(req, res) {
+  return res.status(410).json({
+    success: false,
+    code: 'LEGACY_USER_WRITE_DISABLED',
+    message:
+      'Esta operación fue reemplazada por /api/admin/usuarios'
+  });
+}
+
+
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
 router.use(tenantScope);
@@ -17,12 +27,12 @@ router.get('/', verifyRole('admin'), userController.getAllUsers);
 router.get('/:id', userController.getUserById);
 
 // Crear nuevo usuario (solo admin)
-router.post('/', verifyRole('admin'), userController.createUser);
+router.post('/', legacyWriteDisabled);
 
 // Actualizar usuario
-router.put('/:id', userController.updateUser);
+router.put('/:id', legacyWriteDisabled);
 
 // Eliminar usuario (solo admin)
-router.delete('/:id', verifyRole('admin'), userController.deleteUser);
+router.delete('/:id', legacyWriteDisabled);
 
 module.exports = router;

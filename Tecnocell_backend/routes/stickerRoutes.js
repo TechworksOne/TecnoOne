@@ -4,11 +4,13 @@ const stickerController = require('../controllers/stickerController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePlanModule = require('../middleware/requirePlanModule');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
+router.use(requirePlanModule('taller_operativo'));
 
 // Estadísticas
 router.get('/estadisticas', stickerController.getEstadisticas);

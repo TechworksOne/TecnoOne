@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const permisoService = require('../services/permisoService');
+const planAccessService = require('../services/planAccessService');
 const auditoriaService = require('../services/auditoriaService');
 
 function requireEmpresa(req, res) {
@@ -31,6 +32,51 @@ exports.getMisPermisos = async (req, res) => {
   } catch (error) {
     console.error('getMisPermisos error:', error);
     res.status(500).json({ success: false, message: 'Error al obtener permisos efectivos' });
+  }
+};
+
+
+exports.getMisModulos = async (req, res) => {
+  try {
+    const empresaId = requireEmpresa(req, res);
+    if (!empresaId) return;
+
+    const resumen =
+      await planAccessService.obtenerResumenPlanEmpresa(
+        empresaId
+      );
+
+    if (!resumen) {
+      return res.status(404).json({
+        success: false,
+        code: 'EMPRESA_PLAN_NOT_FOUND',
+        message: 'La empresa no tiene un plan configurado.'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        plan: {
+          id: resumen.plan.id,
+          codigo: resumen.plan.codigo,
+          nombre: resumen.plan.nombre,
+          max_usuarios: resumen.plan.max_usuarios,
+          max_sucursales: resumen.plan.max_sucursales
+        },
+        modulos: resumen.modulos_habilitados
+      }
+    });
+  } catch (error) {
+    console.error('getMisModulos error:', error);
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+      success: false,
+      code: error.code || 'MODULES_LOAD_ERROR',
+      message: 'Error al obtener los módulos contratados'
+    });
   }
 };
 
