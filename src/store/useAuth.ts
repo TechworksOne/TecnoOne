@@ -122,6 +122,9 @@ export const useAuth = create<AuthState>((set, get) => ({
           ? error.message
           : "Error al iniciar sesión";
 
+      // Eliminar cualquier sesión anterior si el nuevo login falla.
+      authService.logout();
+
       set({
         user: null,
         role: null,
@@ -215,10 +218,19 @@ export const useAuth = create<AuthState>((set, get) => ({
       return;
     }
 
-    set({
-      permissionsLoaded: false,
-      modulesLoaded: false,
-    });
+    const isInitialAccessLoad =
+      !state.permissionsLoaded ||
+      !state.modulesLoaded;
+
+    // Durante una actualización en segundo plano no se deben cambiar
+    // estos indicadores a false, porque ProtectedRoute desmontaría
+    // la pantalla actual y provocaría un ciclo de recargas.
+    if (isInitialAccessLoad) {
+      set({
+        permissionsLoaded: false,
+        modulesLoaded: false,
+      });
+    }
 
     try {
       const [permissions, modulesResponse] =
@@ -236,14 +248,23 @@ export const useAuth = create<AuthState>((set, get) => ({
         planConsumption: modulesResponse.consumo,
       });
     } catch {
-      set({
-        permissions: [],
-        permissionsLoaded: true,
-        modules: [],
-        modulesLoaded: true,
-        plan: null,
-        planConsumption: null,
-      });
+      if (isInitialAccessLoad) {
+        set({
+          permissions: [],
+          permissionsLoaded: true,
+          modules: [],
+          modulesLoaded: true,
+          plan: null,
+          planConsumption: null,
+        });
+      } else {
+        // Conservar los permisos y módulos previamente cargados cuando
+        // únicamente falla una actualización en segundo plano.
+        set({
+          permissionsLoaded: true,
+          modulesLoaded: true,
+        });
+      }
     }
   },
 
