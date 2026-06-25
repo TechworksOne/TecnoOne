@@ -8,6 +8,7 @@ const productController = require('../controllers/productController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
+const requirePlanModule = require('../middleware/requirePlanModule');
 const requirePermission = require('../middleware/requirePermission');
 const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
 
@@ -52,15 +53,15 @@ router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 
-router.get('/search', requirePermission('productos.ver'), productController.searchProducts);
-router.get('/alerts/critical-stock', requirePermission('productos.ver'), productController.getCriticalStockProducts);
-router.get('/', requirePermission('productos.ver'), productController.getAllProducts);
-router.get('/:id', requirePermission('productos.ver'), productController.getProductById);
-router.get('/:id/kardex', requirePermission('productos.ver'), productController.getProductKardex);
+router.get('/search', requirePlanModule('productos'), requirePermission('productos.ver'), productController.searchProducts);
+router.get('/alerts/critical-stock', requirePlanModule('inventario'), requirePermission('productos.ver'), productController.getCriticalStockProducts);
+router.get('/', requirePlanModule('productos'), requirePermission('productos.ver'), productController.getAllProducts);
+router.get('/:id', requirePlanModule('productos'), requirePermission('productos.ver'), productController.getProductById);
+router.get('/:id/kardex', requirePlanModule('inventario'), requirePermission('productos.ver'), productController.getProductKardex);
 
-router.post('/', requirePermission('productos.administrar'), uploadImagenesProducto, productController.createProduct);
-router.put('/:id', requirePermission('productos.administrar'), uploadImagenesProducto, productController.updateProduct);
-router.patch('/:id/stock', requirePermission('productos.administrar'), productController.adjustStock);
-router.delete('/:id', requirePermission('productos.administrar'), productController.deleteProduct);
+router.post('/', requirePlanModule('productos'), requirePermission('productos.administrar'), uploadImagenesProducto, productController.createProduct);
+router.put('/:id', requirePlanModule('productos'), requirePermission('productos.administrar'), uploadImagenesProducto, productController.updateProduct);
+router.patch('/:id/stock', requirePlanModule('inventario'), requirePermission('productos.administrar'), productController.adjustStock);
+router.delete('/:id', requirePlanModule('productos'), requirePermission('productos.administrar'), productController.deleteProduct);
 
 module.exports = router;

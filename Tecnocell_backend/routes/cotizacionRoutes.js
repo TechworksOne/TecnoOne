@@ -6,6 +6,7 @@ const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
+const requirePlanModule = require('../middleware/requirePlanModule');
 
 /**
  * RUTAS DE COTIZACIONES
@@ -15,6 +16,7 @@ const requirePermission = require('../middleware/requirePermission');
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
+router.use(requirePlanModule('cotizaciones'));
 
 // Obtener todas las cotizaciones (con filtros opcionales)
 // Query params: ?tipo=VENTA&estado=ENVIADA&cliente_id=1&desde=2025-01-01&hasta=2025-12-31&page=1&limit=20
@@ -35,6 +37,7 @@ router.get('/:id', requirePermission('cotizaciones.ver'), cotizacionController.g
 router.post(
   '/:id/convertir-venta',
   requirePermission('cotizaciones.editar'),
+  requirePlanModule('ventas'),
   requirePermission('ventas.crear'),
   (req, res) => {
     req.params.cotizacionId = req.params.id;

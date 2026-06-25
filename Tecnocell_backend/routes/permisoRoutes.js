@@ -4,6 +4,7 @@ const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
+const requirePlanModule = require('../middleware/requirePlanModule');
 const permisoController = require('../controllers/permisoController');
 
 router.use(verifyToken);
@@ -13,7 +14,10 @@ router.use(checkEmpresaActiva);
 router.get('/mis-permisos', permisoController.getMisPermisos);
 router.get('/mis-modulos', permisoController.getMisModulos);
 
-const administrar = [requirePermission('permisos.administrar')];
+const administrar = [
+  requirePlanModule('roles_permisos'),
+  requirePermission('permisos.administrar'),
+];
 
 router.get('/', ...administrar, permisoController.getCatalogo);
 router.get('/roles', ...administrar, permisoController.getRoles);

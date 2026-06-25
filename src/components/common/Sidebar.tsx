@@ -18,7 +18,7 @@ const GROUPS = [
   {
     label: "Principal",
     items: [
-      { to: "/dashboard", label: "Dashboard", icon: <Home size={17} />, roles: null, permission: "dashboard.ver" },
+      { to: "/dashboard", label: "Dashboard", icon: <Home size={17} />, roles: null, permission: "dashboard.ver", moduleCode: "dashboard" },
       { to: "/perfil", label: "Perfil", icon: <User size={17} />, roles: null },
     ],
   },
@@ -35,35 +35,35 @@ const GROUPS = [
   {
     label: "Comercial",
     items: [
-      { to: "/clientes", label: "Clientes", icon: <Users size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "clientes.ver" },
-      { to: "/cotizaciones", label: "Cotizaciones", icon: <FileText size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "cotizaciones.ver" },
-      { to: "/ventas", label: "Ventas", icon: <CreditCard size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "ventas.ver" },
+      { to: "/clientes", label: "Clientes", icon: <Users size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "clientes.ver", moduleCode: "clientes" },
+      { to: "/cotizaciones", label: "Cotizaciones", icon: <FileText size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "cotizaciones.ver", moduleCode: "cotizaciones" },
+      { to: "/ventas", label: "Ventas", icon: <CreditCard size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "ventas.ver", moduleCode: "ventas" },
     ],
   },
   {
     label: "Inventario y compras",
     items: [
-      { to: "/productos", label: "Productos", icon: <Box size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "productos.ver" },
+      { to: "/productos", label: "Productos", icon: <Box size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "productos.ver", moduleCode: "productos" },
       { to: "/repuestos", label: "Repuestos", icon: <Settings size={17} />, roles: null, permission: "repuestos.ver", moduleCode: "taller_operativo" },
-      { to: "/compras", label: "Compras", icon: <ShoppingBag size={17} />, roles: ["ADMINISTRADOR"], permission: "compras.ver" },
-      { to: "/proveedores", label: "Proveedores", icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"], permission: "proveedores.ver" },
+      { to: "/compras", label: "Compras", icon: <ShoppingBag size={17} />, roles: ["ADMINISTRADOR"], permission: "compras.ver", moduleCode: "compras" },
+      { to: "/proveedores", label: "Proveedores", icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"], permission: "proveedores.ver", moduleCode: "proveedores" },
     ],
   },
   {
     label: "Finanzas",
     items: [
-      { to: "/caja-bancos", label: "Caja y Bancos", icon: <Wallet size={17} />, roles: null, permission: "caja.ver" },
-      { to: "/deudores", label: "Deudores", icon: <Receipt size={17} />, roles: ["ADMINISTRADOR"], permission: "deudores.ver" },
-      { to: "/reportes", label: "Reportes", icon: <BarChart3 size={17} />, roles: ["ADMINISTRADOR"], permission: "reportes.ver" },
+      { to: "/caja-bancos", label: "Caja y Bancos", icon: <Wallet size={17} />, roles: null, permission: "caja.ver", moduleCode: "caja_bancos" },
+      { to: "/deudores", label: "Deudores", icon: <Receipt size={17} />, roles: ["ADMINISTRADOR"], permission: "deudores.ver", moduleCode: "deudores_pagos" },
+      { to: "/reportes", label: "Reportes", icon: <BarChart3 size={17} />, roles: ["ADMINISTRADOR"], permission: "reportes.ver", moduleCode: "reportes_comerciales" },
     ],
   },
   {
     label: "Administración",
     items: [
-      { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />, roles: ["ADMINISTRADOR"], permission: "usuarios.administrar" },
-      { to: "/permisos", label: "Permisos", icon: <KeyRound size={17} />, roles: ["ADMINISTRADOR"], permission: "permisos.administrar", adminOnly: true },
-      { to: "/auditoria", label: "Auditoría", icon: <History size={17} />, roles: ["ADMINISTRADOR"], permission: "auditoria.ver" },
-      { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, roles: ["ADMINISTRADOR"], permission: "empresa.editar" },
+      { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />, roles: ["ADMINISTRADOR"], permission: "usuarios.administrar", moduleCode: "usuarios" },
+      { to: "/permisos", label: "Permisos", icon: <KeyRound size={17} />, roles: ["ADMINISTRADOR"], permission: "permisos.administrar", adminOnly: true, moduleCode: "roles_permisos" },
+      { to: "/auditoria", label: "Auditoría", icon: <History size={17} />, roles: ["ADMINISTRADOR"], permission: "auditoria.ver", moduleCode: "auditoria" },
+      { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, roles: ["ADMINISTRADOR"], permission: "empresa.editar", moduleCode: "configuracion" },
     ],
   },
 ];

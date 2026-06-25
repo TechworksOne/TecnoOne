@@ -44,8 +44,17 @@ const ALL_ROLES     = [ROLES.ADMINISTRADOR, ROLES.TECNICO, ROLES.VENTAS];
 const PR = (roles: string[], child: React.ReactElement) => (
   <ProtectedRoute roles={roles}>{child}</ProtectedRoute>
 );
-const PP = (permission: string, child: React.ReactElement) => (
-  <ProtectedRoute permission={permission}>{child}</ProtectedRoute>
+const PP = (
+  permission: string,
+  child: React.ReactElement,
+  moduleCode?: string
+) => (
+  <ProtectedRoute
+    permission={permission}
+    moduleCode={moduleCode}
+  >
+    {child}
+  </ProtectedRoute>
 );
 
 const PPM = (
@@ -60,30 +69,39 @@ const PPM = (
     {child}
   </ProtectedRoute>
 );
-const APR = (permission: string, child: React.ReactElement) => (
+const APR = (
+  permission: string,
+  child: React.ReactElement,
+  moduleCode?: string
+) => (
   <ProtectedRoute roles={ADMIN_CONFIG}>
-    <ProtectedRoute permission={permission}>{child}</ProtectedRoute>
+    <ProtectedRoute
+      permission={permission}
+      moduleCode={moduleCode}
+    >
+      {child}
+    </ProtectedRoute>
   </ProtectedRoute>
 );
 
 const routes = [
   { path: "/login",     element: <LoginPage /> },
-  { path: "/dashboard", element: PP('dashboard.ver', <DashboardPage />) },
+  { path: "/dashboard", element: PP('dashboard.ver', <DashboardPage />, 'dashboard') },
 
   // ── Operación ──────────────────────────────────────────────────────────────
-  { path: "/productos",            element: PP('productos.ver', <ProductsPage />) },
+  { path: "/productos",            element: PP('productos.ver', <ProductsPage />, 'productos') },
   { path: "/repuestos",            element: PPM('repuestos.ver', 'taller_operativo', <RepuestosPage />) },
   { path: "/repuestos/nuevo",      element: PPM('repuestos.ver', 'taller_operativo', <RepuestoForm />) },
   { path: "/repuestos/editar/:id", element: PPM('repuestos.ver', 'taller_operativo', <RepuestoForm />) },
-  { path: "/compras",              element: PP(PERMISSIONS.COMPRAS_VER, <PurchasesPage />) },
-  { path: "/compras/nueva",        element: PP('compras.crear', <PurchaseFormPage />) },
-  { path: "/cotizaciones",                element: PP('cotizaciones.ver', <QuotesPage />) },
-  { path: "/cotizaciones/nueva",          element: PP('cotizaciones.editar', <QuoteFormPage />) },
-  { path: "/cotizaciones/:id/editar",     element: PP('cotizaciones.editar', <QuoteFormPage />) },
-  { path: "/cotizaciones/:id",            element: PP('cotizaciones.ver', <QuoteDetailPage />) },
-  { path: "/ventas",       element: PP(PERMISSIONS.VENTAS_VER, <SalesPageNew />) },
-  { path: "/ventas/nueva", element: PP(PERMISSIONS.VENTAS_CREAR, <SaleNewPage />) },
-  { path: "/ventas/:id",   element: PP(PERMISSIONS.VENTAS_VER, <SaleDetailPage />) },
+  { path: "/compras",              element: PP(PERMISSIONS.COMPRAS_VER, <PurchasesPage />, 'compras') },
+  { path: "/compras/nueva",        element: PP('compras.crear', <PurchaseFormPage />, 'compras') },
+  { path: "/cotizaciones",                element: PP('cotizaciones.ver', <QuotesPage />, 'cotizaciones') },
+  { path: "/cotizaciones/nueva",          element: PP('cotizaciones.editar', <QuoteFormPage />, 'cotizaciones') },
+  { path: "/cotizaciones/:id/editar",     element: PP('cotizaciones.editar', <QuoteFormPage />, 'cotizaciones') },
+  { path: "/cotizaciones/:id",            element: PP('cotizaciones.ver', <QuoteDetailPage />, 'cotizaciones') },
+  { path: "/ventas",       element: PP(PERMISSIONS.VENTAS_VER, <SalesPageNew />, 'ventas') },
+  { path: "/ventas/nueva", element: PP(PERMISSIONS.VENTAS_CREAR, <SaleNewPage />, 'ventas') },
+  { path: "/ventas/:id",   element: PP(PERMISSIONS.VENTAS_VER, <SaleDetailPage />, 'ventas') },
 
   // ── Servicio técnico ───────────────────────────────────────────────────────
   { path: "/reparaciones",            element: PPM(PERMISSIONS.REPARACIONES_VER, 'reparaciones', <RepairsPage />) },
@@ -93,20 +111,20 @@ const routes = [
   { path: "/flujo-reparaciones/:id",  element: PPM('flujo_reparaciones.ver', 'taller_operativo', <FlujoReparacionDetailPage />) },
   { path: "/ordenes-trabajo",         element: PPM('ordenes_trabajo.ver', 'taller_operativo', <OrdenesTrabajoPage />) },
   { path: "/agenda",                  element: PPM('agenda.ver', 'taller_operativo', <AgendaPage />) },
-  { path: "/pago-tarjeta",            element: PR(ADMIN_VENTAS,  <CardPaymentPage />) },
+  { path: "/pago-tarjeta",            element: PR(ADMIN_VENTAS, PPM('ventas.crear', 'ventas', <CardPaymentPage />)) },
 
   // ── Administración ─────────────────────────────────────────────────────────
-  { path: "/clientes",       element: PP('clientes.ver', <CustomersPage />) },
-  { path: "/caja-bancos",    element: PP(PERMISSIONS.CAJA_VER, <CajaBancosPage />) },
-  { path: "/deudores",       element: PP('deudores.ver', <DeudoresPage />) },
-  { path: "/proveedores",    element: PP('proveedores.ver', <SuppliersPage />) },
+  { path: "/clientes",       element: PP('clientes.ver', <CustomersPage />, 'clientes') },
+  { path: "/caja-bancos",    element: PP(PERMISSIONS.CAJA_VER, <CajaBancosPage />, 'caja_bancos') },
+  { path: "/deudores",       element: PP('deudores.ver', <DeudoresPage />, 'deudores_pagos') },
+  { path: "/proveedores",    element: PP('proveedores.ver', <SuppliersPage />, 'proveedores') },
   { path: "/stickers-garantia", element: PPM('stickers.ver', 'taller_operativo', <StickersGarantiaPage />) },
-  { path: "/admin-usuarios", element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <AdminUsuariosPage />) },
-  { path: "/configuracion/empresa", element: PP(PERMISSIONS.EMPRESA_EDITAR, <EmpresaPage />) },
-  { path: "/reportes",       element: PP(PERMISSIONS.REPORTES_VER, <ReportesPage />) },
-  { path: "/auditoria",      element: PP(PERMISSIONS.AUDITORIA_VER, <AuditoriaPage />) },
-  { path: "/permisos",       element: APR(PERMISSIONS.PERMISOS_ADMINISTRAR, <PermisosPage />) },
-  { path: "/usuarios",       element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <UsersPage />) },
+  { path: "/admin-usuarios", element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <AdminUsuariosPage />, 'usuarios') },
+  { path: "/configuracion/empresa", element: PP(PERMISSIONS.EMPRESA_EDITAR, <EmpresaPage />, 'configuracion') },
+  { path: "/reportes",       element: PP(PERMISSIONS.REPORTES_VER, <ReportesPage />, 'reportes_comerciales') },
+  { path: "/auditoria",      element: PP(PERMISSIONS.AUDITORIA_VER, <AuditoriaPage />, 'auditoria') },
+  { path: "/permisos",       element: APR(PERMISSIONS.PERMISOS_ADMINISTRAR, <PermisosPage />, 'roles_permisos') },
+  { path: "/usuarios",       element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <UsersPage />, 'usuarios') },
 
   // ── Sin restricción de rol (solo autenticación) ────────────────────────────
   { path: "/fel",    element: <FelPage /> },

@@ -4,6 +4,7 @@ const { parsePagination } = require('../utils/pagination');
 const { validatePhone } = require('../utils/phoneValidation');
 const tarjetaCtrl = require('./tarjetaCreditoController');
 const auditoriaService = require('../services/auditoriaService');
+const planAccess = require('../services/planAccessService');
 
 async function auditarCompra(req, empresaId, compraId, numeroCompra, total, tipo, body) {
   await auditoriaService.registrar({
@@ -63,6 +64,16 @@ async function validateProveedorForCompra(connection, proveedorId, empresaId) {
 function compraHttpError(message, statusCode = 400) {
   const error = new Error(message);
   error.statusCode = statusCode;
+  return error;
+}
+
+function compraModuleError(moduleCode) {
+  const error = compraHttpError(
+    'Este modulo no esta incluido en el plan contratado.',
+    403
+  );
+  error.code = 'MODULE_NOT_INCLUDED';
+  error.module = moduleCode;
   return error;
 }
 
@@ -214,6 +225,16 @@ async function aplicarPagoCompra(connection, {
   }
 
   if (metodoPago === 'tarjeta_credito') {
+    const tarjetasIncluidas = await planAccess.tieneModuloEmpresa(
+      empresaId,
+      'tarjetas',
+      connection
+    );
+
+    if (!tarjetasIncluidas) {
+      throw compraModuleError('tarjetas');
+    }
+
     if (!tarjetaId) {
       throw compraHttpError('Debes seleccionar una tarjeta de crédito');
     }
@@ -367,6 +388,10 @@ async function revertirPagoCompra(connection, compra, req) {
 exports.getFuentesPago = async (req, res) => {
   try {
     const empresaId = requireCompraEmpresaId(req);
+    const tarjetasIncluidas = await planAccess.tieneModuloEmpresa(
+      empresaId,
+      'tarjetas'
+    );
 
     const [[cajaRow]] = await db.query(
       `SELECT COALESCE(
@@ -399,8 +424,9 @@ exports.getFuentesPago = async (req, res) => {
       [empresaId]
     );
 
-    const [tarjetas] = await db.query(
-      `SELECT
+    const [tarjetas] = tarjetasIncluidas
+      ? await db.query(
+          `SELECT
          t.id,
          t.banco,
          t.alias,
@@ -430,8 +456,9 @@ exports.getFuentesPago = async (req, res) => {
          t.ultimos4,
          t.limite_credito
        ORDER BY t.banco, t.alias, t.ultimos4`,
-      [empresaId]
-    );
+          [empresaId]
+        )
+      : [[]];
 
     res.json({
       success: true,
@@ -454,6 +481,8 @@ exports.getFuentesPago = async (req, res) => {
     if (error.statusCode) {
       return res.status(error.statusCode).json({
         success: false,
+        code: error.code,
+        module: error.module,
         message: error.message
       });
     }

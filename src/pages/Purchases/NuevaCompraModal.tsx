@@ -6,6 +6,7 @@ import {
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "../../components/ui/Toast";
+import { useAuth } from "../../store/useAuth";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import { formatMoney } from "../../lib/format";
 import { useCatalog } from "../../store/useCatalog";
@@ -70,6 +71,8 @@ export default function NuevaCompraModal({
   const { repuestos, loadRepuestos } = useRepuestosStore();
   const toast = useToast();
   const navigate = useNavigate();
+  const { hasModule } = useAuth();
+  const hasTarjetasModule = hasModule('tarjetas');
 
   const [saving, setSaving] = useState(false);
   const [searchProduct, setSearchProduct] = useState("");
@@ -106,7 +109,7 @@ export default function NuevaCompraModal({
       .then((fuentes) => {
         setSaldoCaja(Number(fuentes.saldo_caja || 0));
         setCuentas(fuentes.cuentas || []);
-        setTarjetas(fuentes.tarjetas || []);
+        setTarjetas(hasTarjetasModule ? fuentes.tarjetas || [] : []);
       })
       .catch((error) => {
         setSaldoCaja(0);
@@ -118,7 +121,15 @@ export default function NuevaCompraModal({
         );
       })
       .finally(() => setLoadingFuentes(false));
-  }, [isOpen]);
+  }, [isOpen, hasTarjetasModule]);
+
+  useEffect(() => {
+    if (!hasTarjetasModule && metodoPago === 'tarjeta_credito') {
+      setMetodoPago('efectivo');
+      setTarjetaId('');
+      setTarjetas([]);
+    }
+  }, [hasTarjetasModule, metodoPago]);
 
   // Escape key
   useEffect(() => {
@@ -322,6 +333,11 @@ export default function NuevaCompraModal({
 
     if (metodoPago === 'transferencia' && !cuentaId) {
       toast.add("Selecciona una cuenta bancaria", "error");
+      return;
+    }
+
+    if (metodoPago === 'tarjeta_credito' && !hasTarjetasModule) {
+      toast.add("El modulo de tarjetas de credito no esta incluido en el plan", "error");
       return;
     }
 
@@ -860,7 +876,7 @@ export default function NuevaCompraModal({
             </div>
 
             <div className="flex gap-2 flex-wrap">
-              {(['efectivo', 'transferencia', 'tarjeta_credito'] as const).map((m) => (
+              {(['efectivo', 'transferencia', ...(hasTarjetasModule ? ['tarjeta_credito' as const] : [])] as const).map((m) => (
                 <button
                   key={m}
                   type="button"

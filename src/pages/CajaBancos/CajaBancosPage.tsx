@@ -116,7 +116,8 @@ export default function CajaBancosPage() {
   const [loadingHistorial, setLoadingHistorial] = useState(false);
 
   // Auth – definir antes de loadData para que el closure lo capture
-  const { user } = useAuth();
+  const { user, hasModule } = useAuth();
+  const hasTarjetasModule = hasModule('tarjetas');
   const isAdmin = user?.role === 'admin' || user?.rol === 'admin' ||
     user?.role === 'ADMIN' || user?.rol === 'ADMIN' ||
     (Array.isArray((user as any)?.roles) && ((user as any).roles.includes('ADMINISTRADOR') || (user as any).roles.includes('admin') || (user as any).roles.includes('ADMIN')));
@@ -124,6 +125,17 @@ export default function CajaBancosPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!hasTarjetasModule && vistaActual === 'tarjetas') {
+      setVistaActual('caja');
+      setTarjetas([]);
+      setTarjetaDetalle(null);
+      setMovsTarjeta([]);
+      setShowTarjetaModal(false);
+      setShowPagoModal(false);
+    }
+  }, [hasTarjetasModule, vistaActual]);
 
   const loadData = async () => {
     try {
@@ -169,10 +181,15 @@ export default function CajaBancosPage() {
 
   // ── Tarjetas helpers ─────────────────────────────────────────────────────
   const cargarTarjetas = useCallback(async () => {
+    if (!hasTarjetasModule) {
+      setTarjetas([]);
+      return;
+    }
+
     setLoadingTarjetas(true);
     try { setTarjetas(await TarjetaService.getTarjetas()); } catch { toast.error('Error al cargar tarjetas'); }
     finally { setLoadingTarjetas(false); }
-  }, []);
+  }, [hasTarjetasModule, toast]);
 
   const handleGuardarTarjeta = async () => {
     setSavingTarjeta(true);
@@ -635,13 +652,13 @@ export default function CajaBancosPage() {
             {[
               { key: 'caja', label: 'Caja Chica', icon: <Wallet size={16} />, badge: pendientesCaja },
               ...(isAdmin ? [{ key: 'bancos', label: 'Bancos', icon: <Landmark size={16} />, badge: pendientesBancos }] : []),
-              ...(isAdmin ? [{ key: 'tarjetas', label: 'Tarjetas de Crédito', icon: <CreditCard size={16} />, badge: 0 }] : []),
+              ...(isAdmin && hasTarjetasModule ? [{ key: 'tarjetas', label: 'Tarjetas de Crédito', icon: <CreditCard size={16} />, badge: 0 }] : []),
             ].map(({ key, label, icon, badge }) => (
               <button
                 key={key}
                 onClick={() => {
                   setVistaActual(key as 'caja' | 'bancos' | 'tarjetas');
-                  if (key === 'tarjetas' && tarjetas.length === 0) cargarTarjetas();
+                  if (key === 'tarjetas' && hasTarjetasModule && tarjetas.length === 0) cargarTarjetas();
                 }}
                 className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors flex-1 sm:flex-none justify-center sm:justify-start ${
                   vistaActual === key
@@ -739,7 +756,7 @@ export default function CajaBancosPage() {
           )}
 
           {/* ── VISTA TARJETAS DE CRÉDITO ────────────────────────────── */}
-          {vistaActual === 'tarjetas' && (
+          {hasTarjetasModule && vistaActual === 'tarjetas' && (
             <TarjetasCreditoPanel
               tarjetas={tarjetas}
               loading={loadingTarjetas}
