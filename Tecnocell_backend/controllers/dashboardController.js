@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const planAccess = require('../services/planAccessService');
 
 // ── Role helpers ──────────────────────────────────────────────────────────────
 function resolveRole(user) {
@@ -34,6 +35,37 @@ function tenantClause(req, alias = null) {
   return { sql: ` AND ${prefix}empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
 }
 
+async function getDashboardModuleAccess(req, connection = pool) {
+  if (isSuperadminTenant(req)) {
+    return {
+      reparaciones: true,
+      taller_operativo: true,
+      reportes_taller: true,
+    };
+  }
+
+  const empresaId = requireTenantEmpresaId(req);
+  const [reparaciones, tallerOperativo, reportesTaller] = await Promise.all([
+    planAccess.tieneModuloEmpresa(empresaId, 'reparaciones', connection),
+    planAccess.tieneModuloEmpresa(empresaId, 'taller_operativo', connection),
+    planAccess.tieneModuloEmpresa(empresaId, 'reportes_taller', connection),
+  ]);
+
+  return {
+    reparaciones,
+    taller_operativo: tallerOperativo,
+    reportes_taller: reportesTaller,
+  };
+}
+
+function canReadTechnicalDashboard(modules) {
+  return Boolean(
+    modules.reparaciones ||
+    modules.taller_operativo ||
+    modules.reportes_taller
+  );
+}
+
 exports.getDashboardStats = async (req, res) => {
   const callerRole = resolveRole(req.user);
   if (callerRole === 'tecnico') {
@@ -42,6 +74,8 @@ exports.getDashboardStats = async (req, res) => {
 
   try {
     const connection = await pool.getConnection();
+    const moduleAccess = await getDashboardModuleAccess(req, connection);
+    const includeTechnical = canReadTechnicalDashboard(moduleAccess);
     const ventasTenant = tenantClause(req);
     const cajaTenant = tenantClause(req);
     const comprasTenant = tenantClause(req);
@@ -140,36 +174,45 @@ exports.getDashboardStats = async (req, res) => {
     `, productosTenant.params);
 
     // ── Reparaciones activas ─────────────────────────────────────────────────
-    const [[reparaciones]] = await connection.query(`
-      SELECT
-        SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') THEN 1 ELSE 0 END) AS total,
-        SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') AND r.id IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS con_checklist,
-        SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') AND r.id NOT IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS sin_checklist,
-        SUM(CASE WHEN estado = 'COMPLETADA' THEN 1 ELSE 0 END) AS completadas
-      FROM reparaciones r
-      WHERE 1=1
-        ${reparacionesAliasTenant.sql}
-    `, reparacionesAliasTenant.params);
+    let reparaciones = {};
+    if (includeTechnical) {
+      [[reparaciones]] = await connection.query(`
+        SELECT
+          SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') THEN 1 ELSE 0 END) AS total,
+          SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') AND r.id IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS con_checklist,
+          SUM(CASE WHEN estado IN ('RECIBIDA', 'EN_DIAGNOSTICO', 'ESPERANDO_AUTORIZACION', 'AUTORIZADA', 'EN_REPARACION', 'EN_PROCESO', 'ESPERANDO_PIEZA', 'STAND_BY') AND r.id NOT IN (SELECT DISTINCT reparacion_id FROM check_equipo) THEN 1 ELSE 0 END) AS sin_checklist,
+          SUM(CASE WHEN estado = 'COMPLETADA' THEN 1 ELSE 0 END) AS completadas
+        FROM reparaciones r
+        WHERE 1=1
+          ${reparacionesAliasTenant.sql}
+      `, reparacionesAliasTenant.params);
+    }
 
     // ── Reparaciones completadas este mes ────────────────────────────────────
-    const [[repsMes]] = await connection.query(`
-      SELECT COUNT(*) AS total
-      FROM reparaciones
-      WHERE estado IN ('COMPLETADA', 'ENTREGADA')
-        AND MONTH(COALESCE(fecha_cierre, updated_at)) = MONTH(CURDATE())
-        AND YEAR(COALESCE(fecha_cierre, updated_at))  = YEAR(CURDATE())
-        ${reparacionesTenant.sql}
-    `, reparacionesTenant.params);
+    let repsMes = {};
+    if (includeTechnical) {
+      [[repsMes]] = await connection.query(`
+        SELECT COUNT(*) AS total
+        FROM reparaciones
+        WHERE estado IN ('COMPLETADA', 'ENTREGADA')
+          AND MONTH(COALESCE(fecha_cierre, updated_at)) = MONTH(CURDATE())
+          AND YEAR(COALESCE(fecha_cierre, updated_at))  = YEAR(CURDATE())
+          ${reparacionesTenant.sql}
+      `, reparacionesTenant.params);
+    }
 
     // ── Reparaciones atrasadas ───────────────────────────────────────────────
-    const [[repsAtrasadas]] = await connection.query(`
-      SELECT COUNT(*) AS total
-      FROM reparaciones
-      WHERE estado NOT IN ('COMPLETADA', 'ENTREGADA', 'CANCELADA')
-        AND fecha_estimada_entrega IS NOT NULL
-        AND fecha_estimada_entrega < CURDATE()
-        ${reparacionesTenant.sql}
-    `, reparacionesTenant.params);
+    let repsAtrasadas = {};
+    if (includeTechnical) {
+      [[repsAtrasadas]] = await connection.query(`
+        SELECT COUNT(*) AS total
+        FROM reparaciones
+        WHERE estado NOT IN ('COMPLETADA', 'ENTREGADA', 'CANCELADA')
+          AND fecha_estimada_entrega IS NOT NULL
+          AND fecha_estimada_entrega < CURDATE()
+          ${reparacionesTenant.sql}
+      `, reparacionesTenant.params);
+    }
 
     // ── Cotizaciones ─────────────────────────────────────────────────────────
     const [[cotizaciones]] = await connection.query(`
@@ -293,6 +336,7 @@ exports.getDashboardStats = async (req, res) => {
         sin_stock:  Number(productos.sin_stock)  || 0,
       },
       reparaciones: {
+        disponible: includeTechnical,
         total:           Number(reparaciones.total)         || 0,
         con_checklist:   Number(reparaciones.con_checklist) || 0,
         sin_checklist:   Number(reparaciones.sin_checklist) || 0,
@@ -335,6 +379,16 @@ exports.getTecnicoDashboardStats = async (req, res) => {
   // Solo técnicos pueden acceder
   if (resolveRole(req.user) !== 'tecnico') {
     return res.status(403).json({ error: 'Acceso denegado. Endpoint exclusivo para técnicos.' });
+  }
+
+  const moduleAccess = await getDashboardModuleAccess(req);
+  if (!canReadTechnicalDashboard(moduleAccess)) {
+    return res.status(403).json({
+      success: false,
+      code: 'MODULE_NOT_INCLUDED',
+      module: 'taller_operativo',
+      message: 'Este modulo no esta incluido en el plan contratado.',
+    });
   }
 
   console.log('[DashboardTecnico] req.user:', {
@@ -518,6 +572,8 @@ exports.getTecnicoDashboardStats = async (req, res) => {
 exports.getVentasDashboard = async (req, res) => {
   try {
     const connection = await pool.getConnection();
+    const moduleAccess = await getDashboardModuleAccess(req, connection);
+    const includeTechnical = canReadTechnicalDashboard(moduleAccess);
     const ventasTenant = tenantClause(req);
     const reparacionesTenant = tenantClause(req);
     const productosTenant = tenantClause(req);
@@ -563,13 +619,16 @@ exports.getVentasDashboard = async (req, res) => {
     `, cotizacionesTenant.params);
 
     // ── Reparaciones: activas + COMPLETADAS (listas para entregar) ────────────
-    const [[reparaciones]] = await connection.query(`
-      SELECT
-        COUNT(CASE WHEN estado NOT IN ('ENTREGADA', 'CANCELADA', 'COMPLETADA') THEN 1 END) AS activas,
-        COUNT(CASE WHEN estado = 'COMPLETADA' THEN 1 END) AS listas
-      FROM reparaciones
-      WHERE 1=1${reparacionesTenant.sql}
-    `, reparacionesTenant.params);
+    let reparaciones = {};
+    if (includeTechnical) {
+      [[reparaciones]] = await connection.query(`
+        SELECT
+          COUNT(CASE WHEN estado NOT IN ('ENTREGADA', 'CANCELADA', 'COMPLETADA') THEN 1 END) AS activas,
+          COUNT(CASE WHEN estado = 'COMPLETADA' THEN 1 END) AS listas
+        FROM reparaciones
+        WHERE 1=1${reparacionesTenant.sql}
+      `, reparacionesTenant.params);
+    }
 
     // ── Ventas con saldo pendiente (PARCIAL) ──────────────────────────────────
     const [[ventasParciales]] = await connection.query(`
@@ -661,6 +720,7 @@ exports.getVentasDashboard = async (req, res) => {
         valor_abierto: Math.round(Number(cotizaciones.valor_abierto) || 0),
       },
       reparaciones: {
+        disponible: includeTechnical,
         activas: Number(reparaciones.activas) || 0,
         listas:  Number(reparaciones.listas)  || 0,
       },

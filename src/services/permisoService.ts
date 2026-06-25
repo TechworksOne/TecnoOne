@@ -30,18 +30,47 @@ export interface RolConfigurable {
   total_usuarios: number;
 }
 
+export interface PlanInfo {
+  id: number;
+  codigo: string;
+  nombre: string;
+  max_usuarios: number | null;
+  max_sucursales: number | null;
+}
+
+export interface PlanConsumption {
+  usuarios_totales: number;
+  usuarios_activos: number;
+  usuarios_inactivos: number;
+  usuarios_limite: number | null;
+  usuarios_disponibles: number | null;
+  porcentaje_usuarios: number | null;
+  sucursales_usadas: number | null;
+  sucursales_limite: number | null;
+}
+
+export interface MisModulosResponse {
+  plan: PlanInfo | null;
+  modulos: string[];
+  consumo: PlanConsumption | null;
+}
+
 export const permisoService = {
   async getMisPermisos(): Promise<string[]> {
     const { data } = await api.get('/permisos/mis-permisos');
     return data.data;
   },
 
-    async getMisModulos(): Promise<string[]> {
+    async getMisModulos(): Promise<MisModulosResponse> {
       const { data } = await api.get('/permisos/mis-modulos');
 
-      return Array.isArray(data?.data?.modulos)
-        ? data.data.modulos
-        : [];
+      return {
+        plan: data?.data?.plan ?? null,
+        modulos: Array.isArray(data?.data?.modulos)
+          ? data.data.modulos
+          : [],
+        consumo: data?.data?.consumo ?? null,
+      };
     },
   async getCatalogo(): Promise<Permiso[]> {
     const { data } = await api.get('/permisos');

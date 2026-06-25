@@ -5,8 +5,15 @@ const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const reportesController = require('../controllers/reportesController');
 const requirePermission = require('../middleware/requirePermission');
+const requirePlanModule = require('../middleware/requirePlanModule');
 
-const soloAdmin = [verifyToken, tenantScope, checkEmpresaActiva, requirePermission('reportes.ver')];
+const soloAdmin = [
+  verifyToken,
+  tenantScope,
+  checkEmpresaActiva,
+  requirePlanModule('reportes_comerciales'),
+  requirePermission('reportes.ver'),
+];
 
 router.get('/resumen',               ...soloAdmin, reportesController.getResumen);
 router.get('/diario',                ...soloAdmin, reportesController.getDiario);

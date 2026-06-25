@@ -5,10 +5,12 @@ const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
+const requirePlanModule = require('../middleware/requirePlanModule');
 
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
+router.use(requirePlanModule('deudores_pagos'));
 
 router.get('/', requirePermission('deudores.ver'), deudoresController.getDeudores);
 router.get('/resumen', requirePermission('deudores.ver'), deudoresController.getResumen);

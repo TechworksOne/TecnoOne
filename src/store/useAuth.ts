@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { authService, LoginCredentials } from "../services/authService";
-import { permisoService } from "../services/permisoService";
+import {
+  permisoService,
+  type PlanConsumption,
+  type PlanInfo,
+} from "../services/permisoService";
 
 interface UserPerfil {
   nombres?: string;
@@ -33,6 +37,8 @@ export interface AuthState {
 
   modules: string[];
   modulesLoaded: boolean;
+  plan: PlanInfo | null;
+  planConsumption: PlanConsumption | null;
 
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => void;
@@ -74,6 +80,8 @@ export const useAuth = create<AuthState>((set, get) => ({
 
   modules: [],
   modulesLoaded: false,
+  plan: null,
+  planConsumption: null,
 
   login: async (credentials: LoginCredentials) => {
     set({
@@ -102,6 +110,8 @@ export const useAuth = create<AuthState>((set, get) => ({
           permissionsLoaded: true,
           modules: ["*"],
           modulesLoaded: true,
+          plan: null,
+          planConsumption: null,
         });
       } else {
         await get().loadPermissions();
@@ -122,6 +132,8 @@ export const useAuth = create<AuthState>((set, get) => ({
         permissionsLoaded: false,
         modules: [],
         modulesLoaded: false,
+        plan: null,
+        planConsumption: null,
       });
 
       throw error;
@@ -140,6 +152,8 @@ export const useAuth = create<AuthState>((set, get) => ({
       permissionsLoaded: false,
       modules: [],
       modulesLoaded: false,
+      plan: null,
+      planConsumption: null,
     });
   },
 
@@ -168,6 +182,8 @@ export const useAuth = create<AuthState>((set, get) => ({
         permissionsLoaded: true,
         modules: ["*"],
         modulesLoaded: true,
+        plan: null,
+        planConsumption: null,
       });
     } else {
       void get().loadPermissions();
@@ -192,6 +208,8 @@ export const useAuth = create<AuthState>((set, get) => ({
         permissionsLoaded: true,
         modules: [],
         modulesLoaded: true,
+        plan: null,
+        planConsumption: null,
       });
 
       return;
@@ -203,7 +221,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     });
 
     try {
-      const [permissions, modules] =
+      const [permissions, modulesResponse] =
         await Promise.all([
           permisoService.getMisPermisos(),
           permisoService.getMisModulos(),
@@ -212,8 +230,10 @@ export const useAuth = create<AuthState>((set, get) => ({
       set({
         permissions,
         permissionsLoaded: true,
-        modules,
+        modules: modulesResponse.modulos,
         modulesLoaded: true,
+        plan: modulesResponse.plan,
+        planConsumption: modulesResponse.consumo,
       });
     } catch {
       set({
@@ -221,6 +241,8 @@ export const useAuth = create<AuthState>((set, get) => ({
         permissionsLoaded: true,
         modules: [],
         modulesLoaded: true,
+        plan: null,
+        planConsumption: null,
       });
     }
   },

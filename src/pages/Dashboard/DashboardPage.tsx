@@ -45,6 +45,7 @@ interface DashboardStats {
   ventas:       { hoy: number; mes: number; total: number; cantidad: number };
   productos:    { total: number; bajo_stock: number; sin_stock: number };
   reparaciones: {
+    disponible?: boolean;
     total: number; con_checklist: number; sin_checklist: number;
     completadas: number; completadas_mes?: number; atrasadas?: number;
   };
@@ -110,7 +111,7 @@ interface VentasStats {
   ticketHoy?:   number;
   ticketMes?:   number;
   cotizaciones: { total: number; abiertas: number; valor_abierto?: number };
-  reparaciones: { activas: number; listas?: number };
+  reparaciones: { disponible?: boolean; activas: number; listas?: number };
   ventasParciales?: { cantidad: number; saldo: number };
   stock?: { sin_stock: number; bajo_stock: number };
   stockBajo:    number;
@@ -416,7 +417,15 @@ function ClockWidget({ time }: { time: Date }) {
 // DASHBOARD TÉCNICO
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function TecnicoDashboard({ data, time }: { data: TecnicoData; time: Date }) {
+function TecnicoDashboard({
+  data,
+  time,
+  hasModule = () => true,
+}: {
+  data: TecnicoData;
+  time: Date;
+  hasModule?: (moduleCode: string) => boolean;
+}) {
   const navigate = useNavigate();
   const { stats, reparaciones, actividad, estados } = data;
 
@@ -492,13 +501,13 @@ function TecnicoDashboard({ data, time }: { data: TecnicoData; time: Date }) {
   ];
 
   const quickActions = [
-    { icon: Wrench,        label: "Mis reparaciones",  path: "/ordenes-trabajo" },
-    { icon: Activity,      label: "Flujo",             path: "/flujo-reparaciones" },
-    { icon: CheckCircle2,  label: "Checklist",         path: "/reparaciones" },
-    { icon: Boxes,         label: "Repuestos",         path: "/repuestos" },
-    { icon: Users,         label: "Clientes",          path: "/clientes" },
-    { icon: Search,        label: "Buscar cliente",    path: "/clientes" },
-  ];
+    { icon: Wrench,        label: "Mis reparaciones",  path: "/ordenes-trabajo", moduleCode: "taller_operativo" },
+    { icon: Activity,      label: "Flujo",             path: "/flujo-reparaciones", moduleCode: "taller_operativo" },
+    { icon: CheckCircle2,  label: "Checklist",         path: "/reparaciones", moduleCode: "reparaciones" },
+    { icon: Boxes,         label: "Repuestos",         path: "/repuestos", moduleCode: "taller_operativo" },
+    { icon: Users,         label: "Clientes",          path: "/clientes", moduleCode: "clientes" },
+    { icon: Search,        label: "Buscar cliente",    path: "/clientes", moduleCode: "clientes" },
+  ].filter(action => hasModule(action.moduleCode));
 
   // Conteo por estado para la mini barra
   const estadosList = Object.entries(estados).map(([k, v]) => ({
@@ -750,7 +759,17 @@ function TecnicoDashboard({ data, time }: { data: TecnicoData; time: Date }) {
 // DASHBOARD VENTAS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: Date; userName?: string }) {
+function VentasDashboard({
+  stats,
+  time,
+  userName,
+  hasModule = () => true,
+}: {
+  stats: VentasStats;
+  time: Date;
+  userName?: string;
+  hasModule?: (moduleCode: string) => boolean;
+}) {
   const navigate = useNavigate();
   const { empresa } = useEmpresa();
   const formatMoney = (amount: number) => formatMoneyBase(amount, {
@@ -763,7 +782,8 @@ function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: 
   const todayKey   = new Date().toISOString().split('T')[0];
   const trend      = stats.tendencia ?? [];
   const maxIng     = Math.max(...trend.map(d => d.ingresos), 1);
-  const repListas  = stats.reparaciones.listas ?? 0;
+  const hasTechnicalModules = hasModule('reparaciones') || hasModule('taller_operativo') || stats.reparaciones?.disponible === true;
+  const repListas  = hasTechnicalModules ? stats.reparaciones.listas ?? 0 : 0;
   const cobros     = stats.ventasParciales ?? { cantidad: 0, saldo: 0 };
   const sinStock   = stats.stock?.sin_stock  ?? 0;
   const bajoStock  = stats.stock?.bajo_stock ?? stats.stockBajo ?? 0;
@@ -773,11 +793,11 @@ function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: 
   const weekVentas = trend.reduce((s, d) => s + d.ventas, 0);
 
   const quickActions = [
-    { icon: ShoppingCart, label: 'Nueva Venta',      color: 'bg-emerald-500', path: '/ventas/nueva' },
-    { icon: FileText,     label: 'Cotización',       color: 'bg-blue-500',    path: '/cotizaciones' },
-    { icon: Users,        label: 'Nuevo Cliente',    color: 'bg-indigo-500',  path: '/clientes' },
-    { icon: Wrench,       label: 'Nueva Reparación', color: 'bg-violet-500',  path: '/reparaciones' },
-  ];
+    { icon: ShoppingCart, label: 'Nueva Venta',      color: 'bg-emerald-500', path: '/ventas/nueva', moduleCode: 'ventas' },
+    { icon: FileText,     label: 'Cotización',       color: 'bg-blue-500',    path: '/cotizaciones', moduleCode: 'cotizaciones' },
+    { icon: Users,        label: 'Nuevo Cliente',    color: 'bg-indigo-500',  path: '/clientes', moduleCode: 'clientes' },
+    { icon: Wrench,       label: 'Nueva Reparación', color: 'bg-violet-500',  path: '/reparaciones', moduleCode: 'reparaciones' },
+  ].filter(action => hasModule(action.moduleCode));
 
   return (
     <div className="space-y-5 max-w-screen-2xl">
@@ -833,6 +853,7 @@ function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: 
 
       {/* ── ROW 2: ALERTAS OPERACIONALES (3 cards) ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {hasTechnicalModules && (
         <OpKpiCard
           label="Reparaciones Listas"
           value={repListas}
@@ -842,6 +863,7 @@ function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: 
           alert={repListas > 0}
           onClick={() => navigate('/ordenes-trabajo')}
         />
+        )}
         <OpKpiCard
           label="Cotizaciones Abiertas"
           value={stats.cotizaciones.abiertas}
@@ -991,7 +1013,15 @@ function VentasDashboard({ stats, time, userName }: { stats: VentasStats; time: 
 // DASHBOARD PRINCIPAL (admin)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) {
+function AdminDashboard({
+  stats,
+  time,
+  hasModule = () => true,
+}: {
+  stats: DashboardStats;
+  time: Date;
+  hasModule?: (moduleCode: string) => boolean;
+}) {
   const navigate = useNavigate();
   const { empresa } = useEmpresa();
   const formatMoney = (amount: number) => formatMoneyBase(amount, {
@@ -1002,19 +1032,20 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
   const fin  = stats.financiero;
   const trend = stats.tendencia ?? [];
   const cli  = stats.clientes;
+  const hasTechnicalModules = hasModule('reparaciones') || hasModule('taller_operativo') || stats.reparaciones?.disponible === true;
 
   const mesLabel = time.toLocaleDateString('es-GT', { month: 'long', year: 'numeric' });
 
   const quickActions = [
-    { icon: ShoppingCart, label: "Nueva Venta",  color: "bg-emerald-500", path: "/ventas/nueva" },
-    { icon: FileText,     label: "Cotización",   color: "bg-blue-500",    path: "/cotizaciones" },
-    { icon: Wrench,       label: "Reparación",   color: "bg-violet-500",  path: "/reparaciones" },
-    { icon: Users,        label: "Clientes",     color: "bg-indigo-500",  path: "/clientes" },
-    { icon: Package,      label: "Productos",    color: "bg-orange-500",  path: "/productos" },
-    { icon: Receipt,      label: "Compras",      color: "bg-teal-500",    path: "/compras" },
-    { icon: Wallet,       label: "Caja",         color: "bg-pink-500",    path: "/caja-bancos" },
-    { icon: Tag,          label: "Stickers",     color: "bg-purple-500",  path: "/stickers-garantia" },
-  ];
+    { icon: ShoppingCart, label: "Nueva Venta",  color: "bg-emerald-500", path: "/ventas/nueva", moduleCode: "ventas" },
+    { icon: FileText,     label: "Cotización",   color: "bg-blue-500",    path: "/cotizaciones", moduleCode: "cotizaciones" },
+    { icon: Wrench,       label: "Reparación",   color: "bg-violet-500",  path: "/reparaciones", moduleCode: "reparaciones" },
+    { icon: Users,        label: "Clientes",     color: "bg-indigo-500",  path: "/clientes", moduleCode: "clientes" },
+    { icon: Package,      label: "Productos",    color: "bg-orange-500",  path: "/productos", moduleCode: "productos" },
+    { icon: Receipt,      label: "Compras",      color: "bg-teal-500",    path: "/compras", moduleCode: "compras" },
+    { icon: Wallet,       label: "Caja",         color: "bg-pink-500",    path: "/caja-bancos", moduleCode: "caja_bancos" },
+    { icon: Tag,          label: "Stickers",     color: "bg-purple-500",  path: "/stickers-garantia", moduleCode: "taller_operativo" },
+  ].filter(action => hasModule(action.moduleCode));
 
   return (
     <div className="space-y-5 max-w-screen-2xl">
@@ -1078,6 +1109,8 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
 
       {/* ── ROW 2: KPIs OPERACIONALES ── */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        {hasTechnicalModules && (
+        <>
         <OpKpiCard
           label="Reparaciones Activas"
           value={stats.reparaciones.total}
@@ -1095,6 +1128,8 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
           accent="#22C55E"
           onClick={() => navigate('/ordenes-trabajo')}
         />
+        </>
+        )}
         <OpKpiCard
           label="Clientes nuevos este mes"
           value={cli?.nuevos_mes ?? 0}
@@ -1245,6 +1280,7 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pb-6">
 
         {/* Reparaciones pipeline */}
+        {hasTechnicalModules && (
         <div
           className="rounded-2xl p-5"
           style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: '0 1px 6px rgba(20,50,74,0.06)' }}
@@ -1284,6 +1320,7 @@ function AdminDashboard({ stats, time }: { stats: DashboardStats; time: Date }) 
             ))}
           </div>
         </div>
+        )}
 
         {/* Inventario + alertas stock */}
         <div
@@ -1454,7 +1491,7 @@ function getStoredAuthToken(): string | null {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, hasModule } = useAuth();
   const { loadEmpresa } = useEmpresa();
 
   // Detectar rol usando array RBAC (user.roles) y campo legado (user.role)
@@ -1587,7 +1624,11 @@ export default function DashboardPage() {
     return (
       <>
         {errorBanner}
-        <TecnicoDashboard data={tecnicoData} time={currentTime} />
+        <TecnicoDashboard
+          data={tecnicoData}
+          time={currentTime}
+          hasModule={hasModule}
+        />
       </>
     );
   }
@@ -1596,7 +1637,12 @@ export default function DashboardPage() {
     return (
       <>
         {errorBanner}
-        <VentasDashboard stats={ventasStats} time={currentTime} userName={user?.name} />
+        <VentasDashboard
+          stats={ventasStats}
+          time={currentTime}
+          userName={user?.name}
+          hasModule={hasModule}
+        />
       </>
     );
   }
@@ -1605,7 +1651,11 @@ export default function DashboardPage() {
     return (
       <>
         {errorBanner}
-        <AdminDashboard stats={adminStats} time={currentTime} />
+        <AdminDashboard
+          stats={adminStats}
+          time={currentTime}
+          hasModule={hasModule}
+        />
       </>
     );
   }

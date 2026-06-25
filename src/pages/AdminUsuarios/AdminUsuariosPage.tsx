@@ -838,6 +838,9 @@ function ModalRoles({
 
 export default function AdminUsuariosPage() {
   const currentUser = useAuth(state => state.user);
+  const plan = useAuth(state => state.plan);
+  const planConsumption = useAuth(state => state.planConsumption);
+  const loadPermissions = useAuth(state => state.loadPermissions);
   const currentUserId = currentUser?.id ?? null;
 
   const [usuarios, setUsuarios] = useState<UsuarioListItem[]>([]);
@@ -879,12 +882,13 @@ export default function AdminUsuariosPage() {
       ]);
       setUsuarios(us);
       setRoles(rs);
+      void loadPermissions();
     } catch {
       setError('Error al cargar los datos. Verifica la conexion con el servidor.');
     } finally {
       setLoading(false);
     }
-  }, [buscar, filtroRol, filtroEstado]);
+  }, [buscar, filtroRol, filtroEstado, loadPermissions]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -922,6 +926,19 @@ export default function AdminUsuariosPage() {
   const tecnicos = usuarios.filter(u => u.roles.includes('TECNICO')).length;
   const admins   = usuarios.filter(u => u.roles.includes('ADMINISTRADOR')).length;
   const ventas   = usuarios.filter(u => u.roles.includes('VENTAS')).length;
+  const limiteUsuarios = planConsumption?.usuarios_limite ?? null;
+  const activosPlan = planConsumption?.usuarios_activos ?? activos;
+  const usuariosSobreLimite =
+    limiteUsuarios !== null &&
+    activosPlan > limiteUsuarios;
+  const limiteAlcanzado =
+    limiteUsuarios !== null &&
+    activosPlan >= limiteUsuarios;
+  const puedeCrearUsuario = !limiteAlcanzado;
+  const textoConsumoUsuarios =
+    limiteUsuarios === null
+      ? `${activosPlan} activos / ilimitado`
+      : `${activosPlan} activos / ${limiteUsuarios} permitidos`;
 
   return (
     <div className="space-y-6">
@@ -957,13 +974,58 @@ export default function AdminUsuariosPage() {
             <Tag size={15} /> Gestionar roles
           </button>
           <button
-            onClick={() => setModalUsuario({ open: true, usuario: null })}
-            className="flex items-center gap-2 px-4 py-2.5 text-sm rounded-xl font-bold bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] text-white transition-colors shadow-sm cursor-pointer"
+            onClick={() => {
+              if (puedeCrearUsuario) {
+                setModalUsuario({ open: true, usuario: null });
+              }
+            }}
+            disabled={!puedeCrearUsuario}
+            title={
+              puedeCrearUsuario
+                ? 'Crear nuevo usuario'
+                : 'La empresa alcanzó el límite de usuarios activos permitido por su plan'
+            }
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm rounded-xl font-bold text-white transition-colors shadow-sm ${
+              puedeCrearUsuario
+                ? 'bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] cursor-pointer'
+                : 'bg-slate-400 cursor-not-allowed opacity-70'
+            }`}
           >
             <UserPlus size={15} /> Nuevo usuario
           </button>
         </div>
       </div>
+
+      {planConsumption && (
+        <div
+          className={`rounded-2xl border p-4 ${
+            usuariosSobreLimite
+              ? 'bg-amber-50 dark:bg-amber-900/20'
+              : limiteAlcanzado
+                ? 'bg-red-50 dark:bg-red-900/20'
+                : 'bg-emerald-50 dark:bg-emerald-900/20'
+          }`}
+          style={{ borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-bold text-[var(--color-text)]">
+                Consumo del plan: usuarios activos
+              </p>
+              <p className="text-xs text-[var(--color-text-sec)]">
+                Plan {plan?.nombre ?? 'vigente'} · {textoConsumoUsuarios}
+              </p>
+            </div>
+            <p className="text-xs font-semibold text-[var(--color-text-sec)]">
+              {usuariosSobreLimite
+                ? 'La empresa está por encima del límite; desactiva usuarios antes de crear o reactivar.'
+                : limiteAlcanzado
+                  ? 'Límite alcanzado. Cambia de plan para agregar más usuarios.'
+                  : 'Aún hay cupo para usuarios activos.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── KPI cards ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">

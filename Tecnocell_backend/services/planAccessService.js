@@ -749,7 +749,9 @@ function createPlanLimitError({
   planCode,
 }) {
   const error = new Error(
-    `El plan alcanzó el límite de ${resource} activos.`
+    resource === 'usuarios'
+      ? 'La empresa alcanzó el límite de usuarios activos permitido por su plan.'
+      : `El plan alcanzó el límite de ${resource} activos.`
   );
 
   error.code = 'PLAN_LIMIT_EXCEEDED';

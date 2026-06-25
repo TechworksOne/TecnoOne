@@ -64,7 +64,8 @@ exports.getMisModulos = async (req, res) => {
           max_usuarios: resumen.plan.max_usuarios,
           max_sucursales: resumen.plan.max_sucursales
         },
-        modulos: resumen.modulos_habilitados
+        modulos: resumen.modulos_habilitados,
+        consumo: resumen.consumo
       }
     });
   } catch (error) {

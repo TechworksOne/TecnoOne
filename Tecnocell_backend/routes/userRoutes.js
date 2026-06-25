@@ -5,6 +5,7 @@ const { verifyToken } = require('../middleware/authMiddleware');
 const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
+const requirePlanModule = require('../middleware/requirePlanModule');
 
 function legacyWriteDisabled(req, res) {
   return res.status(410).json({
@@ -20,6 +21,7 @@ function legacyWriteDisabled(req, res) {
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
+router.use(requirePlanModule('usuarios'));
 
 // Obtener todos los usuarios (solo admin)
 router.get('/', requirePermission('usuarios.administrar'), userController.getAllUsers);
