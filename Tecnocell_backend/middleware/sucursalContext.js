@@ -47,6 +47,7 @@ async function sucursalContext(req, res, next) {
     }
     req.sucursal_id = Number(sucursal.id);
     req.sucursal_context = sucursal;
+    req.sucursal = { ...sucursal, id: Number(sucursal.id) };
     return next();
   } catch (error) {
     console.error('sucursalContext error:', error);

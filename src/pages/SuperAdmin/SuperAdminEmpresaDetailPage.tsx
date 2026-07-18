@@ -9,6 +9,9 @@ import {
 } from '../../services/superAdminService';
 import SucursalManager from '../../components/sucursales/SucursalManager';
 import { superAdminSucursalApi } from '../../services/sucursalService';
+import type { Sucursal } from '../../services/sucursalService';
+import CajaManager from '../../components/cajas/CajaManager';
+import { superAdminCajaApi } from '../../services/cajaCatalogoService';
 
 const badgeStyles: Record<string, string> = {
   prueba: 'bg-violet-100 text-violet-700',
@@ -96,6 +99,11 @@ export default function SuperAdminEmpresaDetailPage() {
     () => superAdminSucursalApi(id),
     [id]
   );
+  const cajasApi = useMemo(() => superAdminCajaApi(id), [id]);
+  const [sucursalesCajas, setSucursalesCajas] = useState<Sucursal[]>([]);
+  useEffect(() => {
+    void sucursalesApi.listar().then(setSucursalesCajas).catch(() => setSucursalesCajas([]));
+  }, [sucursalesApi]);
 
   const [searchParams] =
     useSearchParams();
@@ -666,6 +674,8 @@ export default function SuperAdminEmpresaDetailPage() {
         used={suscripcion.consumo?.sucursales_usadas}
         limit={suscripcion.consumo?.sucursales_limite}
       />
+
+      <CajaManager api={cajasApi} sucursales={sucursalesCajas} />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-[#191a1d]">
         <div className="flex flex-wrap items-center justify-between gap-3">
