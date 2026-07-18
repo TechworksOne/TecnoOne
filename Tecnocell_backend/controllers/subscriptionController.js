@@ -2,6 +2,7 @@ const db = require('../config/database');
 const subscriptionAccess = require('../services/subscriptionAccessService');
 const superAdminAudit = require('../services/superAdminAuditService');
 const planAccess = require('../services/planAccessService');
+const lifecycle = require('../services/subscriptionLifecycleService');
 
 const TIPOS = new Set(['prueba', 'comercial']);
 const MESES_PERMITIDOS = new Set([1, 3, 6, 12]);
@@ -440,11 +441,25 @@ exports.updateSuscripcion = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Empresa o suscripción no encontrada' });
     }
 
+    let planCatalogo = null;
+    if (plan !== undefined) {
+      planCatalogo = await planAccess.obtenerPlanPorCodigo(plan, connection);
+      if (!planCatalogo || !planCatalogo.activo || !planCatalogo.asignable) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          code: 'PLAN_NOT_ASSIGNABLE',
+          message: 'El plan no existe o no está disponible para asignación',
+        });
+      }
+    }
+
     const previous = decorate(suscripcion, empresa);
     const next = {
       ...previous,
       tipo: tipo ?? previous.tipo,
-      plan: plan ?? previous.plan,
+      plan: planCatalogo?.codigo ?? previous.plan,
+      plan_id: planCatalogo?.id ?? previous.plan_id,
       fecha_inicio: fechaInicio ?? previous.fecha_inicio,
       fecha_vencimiento: fechaVencimiento === undefined ? previous.fecha_vencimiento : fechaVencimiento,
       dias_gracia: diasGracia ?? previous.dias_gracia,
@@ -464,11 +479,12 @@ exports.updateSuscripcion = async (req, res) => {
 
     await connection.query(
       `UPDATE suscripciones
-       SET plan = ?, tipo = ?, estado = ?, fecha_inicio = ?,
+       SET plan = ?, plan_id = ?, tipo = ?, estado = ?, fecha_inicio = ?,
            fecha_vencimiento = ?, dias_gracia = ?, fecha_fin_gracia = ?
        WHERE id = ?`,
       [
         next.plan,
+        next.plan_id,
         next.tipo,
         next.estado,
         next.fecha_inicio,
@@ -1313,7 +1329,7 @@ async function renovarSuscripcionTransaccional(connection, {
   };
 }
 
-exports.renovarSuscripcionTransaccional = renovarSuscripcionTransaccional;
+exports.renovarSuscripcionTransaccional = lifecycle.renovarSuscripcionTransaccional;
 
 exports.renovarSuscripcion = async (req, res) => {
   let connection;
@@ -1323,7 +1339,7 @@ exports.renovarSuscripcion = async (req, res) => {
       ? 0
       : Number(req.body.dias_gracia);
     const motivo = text(req.body?.motivo, 500);
-    const plan = text(req.body?.plan, 50);
+    const planId = req.body?.plan_id === undefined ? null : Number(req.body.plan_id);
 
     if (!MESES_PERMITIDOS.has(meses)) {
       return res.status(400).json({ success: false, message: 'meses debe ser 1, 3, 6 o 12' });
@@ -1331,15 +1347,18 @@ exports.renovarSuscripcion = async (req, res) => {
     if (!Number.isInteger(diasGracia) || diasGracia < 0) {
       return res.status(400).json({ success: false, message: 'dias_gracia debe ser un entero mayor o igual a cero' });
     }
+    if (planId !== null && (!Number.isInteger(planId) || planId <= 0)) {
+      return res.status(400).json({ success: false, message: 'plan_id no es válido' });
+    }
 
     connection = await db.getConnection();
     await connection.beginTransaction();
-    const result = await renovarSuscripcionTransaccional(connection, {
+    const result = await lifecycle.renovarSuscripcionTransaccional(connection, {
       empresaId: req.params.id,
       meses,
       diasGracia,
       motivo,
-      plan,
+      planId,
       superAdminId: req.superAdmin.id,
     });
     await connection.commit();
@@ -1368,5 +1387,64 @@ exports.renovarSuscripcion = async (req, res) => {
     });
   } finally {
     if (connection) connection.release();
+  }
+};
+
+async function ejecutarTransicion(req, res, accion, auditAction) {
+  try {
+    const result = await accion(req.params.id, {
+      motivo: text(req.body?.motivo, 500),
+      superAdminId: req.superAdmin.id,
+    });
+    await superAdminAudit.registrar({
+      req,
+      accion: auditAction,
+      entidad: 'SUSCRIPCION',
+      entidadId: req.params.id,
+      datosAnteriores: result.anterior,
+      datosNuevos: result.nuevo,
+    });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    console.error(`${auditAction} error:`, error);
+    return res.status(error.status || 500).json({
+      success: false,
+      code: error.code || 'LIFECYCLE_ERROR',
+      message: error.status ? error.message : 'Error al cambiar el ciclo de vida de la suscripción',
+    });
+  }
+}
+
+exports.suspenderEmpresa = (req, res) => ejecutarTransicion(
+  req, res, lifecycle.suspenderEmpresaConSuscripcion, 'SUSPENDER_EMPRESA'
+);
+
+exports.cancelarEmpresa = (req, res) => ejecutarTransicion(
+  req, res, lifecycle.cancelarEmpresaConSuscripcion, 'CANCELAR_EMPRESA'
+);
+
+exports.reactivarEmpresa = (req, res) => ejecutarTransicion(
+  req, res, lifecycle.reactivarEmpresaConSuscripcion, 'REACTIVAR_EMPRESA'
+);
+
+exports.procesarPendientes = async (req, res) => {
+  try {
+    const result = await lifecycle.procesarPendientes();
+    await superAdminAudit.registrar({
+      req,
+      accion: 'PROCESAR_SUSCRIPCIONES_PENDIENTES',
+      entidad: 'SUSCRIPCION',
+      entidadId: null,
+      datosAnteriores: null,
+      datosNuevos: result.resumen,
+    });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('procesarPendientes error:', error);
+    return res.status(error.status || 500).json({
+      success: false,
+      code: error.code || 'PROCESS_PENDING_ERROR',
+      message: error.status ? error.message : 'Error al procesar suscripciones pendientes',
+    });
   }
 };

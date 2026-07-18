@@ -75,7 +75,22 @@ const denied = service.evaluarAcceso({
 assert.strictEqual(denied.permitido, false);
 assert.strictEqual(denied.code, 'SUSCRIPCION_VENCIDA');
 
+const withoutSubscription = service.evaluarAcceso({
+  empresa: { estado: 'activa' },
+  suscripcion: null,
+}, hoy);
+assert.strictEqual(withoutSubscription.permitido, false);
+assert.strictEqual(withoutSubscription.code, 'SUSCRIPCION_REQUERIDA');
+
+for (const estado of ['suspendida', 'cancelada']) {
+  const blocked = service.evaluarAcceso({
+    empresa: { estado },
+    suscripcion: subscription(),
+  }, hoy);
+  assert.strictEqual(blocked.permitido, false);
+}
+
 const superAdminIndependent = { tipo_usuario: 'PLATAFORMA', es_super_admin: true };
 assert.strictEqual(superAdminIndependent.es_super_admin, true);
 
-console.log('OK subscriptionAccessService: 16 casos validados');
+console.log('OK subscriptionAccessService: acceso, gracia, vencimiento y estados operativos validados');

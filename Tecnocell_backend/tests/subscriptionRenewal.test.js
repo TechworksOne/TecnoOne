@@ -98,7 +98,8 @@ async function main() {
     superAdminId: 99,
     hoy: '2026-06-22',
   });
-  assert.strictEqual(suspendedResult.estado_empresa, 'activa');
+  assert.strictEqual(suspendedResult.estado_empresa, 'suspendida');
+  assert.strictEqual(suspendedResult.requiere_reactivacion_explicita, true);
 
   const cancelled = makeConnection({ empresaEstado: 'cancelada', vencimiento: '2026-06-01' });
   const cancelledResult = await controller.renovarSuscripcionTransaccional(cancelled, {
@@ -135,7 +136,7 @@ async function main() {
   assert.strictEqual(failing.committed, false);
   assert.strictEqual(failing.released, true);
 
-  console.log('OK subscriptionRenewal: renovación, reactivación, historial y rollback validados');
+  console.log('OK subscriptionRenewal: renovación sin reactivación implícita, historial y rollback validados');
 }
 
 main().catch(error => {
