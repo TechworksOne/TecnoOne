@@ -17,6 +17,7 @@ const targetPlan = {
 require.cache[require.resolve('../services/planAccessService')] = {
   exports: {
     obtenerPlanPorId: async () => targetPlan,
+    obtenerPlanPorCodigo: async () => targetPlan,
     aplicarCambioPlanProgramadoTransaccional: async () => ({ aplicado: false }),
   },
 };
@@ -26,6 +27,7 @@ require.cache[require.resolve('../services/superAdminAuditService')] = {
 
 const lifecycle = require('../services/subscriptionLifecycleService');
 const superAdminController = require('../controllers/superAdminController');
+const subscriptionController = require('../controllers/subscriptionController');
 
 function makeConnection({ empresaEstado = 'suspendida', subscriptionState = 'vigente', activeUsers = 1 } = {}) {
   const calls = [];
@@ -121,7 +123,47 @@ async function main() {
   assert.strictEqual(response.statusCode, 409);
   assert.strictEqual(response.body.code, 'EXPLICIT_LIFECYCLE_ENDPOINT_REQUIRED');
 
-  console.log('OK subscriptionLifecycleBlockers: historial, plan, limites y endpoint generico validados');
+  currentConnection = makeConnection({ activeUsers: 3 });
+  const limitResponse = {
+    statusCode: 200,
+    body: null,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; },
+  };
+  await subscriptionController.updateSuscripcion({
+    params: { id: 10 },
+    body: { plan: 'pos' },
+    superAdmin: { id: 99 },
+  }, limitResponse);
+  assert.strictEqual(limitResponse.statusCode, 409);
+  assert.strictEqual(limitResponse.body.code, 'PLAN_LIMIT_CONFLICT');
+  assert.strictEqual(limitResponse.body.used, 3);
+  assert.strictEqual(currentConnection.rolledBack, true);
+  assert(!currentConnection.calls.some(sql => /UPDATE suscripciones/.test(sql)));
+
+  currentConnection = makeConnection({ activeUsers: 2 });
+  const updateResponse = {
+    statusCode: 200,
+    body: null,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; },
+  };
+  await subscriptionController.updateSuscripcion({
+    params: { id: 10 },
+    body: { plan: 'pos', motivo: 'Cambio controlado' },
+    superAdmin: { id: 99 },
+  }, updateResponse);
+  assert.strictEqual(updateResponse.statusCode, 200);
+  assert.strictEqual(updateResponse.body.data.plan, 'pos');
+  assert.strictEqual(updateResponse.body.data.plan_id, 7);
+  assert(currentConnection.calls.some(sql =>
+    /plan_programado_id = NULL, cambio_plan_efectivo_en = NULL/.test(sql)
+  ));
+  assert(currentConnection.calls.some(sql => /UPDATE empresas\s+SET plan = \?/.test(sql)));
+  assert(currentConnection.calls.some(sql => /INSERT INTO historial_suscripciones/.test(sql)));
+  assert.strictEqual(currentConnection.committed, true);
+
+  console.log('OK subscriptionLifecycleBlockers: historial, limpieza de plan programado y limites validados');
 }
 
 main().catch(error => {

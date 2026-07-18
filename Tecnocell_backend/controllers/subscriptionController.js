@@ -462,6 +462,29 @@ exports.updateSuscripcion = async (req, res) => {
           message: 'El plan no existe o no está disponible para asignación',
         });
       }
+
+      const [activeUsers] = await connection.query(
+        `SELECT id FROM users
+         WHERE empresa_id = ? AND active = 1
+           AND COALESCE(tipo_usuario, 'EMPRESA') = 'EMPRESA'
+           AND COALESCE(es_super_admin, 0) = 0
+         FOR UPDATE`,
+        [empresa.id]
+      );
+      if (
+        planCatalogo.max_usuarios !== null &&
+        activeUsers.length > planCatalogo.max_usuarios
+      ) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          code: 'PLAN_LIMIT_CONFLICT',
+          resource: 'usuarios',
+          used: activeUsers.length,
+          limit: planCatalogo.max_usuarios,
+          message: 'La empresa excede el límite de usuarios activos del plan seleccionado',
+        });
+      }
     }
 
     const previous = decorate(suscripcion, empresa);
@@ -470,6 +493,8 @@ exports.updateSuscripcion = async (req, res) => {
       tipo: tipo ?? previous.tipo,
       plan: planCatalogo?.codigo ?? previous.plan,
       plan_id: planCatalogo?.id ?? previous.plan_id,
+      plan_programado_id: planCatalogo ? null : previous.plan_programado_id,
+      cambio_plan_efectivo_en: planCatalogo ? null : previous.cambio_plan_efectivo_en,
       fecha_inicio: fechaInicio ?? previous.fecha_inicio,
       fecha_vencimiento: fechaVencimiento === undefined ? previous.fecha_vencimiento : fechaVencimiento,
       dias_gracia: diasGracia ?? previous.dias_gracia,
@@ -487,10 +512,14 @@ exports.updateSuscripcion = async (req, res) => {
     );
     next.estado = subscriptionAccess.calcularEstadoSuscripcion(next);
 
+    const limpiarPlanProgramado = planCatalogo
+      ? ', plan_programado_id = NULL, cambio_plan_efectivo_en = NULL'
+      : '';
     await connection.query(
       `UPDATE suscripciones
        SET plan = ?, plan_id = ?, tipo = ?, estado = ?, fecha_inicio = ?,
            fecha_vencimiento = ?, dias_gracia = ?, fecha_fin_gracia = ?
+           ${limpiarPlanProgramado}
        WHERE id = ?`,
       [
         next.plan,
