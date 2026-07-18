@@ -10,6 +10,7 @@ import routes from "./routes";
 import { useAuth } from "./store/useAuth";
 import { useEmpresa } from "./store/useEmpresa";
 import { useSidebar } from "./store/useSidebar";
+import { useSucursalContext } from "./store/useSucursalContext";
 import SuperAdminRoutes from "./superAdminRoutes";
 
 /** Activa el cierre por inactividad solo cuando hay sesión */
@@ -37,6 +38,22 @@ function TenantBrandingGuard() {
   useEffect(() => {
     applyTenantBranding(empresa?.color_principal || empresa?.color_primario);
   }, [empresa?.color_principal, empresa?.color_primario]);
+
+  return null;
+}
+
+function SucursalContextGuard() {
+  const user = useAuth(state => state.user);
+  const cargar = useSucursalContext(state => state.cargar);
+  const limpiar = useSucursalContext(state => state.limpiar);
+
+  useEffect(() => {
+    if (user && !user.es_super_admin && user.role !== 'superadmin') {
+      void cargar(user.id);
+      return;
+    }
+    limpiar();
+  }, [user?.id, user?.es_super_admin, user?.role, cargar, limpiar]);
 
   return null;
 }
@@ -86,6 +103,7 @@ export default function App() {
       {/* Guard de inactividad — solo activo con sesión */}
       <IdleLogoutGuard />
       <TenantBrandingGuard />
+      <SucursalContextGuard />
       <div className="min-h-screen" style={{ background: "var(--color-bg)" }}>
         <Sidebar />
         <div

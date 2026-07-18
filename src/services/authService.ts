@@ -67,6 +67,10 @@ export const authService = {
 
       const user = loginData.user;
 
+      if (user.es_super_admin || user.role === 'superadmin') {
+        localStorage.removeItem('tecnoone.sucursalActivaId');
+      }
+
       // Guardar sesión en sessionStorage (se borra al cerrar el navegador)
       // Limpiar datos viejos de localStorage si los hubiera
       localStorage.removeItem('token');
@@ -104,6 +108,7 @@ export const authService = {
     sessionStorage.removeItem('user');
     sessionStorage.removeItem('userName');
     sessionStorage.removeItem('role');
+    localStorage.removeItem('tecnoone.sucursalActivaId');
 
     window.dispatchEvent(new Event('auth-change'));
   },

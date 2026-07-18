@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAuth } from "../../store/useAuth";
 import { useSidebar } from "../../store/useSidebar";
+import SucursalSelector from "./SucursalSelector";
 
 export default function Topbar() {
   const navigate = useNavigate();
@@ -65,6 +66,7 @@ export default function Topbar() {
       </div>
 
       <div className="flex items-center gap-2">
+        <SucursalSelector />
         {/* Toggle de tema */}
         <button
           onClick={toggleTheme}
