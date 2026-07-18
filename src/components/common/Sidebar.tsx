@@ -61,6 +61,7 @@ const GROUPS = [
     label: "Administración",
     items: [
       { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />, roles: ["ADMINISTRADOR"], permission: "usuarios.administrar", moduleCode: "usuarios" },
+      { to: "/sucursales", label: "Sucursales", icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"], permission: "usuarios.administrar", moduleCode: "usuarios" },
       { to: "/permisos", label: "Permisos", icon: <KeyRound size={17} />, roles: ["ADMINISTRADOR"], permission: "permisos.administrar", adminOnly: true, moduleCode: "roles_permisos" },
       { to: "/auditoria", label: "Auditoría", icon: <History size={17} />, roles: ["ADMINISTRADOR"], permission: "auditoria.ver", moduleCode: "auditoria" },
       { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, roles: ["ADMINISTRADOR"], permission: "empresa.editar", moduleCode: "configuracion" },

@@ -7,6 +7,8 @@ import {
   type PlanCatalogo,
   type Suscripcion,
 } from '../../services/superAdminService';
+import SucursalManager from '../../components/sucursales/SucursalManager';
+import { superAdminSucursalApi } from '../../services/sucursalService';
 
 const badgeStyles: Record<string, string> = {
   prueba: 'bg-violet-100 text-violet-700',
@@ -89,6 +91,11 @@ function errorMessage(
 export default function SuperAdminEmpresaDetailPage() {
   const { id = '' } =
     useParams();
+
+  const sucursalesApi = useMemo(
+    () => superAdminSucursalApi(id),
+    [id]
+  );
 
   const [searchParams] =
     useSearchParams();
@@ -653,6 +660,12 @@ export default function SuperAdminEmpresaDetailPage() {
           </div>
         )}
       </section>
+
+      <SucursalManager
+        api={sucursalesApi}
+        used={suscripcion.consumo?.sucursales_usadas}
+        limit={suscripcion.consumo?.sucursales_limite}
+      />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-[#191a1d]">
         <div className="flex flex-wrap items-center justify-between gap-3">
