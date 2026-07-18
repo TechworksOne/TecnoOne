@@ -32,6 +32,7 @@ import OrdenesTrabajoPage from "./pages/OrdenesTrabajo/OrdenesTrabajoPage";
 import EmpresaPage from "./pages/Configuracion/EmpresaPage";
 import AuditoriaPage from "./pages/Auditoria/AuditoriaPage";
 import PermisosPage from "./pages/Permisos/PermisosPage";
+import SucursalesPage from "./pages/Sucursales/SucursalesPage";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import { PERMISSIONS, ROLES } from "./lib/permissions";
 
@@ -120,6 +121,7 @@ const routes = [
   { path: "/proveedores",    element: PP('proveedores.ver', <SuppliersPage />, 'proveedores') },
   { path: "/stickers-garantia", element: PPM('stickers.ver', 'taller_operativo', <StickersGarantiaPage />) },
   { path: "/admin-usuarios", element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <AdminUsuariosPage />, 'usuarios') },
+  { path: "/sucursales", element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <SucursalesPage />, 'usuarios') },
   { path: "/configuracion/empresa", element: PP(PERMISSIONS.EMPRESA_EDITAR, <EmpresaPage />, 'configuracion') },
   { path: "/reportes",       element: PP(PERMISSIONS.REPORTES_VER, <ReportesPage />, 'reportes_comerciales') },
   { path: "/auditoria",      element: PP(PERMISSIONS.AUDITORIA_VER, <AuditoriaPage />, 'auditoria') },
