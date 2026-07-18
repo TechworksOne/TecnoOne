@@ -3,6 +3,9 @@ const planAccess = require('./planAccessService');
 
 const ESTADOS_EMPRESA_CON_ACCESO = new Set(['activa', 'demo', 'prueba']);
 const ESTADOS_SUSCRIPCION_CON_ACCESO = new Set(['prueba', 'vigente', 'gracia']);
+const LEGACY_ACCESS_ENABLED = String(
+  process.env.ALLOW_LEGACY_SUBSCRIPTION_ACCESS || ''
+).toLowerCase() === 'true';
 
 function toDateString(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -117,7 +120,14 @@ function evaluarAcceso({ empresa, suscripcion }, hoy = todayString()) {
   }
 
   if (!suscripcion) {
-    return { permitido: true, code: 'SUSCRIPCION_LEGACY', estado_suscripcion: null };
+    return {
+      permitido: LEGACY_ACCESS_ENABLED,
+      code: LEGACY_ACCESS_ENABLED
+        ? 'SUSCRIPCION_LEGACY_EXPLICITA'
+        : 'SUSCRIPCION_REQUERIDA',
+      estado_suscripcion: null,
+      compatibilidad_legacy: LEGACY_ACCESS_ENABLED,
+    };
   }
 
   const estadoSuscripcion = calcularEstadoSuscripcion(suscripcion, hoy);
@@ -190,13 +200,9 @@ async function obtenerContextoEmpresa(empresaId, connection = db) {
 async function sincronizarEstadoDerivado(contexto, connection = db, hoy = todayString()) {
   if (!contexto?.suscripcion) return contexto;
   const estado = calcularEstadoSuscripcion(contexto.suscripcion, hoy);
-  if (estado !== contexto.suscripcion.estado) {
-    await connection.query(
-      'UPDATE suscripciones SET estado = ? WHERE id = ?',
-      [estado, contexto.suscripcion.id]
-    );
-    contexto.suscripcion.estado = estado;
-  }
+  // El acceso es deliberadamente de solo lectura. La persistencia y su
+  // historial pertenecen al procesador explícito de pendientes.
+  contexto.suscripcion.estado = estado;
   return contexto;
 }
 
@@ -225,7 +231,15 @@ async function evaluarAccesoEmpresa(empresaId, {
 
   const contexto = await obtenerContextoEmpresa(empresaId, connection);
   if (sincronizar) await sincronizarEstadoDerivado(contexto, connection, hoy);
-  return { ...contexto, ...evaluarAcceso(contexto, hoy) };
+  const acceso = evaluarAcceso(contexto, hoy);
+  if (acceso.code === 'SUSCRIPCION_LEGACY_EXPLICITA') {
+    console.warn(JSON.stringify({
+      event: 'LEGACY_SUBSCRIPTION_ACCESS',
+      empresa_id: Number(empresaId),
+      at: new Date().toISOString(),
+    }));
+  }
+  return { ...contexto, ...acceso };
 }
 
 function mensajeAccesoDenegado(code) {
@@ -233,6 +247,7 @@ function mensajeAccesoDenegado(code) {
     EMPRESA_CANCELADA: 'La empresa se encuentra cancelada',
     EMPRESA_SUSPENDIDA: 'La empresa se encuentra suspendida',
     SUSCRIPCION_VENCIDA: 'La suscripción de la empresa se encuentra vencida',
+    SUSCRIPCION_REQUERIDA: 'La empresa no tiene una suscripción configurada',
     EMPRESA_INEXISTENTE: 'La empresa no se encuentra disponible',
   };
   return messages[code] || 'La empresa no se encuentra disponible';

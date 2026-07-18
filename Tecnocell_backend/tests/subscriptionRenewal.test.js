@@ -2,9 +2,8 @@ const assert = require('assert');
 
 const pool = { getConnection: async () => null, query: async () => [[]] };
 require.cache[require.resolve('../config/database')] = { exports: pool };
-require.cache[require.resolve('../services/superAdminAuditService')] = {
-  exports: { registrar: async () => true },
-};
+const auditService = { registrar: async () => true };
+require.cache[require.resolve('../services/superAdminAuditService')] = { exports: auditService };
 
 const controller = require('../controllers/subscriptionController');
 
@@ -98,7 +97,8 @@ async function main() {
     superAdminId: 99,
     hoy: '2026-06-22',
   });
-  assert.strictEqual(suspendedResult.estado_empresa, 'activa');
+  assert.strictEqual(suspendedResult.estado_empresa, 'suspendida');
+  assert.strictEqual(suspendedResult.requiere_reactivacion_explicita, true);
 
   const cancelled = makeConnection({ empresaEstado: 'cancelada', vencimiento: '2026-06-01' });
   const cancelledResult = await controller.renovarSuscripcionTransaccional(cancelled, {
@@ -135,7 +135,32 @@ async function main() {
   assert.strictEqual(failing.committed, false);
   assert.strictEqual(failing.released, true);
 
-  console.log('OK subscriptionRenewal: renovación, reactivación, historial y rollback validados');
+  const auditFailure = makeConnection();
+  pool.getConnection = async () => auditFailure;
+  auditService.registrar = async () => { throw new Error('audit unavailable'); };
+  const successDespiteAudit = {
+    statusCode: 200,
+    body: null,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; },
+  };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await controller.renovarSuscripcion({
+      params: { id: 10 },
+      body: { meses: 1, dias_gracia: 0 },
+      superAdmin: { id: 99 },
+    }, successDespiteAudit);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.strictEqual(successDespiteAudit.statusCode, 200);
+  assert.strictEqual(successDespiteAudit.body.success, true);
+  assert.strictEqual(auditFailure.committed, true);
+  assert.strictEqual(auditFailure.rolledBack, false);
+
+  console.log('OK subscriptionRenewal: renovación sin reactivación implícita, historial y rollback validados');
 }
 
 main().catch(error => {

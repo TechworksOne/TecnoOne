@@ -18,6 +18,9 @@ router.get('/empresas/:id', controller.getEmpresaById);
 router.post('/empresas', controller.createEmpresa);
 router.put('/empresas/:id', controller.updateEmpresa);
 router.patch('/empresas/:id/estado', controller.updateEmpresaEstado);
+router.post('/empresas/:id/suspender', subscriptionController.suspenderEmpresa);
+router.post('/empresas/:id/cancelar', subscriptionController.cancelarEmpresa);
+router.post('/empresas/:id/reactivar', subscriptionController.reactivarEmpresa);
 router.post('/empresas/:id/administrador', controller.createEmpresaAdministrador);
 router.get('/empresas/:id/suscripcion', subscriptionController.getSuscripcion);
 router.patch('/empresas/:id/suscripcion', subscriptionController.updateSuscripcion);
@@ -39,5 +42,6 @@ router.delete(
 
 router.post('/empresas/:id/suscripcion/renovar', subscriptionController.renovarSuscripcion);
 router.get('/empresas/:id/suscripcion/historial', subscriptionController.getHistorial);
+router.post('/suscripciones/procesar-pendientes', subscriptionController.procesarPendientes);
 
 module.exports = router;

@@ -2,6 +2,7 @@ const db = require('../config/database');
 const subscriptionAccess = require('../services/subscriptionAccessService');
 const superAdminAudit = require('../services/superAdminAuditService');
 const planAccess = require('../services/planAccessService');
+const lifecycle = require('../services/subscriptionLifecycleService');
 
 const TIPOS = new Set(['prueba', 'comercial']);
 const MESES_PERMITIDOS = new Set([1, 3, 6, 12]);
@@ -14,6 +15,16 @@ function text(value, max = 255) {
 
 function serialize(value) {
   return value == null ? null : JSON.stringify(value);
+}
+
+async function registrarAuditoriaNoBloqueante(payload) {
+  try {
+    await superAdminAudit.registrar(payload);
+    return true;
+  } catch (error) {
+    console.warn('No fue posible registrar auditoria_super_admin después del commit:', error.message);
+    return false;
+  }
 }
 
 function decorate(suscripcion, empresa = null) {
@@ -440,11 +451,50 @@ exports.updateSuscripcion = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Empresa o suscripción no encontrada' });
     }
 
+    let planCatalogo = null;
+    if (plan !== undefined) {
+      planCatalogo = await planAccess.obtenerPlanPorCodigo(plan, connection);
+      if (!planCatalogo || !planCatalogo.activo || !planCatalogo.asignable) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          code: 'PLAN_NOT_ASSIGNABLE',
+          message: 'El plan no existe o no está disponible para asignación',
+        });
+      }
+
+      const [activeUsers] = await connection.query(
+        `SELECT id FROM users
+         WHERE empresa_id = ? AND active = 1
+           AND COALESCE(tipo_usuario, 'EMPRESA') = 'EMPRESA'
+           AND COALESCE(es_super_admin, 0) = 0
+         FOR UPDATE`,
+        [empresa.id]
+      );
+      if (
+        planCatalogo.max_usuarios !== null &&
+        activeUsers.length > planCatalogo.max_usuarios
+      ) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          code: 'PLAN_LIMIT_CONFLICT',
+          resource: 'usuarios',
+          used: activeUsers.length,
+          limit: planCatalogo.max_usuarios,
+          message: 'La empresa excede el límite de usuarios activos del plan seleccionado',
+        });
+      }
+    }
+
     const previous = decorate(suscripcion, empresa);
     const next = {
       ...previous,
       tipo: tipo ?? previous.tipo,
-      plan: plan ?? previous.plan,
+      plan: planCatalogo?.codigo ?? previous.plan,
+      plan_id: planCatalogo?.id ?? previous.plan_id,
+      plan_programado_id: planCatalogo ? null : previous.plan_programado_id,
+      cambio_plan_efectivo_en: planCatalogo ? null : previous.cambio_plan_efectivo_en,
       fecha_inicio: fechaInicio ?? previous.fecha_inicio,
       fecha_vencimiento: fechaVencimiento === undefined ? previous.fecha_vencimiento : fechaVencimiento,
       dias_gracia: diasGracia ?? previous.dias_gracia,
@@ -462,13 +512,18 @@ exports.updateSuscripcion = async (req, res) => {
     );
     next.estado = subscriptionAccess.calcularEstadoSuscripcion(next);
 
+    const limpiarPlanProgramado = planCatalogo
+      ? ', plan_programado_id = NULL, cambio_plan_efectivo_en = NULL'
+      : '';
     await connection.query(
       `UPDATE suscripciones
-       SET plan = ?, tipo = ?, estado = ?, fecha_inicio = ?,
+       SET plan = ?, plan_id = ?, tipo = ?, estado = ?, fecha_inicio = ?,
            fecha_vencimiento = ?, dias_gracia = ?, fecha_fin_gracia = ?
+           ${limpiarPlanProgramado}
        WHERE id = ?`,
       [
         next.plan,
+        next.plan_id,
         next.tipo,
         next.estado,
         next.fecha_inicio,
@@ -1313,7 +1368,7 @@ async function renovarSuscripcionTransaccional(connection, {
   };
 }
 
-exports.renovarSuscripcionTransaccional = renovarSuscripcionTransaccional;
+exports.renovarSuscripcionTransaccional = lifecycle.renovarSuscripcionTransaccional;
 
 exports.renovarSuscripcion = async (req, res) => {
   let connection;
@@ -1323,7 +1378,7 @@ exports.renovarSuscripcion = async (req, res) => {
       ? 0
       : Number(req.body.dias_gracia);
     const motivo = text(req.body?.motivo, 500);
-    const plan = text(req.body?.plan, 50);
+    const planId = req.body?.plan_id === undefined ? null : Number(req.body.plan_id);
 
     if (!MESES_PERMITIDOS.has(meses)) {
       return res.status(400).json({ success: false, message: 'meses debe ser 1, 3, 6 o 12' });
@@ -1331,20 +1386,23 @@ exports.renovarSuscripcion = async (req, res) => {
     if (!Number.isInteger(diasGracia) || diasGracia < 0) {
       return res.status(400).json({ success: false, message: 'dias_gracia debe ser un entero mayor o igual a cero' });
     }
+    if (planId !== null && (!Number.isInteger(planId) || planId <= 0)) {
+      return res.status(400).json({ success: false, message: 'plan_id no es válido' });
+    }
 
     connection = await db.getConnection();
     await connection.beginTransaction();
-    const result = await renovarSuscripcionTransaccional(connection, {
+    const result = await lifecycle.renovarSuscripcionTransaccional(connection, {
       empresaId: req.params.id,
       meses,
       diasGracia,
       motivo,
-      plan,
+      planId,
       superAdminId: req.superAdmin.id,
     });
     await connection.commit();
 
-    await superAdminAudit.registrar({
+    await registrarAuditoriaNoBloqueante({
       req,
       accion: 'RENOVAR_SUSCRIPCION',
       entidad: 'SUSCRIPCION',
@@ -1368,5 +1426,64 @@ exports.renovarSuscripcion = async (req, res) => {
     });
   } finally {
     if (connection) connection.release();
+  }
+};
+
+async function ejecutarTransicion(req, res, accion, auditAction) {
+  try {
+    const result = await accion(req.params.id, {
+      motivo: text(req.body?.motivo, 500),
+      superAdminId: req.superAdmin.id,
+    });
+    await registrarAuditoriaNoBloqueante({
+      req,
+      accion: auditAction,
+      entidad: 'SUSCRIPCION',
+      entidadId: req.params.id,
+      datosAnteriores: result.anterior,
+      datosNuevos: result.nuevo,
+    });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    console.error(`${auditAction} error:`, error);
+    return res.status(error.status || 500).json({
+      success: false,
+      code: error.code || 'LIFECYCLE_ERROR',
+      message: error.status ? error.message : 'Error al cambiar el ciclo de vida de la suscripción',
+    });
+  }
+}
+
+exports.suspenderEmpresa = (req, res) => ejecutarTransicion(
+  req, res, lifecycle.suspenderEmpresaConSuscripcion, 'SUSPENDER_EMPRESA'
+);
+
+exports.cancelarEmpresa = (req, res) => ejecutarTransicion(
+  req, res, lifecycle.cancelarEmpresaConSuscripcion, 'CANCELAR_EMPRESA'
+);
+
+exports.reactivarEmpresa = (req, res) => ejecutarTransicion(
+  req, res, lifecycle.reactivarEmpresaConSuscripcion, 'REACTIVAR_EMPRESA'
+);
+
+exports.procesarPendientes = async (req, res) => {
+  try {
+    const result = await lifecycle.procesarPendientes();
+    await registrarAuditoriaNoBloqueante({
+      req,
+      accion: 'PROCESAR_SUSCRIPCIONES_PENDIENTES',
+      entidad: 'SUSCRIPCION',
+      entidadId: null,
+      datosAnteriores: null,
+      datosNuevos: result.resumen,
+    });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('procesarPendientes error:', error);
+    return res.status(error.status || 500).json({
+      success: false,
+      code: error.code || 'PROCESS_PENDING_ERROR',
+      message: error.status ? error.message : 'Error al procesar suscripciones pendientes',
+    });
   }
 };
