@@ -11,6 +11,7 @@ import {
   type RolItem,
   type CreateUsuarioPayload,
   type UpdateUsuarioPayload,
+  type UsuarioSucursalItem,
 } from '../../services/adminUsuarioService';
 import { getInitialsFromName } from '../../lib/avatar';
 import { useAuth } from '../../store/useAuth';
@@ -200,6 +201,51 @@ function ModalUsuario({
   const [showPass, setShowPass] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [sucursales, setSucursales] = useState<UsuarioSucursalItem[]>([]);
+  const [sucursalIds, setSucursalIds] = useState<number[]>([]);
+  const [predeterminadaId, setPredeterminadaId] = useState<number | null>(null);
+  const [loadingSucursales, setLoadingSucursales] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    const loadSucursales = async () => {
+      setLoadingSucursales(true);
+      try {
+        const [disponibles, asignadas] = await Promise.all([
+          adminUsuarioService.getSucursales(),
+          usuario ? adminUsuarioService.getUsuarioSucursales(usuario.id) : Promise.resolve([]),
+        ]);
+        if (!active) return;
+        setSucursales(disponibles);
+        if (usuario) {
+          const activas = asignadas.filter(item => Boolean(item.activa));
+          const idsActivos = activas.map(item => item.id);
+          const predeterminada = activas.find(item => Boolean(item.es_predeterminada))?.id
+            ?? idsActivos[0]
+            ?? null;
+          setSucursalIds(idsActivos);
+          setPredeterminadaId(predeterminada);
+        } else {
+          const principal = disponibles.find(item => Boolean(item.es_principal) && Boolean(item.activa));
+          if (principal) {
+            setSucursalIds([principal.id]);
+            setPredeterminadaId(principal.id);
+          }
+        }
+      } catch (e: unknown) {
+        if (active) {
+          setError(
+            (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+              'No se pudieron cargar las sucursales',
+          );
+        }
+      } finally {
+        if (active) setLoadingSucursales(false);
+      }
+    };
+    void loadSucursales();
+    return () => { active = false; };
+  }, [usuario]);
 
   useEffect(() => {
     if (usuario) {
@@ -243,6 +289,10 @@ function ModalUsuario({
     if (form.password && form.password.length < 6) return 'La contrasena debe tener minimo 6 caracteres';
     if (form.password && form.password !== form.confirmPassword) return 'Las contrasenas no coinciden';
     if (!form.roles.length) return 'Selecciona al menos un rol';
+    if (!sucursalIds.length) return 'Selecciona al menos una sucursal';
+    if (!predeterminadaId || !sucursalIds.includes(predeterminadaId)) {
+      return 'Selecciona una sucursal predeterminada';
+    }
     return '';
   };
 
@@ -267,6 +317,10 @@ function ModalUsuario({
           foto: form.foto,
         };
         await adminUsuarioService.updateUsuario(usuario.id, payload);
+        await adminUsuarioService.updateUsuarioSucursales(usuario.id, {
+          sucursal_ids: sucursalIds,
+          predeterminada_id: predeterminadaId as number,
+        });
       } else {
         const payload: CreateUsuarioPayload = {
           nombres: form.nombres,
@@ -279,6 +333,8 @@ function ModalUsuario({
           direccion: form.direccion || undefined,
           roles: form.roles,
           foto: form.foto,
+          sucursalIds,
+          sucursalPredeterminadaId: predeterminadaId as number,
         };
         await adminUsuarioService.createUsuario(payload);
       }
@@ -291,6 +347,19 @@ function ModalUsuario({
     } finally {
       setSaving(false);
     }
+  };
+
+  const toggleSucursal = (id: number) => {
+    setSucursalIds(current => {
+      if (current.includes(id)) {
+        const next = current.filter(item => item !== id);
+        if (predeterminadaId === id) setPredeterminadaId(next[0] ?? null);
+        return next;
+      }
+      const next = [...current, id];
+      if (!predeterminadaId) setPredeterminadaId(id);
+      return next;
+    });
   };
 
   return (
@@ -502,6 +571,57 @@ function ModalUsuario({
             })}
           </div>
 
+          <SectionSep label="Sucursales asignadas" />
+          {loadingSucursales ? (
+            <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+              <Loader2 size={15} className="animate-spin" /> Cargando sucursales...
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sucursales.filter(item => Boolean(item.activa)).map(item => {
+                const selected = sucursalIds.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border p-3"
+                    style={{ borderColor: 'var(--color-border)' }}
+                  >
+                    <label className="flex flex-1 items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleSucursal(item.id)}
+                        className="h-4 w-4 accent-[var(--color-primary)]"
+                      />
+                      <span className="text-sm font-semibold text-[var(--color-text)]">
+                        {item.nombre}
+                        {Boolean(item.es_principal) && (
+                          <span className="ml-2 text-xs font-normal text-[var(--color-primary)]">
+                            Principal
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                    <label className={`flex items-center gap-2 text-xs ${selected ? 'cursor-pointer' : 'opacity-50'}`}>
+                      <input
+                        type="radio"
+                        name="sucursal-predeterminada"
+                        checked={predeterminadaId === item.id}
+                        disabled={!selected}
+                        onChange={() => setPredeterminadaId(item.id)}
+                        className="accent-[var(--color-primary)]"
+                      />
+                      Predeterminada
+                    </label>
+                  </div>
+                );
+              })}
+              {!sucursales.some(item => Boolean(item.activa)) && (
+                <p className="text-sm text-red-500">La empresa no tiene sucursales activas.</p>
+              )}
+            </div>
+          )}
+
           {/* Estado (solo edicion) */}
           {isEdit && (
             <div className="flex items-center gap-3 pt-2">
@@ -548,7 +668,7 @@ function ModalUsuario({
           <button
             type="submit"
             form="modal-user-form"
-            disabled={saving}
+            disabled={saving || loadingSucursales}
             className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] text-white transition-colors disabled:opacity-60 shadow-sm cursor-pointer"
           >
             {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}

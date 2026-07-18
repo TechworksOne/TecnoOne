@@ -27,6 +27,8 @@ router.get('/empresas/:id/sucursales', sucursalController.listar);
 router.post('/empresas/:id/sucursales', sucursalController.crear);
 router.put('/empresas/:id/sucursales/:sucursalId', sucursalController.editar);
 router.patch('/empresas/:id/sucursales/:sucursalId/estado', sucursalController.cambiarEstado);
+router.get('/empresas/:empresaId/usuarios/:userId/sucursales', sucursalController.listarUsuario);
+router.put('/empresas/:empresaId/usuarios/:userId/sucursales', sucursalController.actualizarUsuario);
 router.get('/empresas/:id/suscripcion', subscriptionController.getSuscripcion);
 router.patch('/empresas/:id/suscripcion', subscriptionController.updateSuscripcion);
 router.patch(

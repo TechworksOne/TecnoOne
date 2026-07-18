@@ -18,8 +18,10 @@ router.use(requirePermission('usuarios.administrar'));
 // ── Usuarios ──────────────────────────────────────────────────────────────
 router.get('/usuarios', ctrl.getUsuarios);
 router.get('/usuarios/:id', ctrl.getUsuarioById);
+router.get('/usuarios/:id/sucursales', sucursalController.listarUsuario);
 router.post('/usuarios', ctrl.upload.single('foto_perfil'), ctrl.createUsuario);
 router.put('/usuarios/:id', ctrl.upload.single('foto_perfil'), ctrl.updateUsuario);
+router.put('/usuarios/:id/sucursales', sucursalController.actualizarUsuario);
 router.patch('/usuarios/:id/estado', ctrl.toggleEstado);
 router.patch('/usuarios/:id/password', ctrl.changePassword);
 router.delete('/usuarios/:id', ctrl.deleteUsuario);

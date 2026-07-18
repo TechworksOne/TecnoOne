@@ -607,6 +607,12 @@ exports.createEmpresaAdministrador = async (req, res) => {
       ]
     );
 
+    await sucursalService.asignarSucursalPrincipalUsuario(
+      empresa.id,
+      userResult.insertId,
+      connection
+    );
+
     await connection.commit();
     committed = true;
 
