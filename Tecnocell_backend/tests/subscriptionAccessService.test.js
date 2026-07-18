@@ -93,4 +93,26 @@ for (const estado of ['suspendida', 'cancelada']) {
 const superAdminIndependent = { tipo_usuario: 'PLATAFORMA', es_super_admin: true };
 assert.strictEqual(superAdminIndependent.es_super_admin, true);
 
-console.log('OK subscriptionAccessService: acceso, gracia, vencimiento y estados operativos validados');
+async function verifyReadOnlyDerivedState() {
+  let writes = 0;
+  const context = {
+    empresa: { id: 10, estado: 'activa' },
+    suscripcion: subscription({
+      id: 20,
+      estado: 'vigente',
+      fecha_vencimiento: '2026-06-20',
+      fecha_fin_gracia: '2026-06-21',
+    }),
+  };
+  await service.sincronizarEstadoDerivado(context, {
+    query: async () => { writes += 1; },
+  }, hoy);
+  assert.strictEqual(context.suscripcion.estado, 'vencida');
+  assert.strictEqual(writes, 0, 'El acceso no debe persistir estados derivados');
+  console.log('OK subscriptionAccessService: acceso de solo lectura y estados validados');
+}
+
+verifyReadOnlyDerivedState().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

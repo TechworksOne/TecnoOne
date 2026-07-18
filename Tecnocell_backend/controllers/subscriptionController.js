@@ -17,6 +17,16 @@ function serialize(value) {
   return value == null ? null : JSON.stringify(value);
 }
 
+async function registrarAuditoriaNoBloqueante(payload) {
+  try {
+    await superAdminAudit.registrar(payload);
+    return true;
+  } catch (error) {
+    console.warn('No fue posible registrar auditoria_super_admin después del commit:', error.message);
+    return false;
+  }
+}
+
 function decorate(suscripcion, empresa = null) {
   const estado = subscriptionAccess.calcularEstadoSuscripcion(suscripcion);
   const diasRestantes = subscriptionAccess.calcularDiasRestantes(suscripcion);
@@ -1363,7 +1373,7 @@ exports.renovarSuscripcion = async (req, res) => {
     });
     await connection.commit();
 
-    await superAdminAudit.registrar({
+    await registrarAuditoriaNoBloqueante({
       req,
       accion: 'RENOVAR_SUSCRIPCION',
       entidad: 'SUSCRIPCION',
@@ -1396,7 +1406,7 @@ async function ejecutarTransicion(req, res, accion, auditAction) {
       motivo: text(req.body?.motivo, 500),
       superAdminId: req.superAdmin.id,
     });
-    await superAdminAudit.registrar({
+    await registrarAuditoriaNoBloqueante({
       req,
       accion: auditAction,
       entidad: 'SUSCRIPCION',
@@ -1430,7 +1440,7 @@ exports.reactivarEmpresa = (req, res) => ejecutarTransicion(
 exports.procesarPendientes = async (req, res) => {
   try {
     const result = await lifecycle.procesarPendientes();
-    await superAdminAudit.registrar({
+    await registrarAuditoriaNoBloqueante({
       req,
       accion: 'PROCESAR_SUSCRIPCIONES_PENDIENTES',
       entidad: 'SUSCRIPCION',

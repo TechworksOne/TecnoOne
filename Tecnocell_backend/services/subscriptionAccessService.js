@@ -200,13 +200,9 @@ async function obtenerContextoEmpresa(empresaId, connection = db) {
 async function sincronizarEstadoDerivado(contexto, connection = db, hoy = todayString()) {
   if (!contexto?.suscripcion) return contexto;
   const estado = calcularEstadoSuscripcion(contexto.suscripcion, hoy);
-  if (estado !== contexto.suscripcion.estado) {
-    await connection.query(
-      'UPDATE suscripciones SET estado = ? WHERE id = ?',
-      [estado, contexto.suscripcion.id]
-    );
-    contexto.suscripcion.estado = estado;
-  }
+  // El acceso es deliberadamente de solo lectura. La persistencia y su
+  // historial pertenecen al procesador explícito de pendientes.
+  contexto.suscripcion.estado = estado;
   return contexto;
 }
 

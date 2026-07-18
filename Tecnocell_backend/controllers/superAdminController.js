@@ -342,28 +342,25 @@ exports.updateEmpresa = async (req, res) => {
 };
 
 exports.updateEmpresaEstado = async (req, res) => {
-  try {
-    const estado = text(req.body?.estado, 30)?.toLowerCase();
-    if (!estado || !ESTADOS_EMPRESA.has(estado)) {
-      return res.status(400).json({ success: false, message: 'Estado no válido' });
-    }
-    const [[previous]] = await db.query('SELECT id, estado FROM empresas WHERE id = ?', [req.params.id]);
-    if (!previous) return res.status(404).json({ success: false, message: 'Empresa no encontrada' });
-
-    await db.query('UPDATE empresas SET estado = ? WHERE id = ?', [estado, req.params.id]);
-    await superAdminAudit.registrar({
-      req,
-      accion: 'CAMBIAR_ESTADO_EMPRESA',
-      entidad: 'EMPRESA',
-      entidadId: req.params.id,
-      datosAnteriores: { estado: previous.estado },
-      datosNuevos: { estado },
-    });
-    res.json({ success: true, data: { id: Number(req.params.id), estado } });
-  } catch (error) {
-    console.error('updateEmpresaEstado error:', error);
-    res.status(500).json({ success: false, message: 'Error al cambiar el estado' });
+  const estado = text(req.body?.estado, 30)?.toLowerCase();
+  if (!estado || !ESTADOS_EMPRESA.has(estado)) {
+    return res.status(400).json({ success: false, message: 'Estado no válido' });
   }
+
+  const endpoint = {
+    suspendida: `/api/superadmin/empresas/${req.params.id}/suspender`,
+    cancelada: `/api/superadmin/empresas/${req.params.id}/cancelar`,
+    activa: `/api/superadmin/empresas/${req.params.id}/reactivar`,
+    demo: `/api/superadmin/empresas/${req.params.id}/reactivar`,
+    prueba: `/api/superadmin/empresas/${req.params.id}/reactivar`,
+  }[estado];
+
+  return res.status(409).json({
+    success: false,
+    code: 'EXPLICIT_LIFECYCLE_ENDPOINT_REQUIRED',
+    message: 'Use el endpoint explícito del ciclo de vida para conservar la consistencia y el historial',
+    endpoint,
+  });
 };
 
 exports.createEmpresaAdministrador = async (req, res) => {

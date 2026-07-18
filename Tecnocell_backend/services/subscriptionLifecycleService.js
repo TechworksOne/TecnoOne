@@ -26,6 +26,10 @@ function snapshot(empresa, suscripcion) {
     estado_empresa: empresa.estado,
     plan: suscripcion.plan,
     plan_id: suscripcion.plan_id == null ? null : Number(suscripcion.plan_id),
+    plan_programado_id: suscripcion.plan_programado_id == null
+      ? null
+      : Number(suscripcion.plan_programado_id),
+    cambio_plan_efectivo_en: subscriptionAccess.toDateString(suscripcion.cambio_plan_efectivo_en),
     tipo: suscripcion.tipo,
     estado: suscripcion.estado,
     fecha_inicio: subscriptionAccess.toDateString(suscripcion.fecha_inicio),
@@ -135,6 +139,12 @@ function reactivarEmpresaConSuscripcion(empresaId, options = {}) {
     const estado = suscripcion.tipo === 'prueba' ? 'prueba' : 'activa';
     const anterior = snapshot(empresa, suscripcion);
     await connection.query('UPDATE empresas SET estado = ? WHERE id = ?', [estado, empresa.id]);
+    if (estadoSuscripcion !== suscripcion.estado) {
+      await connection.query(
+        'UPDATE suscripciones SET estado = ? WHERE id = ?',
+        [estadoSuscripcion, suscripcion.id]
+      );
+    }
     const nuevo = { ...anterior, estado_empresa: estado, estado: estadoSuscripcion };
     await registrarHistorial(connection, {
       empresa, suscripcion, anterior, nuevo,
@@ -167,12 +177,35 @@ async function renovarSuscripcionTransaccional(connection, {
   if (planId && (!plan || !plan.activo || !plan.asignable)) {
     throw lifecycleError('Plan no disponible para asignación', 409, 'PLAN_NOT_ASSIGNABLE');
   }
+  if (plan) {
+    const [activeUsers] = await connection.query(
+      `SELECT id FROM users
+       WHERE empresa_id = ? AND active = 1
+         AND COALESCE(tipo_usuario, 'EMPRESA') = 'EMPRESA'
+         AND COALESCE(es_super_admin, 0) = 0
+       FOR UPDATE`,
+      [empresa.id]
+    );
+    if (plan.max_usuarios !== null && activeUsers.length > plan.max_usuarios) {
+      const error = lifecycleError(
+        'La empresa excede el límite de usuarios activos del plan seleccionado',
+        409,
+        'PLAN_LIMIT_CONFLICT'
+      );
+      error.resource = 'usuarios';
+      error.used = activeUsers.length;
+      error.limit = plan.max_usuarios;
+      throw error;
+    }
+  }
   const planCodigo = plan?.codigo || suscripcion.plan;
   const planCatalogoId = plan?.id || suscripcion.plan_id;
   const nuevo = {
     ...anterior,
     plan: planCodigo,
     plan_id: Number(planCatalogoId),
+    plan_programado_id: null,
+    cambio_plan_efectivo_en: null,
     tipo: 'comercial',
     estado: 'vigente',
     fecha_inicio: anterior.fecha_inicio || hoy,
@@ -184,7 +217,9 @@ async function renovarSuscripcionTransaccional(connection, {
     estado_empresa: empresa.estado,
   };
   await connection.query(
-    `UPDATE suscripciones SET plan = ?, plan_id = ?, tipo = 'comercial', estado = 'vigente',
+    `UPDATE suscripciones SET plan = ?, plan_id = ?,
+       plan_programado_id = NULL, cambio_plan_efectivo_en = NULL,
+       tipo = 'comercial', estado = 'vigente',
        fecha_inicio = ?, fecha_vencimiento = ?, dias_gracia = ?, fecha_fin_gracia = ?, duracion_meses = ?
      WHERE id = ?`,
     [nuevo.plan, nuevo.plan_id, nuevo.fecha_inicio, nuevo.fecha_vencimiento,
