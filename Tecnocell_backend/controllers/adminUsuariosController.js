@@ -7,6 +7,7 @@ const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecur
 const { validatePhone } = require('../utils/phoneValidation');
 const auditoriaService = require('../services/auditoriaService');
 const planAccess = require('../services/planAccessService');
+const sucursalService = require('../services/sucursalService');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 
@@ -20,6 +21,20 @@ function sendPlanLimitError(res, error) {
 
   res.status(response.status).json(response.body);
   return true;
+}
+
+function parseSucursalIds(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (_) {
+      return value.split(',').map(item => item.trim()).filter(Boolean);
+    }
+  }
+  return [value];
 }
 
 
@@ -188,7 +203,9 @@ exports.createUsuario = async (req, res) => {
       dpi,
       direccion,
       roles,
-      empresa_id
+      empresa_id,
+      sucursal_ids,
+      sucursal_predeterminada_id
     } = req.body;
 
     if (req.file) {
@@ -440,6 +457,25 @@ exports.createUsuario = async (req, res) => {
       );
     }
 
+    const sucursalIds = parseSucursalIds(sucursal_ids);
+    if (sucursalIds === null) {
+      await sucursalService.asignarSucursalPrincipalUsuario(
+        empresaId,
+        userId,
+        connection
+      );
+    } else {
+      await sucursalService.actualizarSucursalesUsuario(
+        empresaId,
+        userId,
+        {
+          sucursal_ids: sucursalIds,
+          predeterminada_id: sucursal_predeterminada_id,
+        },
+        connection
+      );
+    }
+
     await connection.commit();
 
     movedPhotoDiskPath = null;
@@ -466,7 +502,8 @@ exports.createUsuario = async (req, res) => {
             telefonoNormalizado,
           dpi,
           direccion,
-          roles: rolesArray
+          roles: rolesArray,
+          sucursal_ids: sucursalIds
         },
       });
     } catch (auditError) {
@@ -515,6 +552,7 @@ exports.createUsuario = async (req, res) => {
       Number(error.statusCode || 500)
     ).json({
       success: false,
+      code: error.code,
       message:
         error.statusCode
           ? error.message

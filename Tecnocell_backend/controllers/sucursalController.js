@@ -1,11 +1,15 @@
 const sucursalService = require('../services/sucursalService');
 
 function empresaId(req) {
-  return req.params.empresaId || req.params.id || req.tenant?.empresa_id;
+  return req.params.empresaId || req.tenant?.empresa_id || req.params.id;
 }
 
 function sucursalId(req) {
   return req.params.sucursalId || req.params.idSucursal;
+}
+
+function usuarioId(req) {
+  return req.params.userId || req.params.id;
 }
 
 function errorResponse(res, error) {
@@ -78,6 +82,33 @@ exports.cambiarEstado = async (req, res) => {
     return res.json({ success: true, data });
   } catch (error) {
     console.error('cambiarEstadoSucursal error:', error);
+    return errorResponse(res, error);
+  }
+};
+
+exports.listarUsuario = async (req, res) => {
+  try {
+    const data = await sucursalService.listarSucursalesUsuario(
+      empresaId(req),
+      usuarioId(req)
+    );
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error('listarSucursalesUsuario error:', error);
+    return errorResponse(res, error);
+  }
+};
+
+exports.actualizarUsuario = async (req, res) => {
+  try {
+    const data = await sucursalService.actualizarSucursalesUsuario(
+      empresaId(req),
+      usuarioId(req),
+      req.body
+    );
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error('actualizarSucursalesUsuario error:', error);
     return errorResponse(res, error);
   }
 };

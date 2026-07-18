@@ -297,6 +297,119 @@ async function cambiarEstadoSucursal(empresaId, sucursalId, activa) {
   });
 }
 
+function normalizarAsignacionSucursales(data = {}) {
+  const rawIds = data.sucursal_ids;
+  if (!Array.isArray(rawIds) || rawIds.length === 0) {
+    throw serviceError(
+      'El usuario debe tener al menos una sucursal asignada',
+      400,
+      'BRANCH_ASSIGNMENT_REQUIRED'
+    );
+  }
+  const sucursalIds = [...new Set(rawIds.map(value => positiveId(value, 'Sucursal')))];
+  if (data.predeterminada_id === undefined || data.predeterminada_id === null || data.predeterminada_id === '') {
+    throw serviceError(
+      'El usuario debe tener una sucursal predeterminada',
+      400,
+      'DEFAULT_BRANCH_REQUIRED'
+    );
+  }
+  const predeterminadaId = positiveId(data.predeterminada_id, 'Sucursal predeterminada');
+  if (!sucursalIds.includes(predeterminadaId)) {
+    throw serviceError(
+      'La sucursal predeterminada debe estar incluida en las sucursales asignadas',
+      400,
+      'DEFAULT_BRANCH_REQUIRED'
+    );
+  }
+  return { sucursalIds, predeterminadaId };
+}
+
+async function listarSucursalesUsuario(empresaId, usuarioId, connection = db) {
+  const companyId = positiveId(empresaId, 'Empresa');
+  const userId = positiveId(usuarioId, 'Usuario');
+  const [[usuario]] = await connection.query(
+    'SELECT id FROM users WHERE id = ? AND empresa_id = ? LIMIT 1',
+    [userId, companyId]
+  );
+  if (!usuario) throw serviceError('Usuario no encontrado', 404, 'USER_NOT_FOUND');
+
+  const [rows] = await connection.query(
+    `SELECT s.id, s.empresa_id, s.codigo, s.nombre, s.activa, s.es_principal,
+            us.es_predeterminada
+     FROM usuario_sucursales us
+     INNER JOIN sucursales s
+       ON s.id = us.sucursal_id AND s.empresa_id = us.empresa_id
+     WHERE us.usuario_id = ? AND us.empresa_id = ?
+     ORDER BY us.es_predeterminada DESC, s.es_principal DESC, s.nombre, s.id`,
+    [userId, companyId]
+  );
+  return rows;
+}
+
+async function guardarAsignacionSucursales(
+  empresaId,
+  usuarioId,
+  data,
+  connection
+) {
+  const companyId = positiveId(empresaId, 'Empresa');
+  const userId = positiveId(usuarioId, 'Usuario');
+  const { sucursalIds, predeterminadaId } = normalizarAsignacionSucursales(data);
+  const [[usuario]] = await connection.query(
+    'SELECT id FROM users WHERE id = ? AND empresa_id = ? FOR UPDATE',
+    [userId, companyId]
+  );
+  if (!usuario) throw serviceError('Usuario no encontrado', 404, 'USER_NOT_FOUND');
+
+  const placeholders = sucursalIds.map(() => '?').join(',');
+  const [sucursales] = await connection.query(
+    `SELECT id FROM sucursales
+     WHERE empresa_id = ? AND activa = 1 AND id IN (${placeholders})
+     FOR UPDATE`,
+    [companyId, ...sucursalIds]
+  );
+  if (sucursales.length !== sucursalIds.length) {
+    throw serviceError(
+      'Una o mas sucursales no existen, estan inactivas o pertenecen a otra empresa',
+      409,
+      'BRANCH_COMPANY_MISMATCH'
+    );
+  }
+
+  await connection.query(
+    'DELETE FROM usuario_sucursales WHERE usuario_id = ? AND empresa_id = ?',
+    [userId, companyId]
+  );
+  for (const branchId of sucursalIds) {
+    await connection.query(
+      `INSERT INTO usuario_sucursales
+       (usuario_id, sucursal_id, empresa_id, es_predeterminada)
+       VALUES (?, ?, ?, ?)`,
+      [userId, branchId, companyId, branchId === predeterminadaId ? 1 : 0]
+    );
+  }
+  return listarSucursalesUsuario(companyId, userId, connection);
+}
+
+async function actualizarSucursalesUsuario(empresaId, usuarioId, data, connection = null) {
+  const execute = conn => guardarAsignacionSucursales(empresaId, usuarioId, data, conn);
+  return connection ? execute(connection) : inTransaction(execute);
+}
+
+async function asignarSucursalPrincipalUsuario(empresaId, usuarioId, connection = null) {
+  const execute = async conn => {
+    const companyId = positiveId(empresaId, 'Empresa');
+    const principalResult = await asegurarSucursalPrincipal(companyId, conn);
+    const principal = principalResult.sucursal;
+    return guardarAsignacionSucursales(companyId, usuarioId, {
+      sucursal_ids: [principal.id],
+      predeterminada_id: principal.id,
+    }, conn);
+  };
+  return connection ? execute(connection) : inTransaction(execute);
+}
+
 module.exports = {
   contarSucursalesActivas,
   validarLimiteSucursales,
@@ -306,4 +419,7 @@ module.exports = {
   crearSucursal,
   editarSucursal,
   cambiarEstadoSucursal,
+  listarSucursalesUsuario,
+  actualizarSucursalesUsuario,
+  asignarSucursalPrincipalUsuario,
 };

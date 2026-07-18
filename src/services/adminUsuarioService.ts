@@ -35,6 +35,16 @@ export interface RolItem {
   total_usuarios: number;
 }
 
+export interface UsuarioSucursalItem {
+  id: number;
+  empresa_id: number;
+  codigo: string;
+  nombre: string;
+  activa: boolean | number;
+  es_principal: boolean | number;
+  es_predeterminada?: boolean | number;
+}
+
 export interface CreateUsuarioPayload {
   username?: string;
   email?: string;
@@ -46,6 +56,8 @@ export interface CreateUsuarioPayload {
   direccion?: string;
   roles: string[];
   foto?: File | null;
+  sucursalIds?: number[];
+  sucursalPredeterminadaId?: number;
 }
 
 export interface UpdateUsuarioPayload {
@@ -87,6 +99,10 @@ export const adminUsuarioService = {
     if (payload.dpi) form.append('dpi', payload.dpi);
     if (payload.direccion) form.append('direccion', payload.direccion);
     payload.roles.forEach(r => form.append('roles', r));
+    if (payload.sucursalIds?.length) {
+      form.append('sucursal_ids', JSON.stringify(payload.sucursalIds));
+      form.append('sucursal_predeterminada_id', String(payload.sucursalPredeterminadaId));
+    }
     if (payload.foto) form.append('foto_perfil', payload.foto);
     const { data } = await api.post('/admin/usuarios', form);
     return data.data;
@@ -132,5 +148,23 @@ export const adminUsuarioService = {
 
   async updateRol(id: number, payload: { descripcion?: string; activo?: boolean }): Promise<void> {
     await api.put(`/admin/roles/${id}`, payload);
+  },
+
+  async getSucursales(): Promise<UsuarioSucursalItem[]> {
+    const { data } = await api.get('/admin/sucursales');
+    return data.data;
+  },
+
+  async getUsuarioSucursales(id: number): Promise<UsuarioSucursalItem[]> {
+    const { data } = await api.get(`/admin/usuarios/${id}/sucursales`);
+    return data.data;
+  },
+
+  async updateUsuarioSucursales(
+    id: number,
+    payload: { sucursal_ids: number[]; predeterminada_id: number },
+  ): Promise<UsuarioSucursalItem[]> {
+    const { data } = await api.put(`/admin/usuarios/${id}/sucursales`, payload);
+    return data.data;
   },
 };
