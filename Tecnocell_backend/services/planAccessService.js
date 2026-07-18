@@ -591,11 +591,18 @@ async function obtenerConsumoEmpresa(empresaId, connection = db) {
        AND COALESCE(es_super_admin, 0) = 0`,
     [empresaId]
   );
+  const [[branches]] = await connection.query(
+    `SELECT COUNT(*) AS sucursales_activas
+     FROM sucursales
+     WHERE empresa_id = ? AND activa = 1`,
+    [empresaId]
+  );
 
   return {
     usuarios_totales: Number(users.usuarios_totales || 0),
     usuarios_activos: Number(users.usuarios_activos || 0),
     usuarios_inactivos: Number(users.usuarios_inactivos || 0),
+    sucursales_activas: Number(branches.sucursales_activas || 0),
   };
 }
 
@@ -624,7 +631,7 @@ async function obtenerResumenPlanEmpresa(empresaId, connection = db) {
         limite === null || limite === 0
           ? null
           : Math.round((usados / limite) * 100),
-      sucursales_usadas: null,
+      sucursales_usadas: consumo.sucursales_activas,
       sucursales_limite: planEmpresa.plan.max_sucursales,
     },
   };

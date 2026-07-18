@@ -5,6 +5,7 @@ const { verifySuperAdmin } = require('../middleware/superAdminMiddleware');
 const controller = require('../controllers/superAdminController');
 const subscriptionController = require('../controllers/subscriptionController');
 const planController = require('../controllers/planController');
+const sucursalController = require('../controllers/sucursalController');
 
 router.use(verifyToken);
 router.use(verifySuperAdmin);
@@ -22,6 +23,10 @@ router.post('/empresas/:id/suspender', subscriptionController.suspenderEmpresa);
 router.post('/empresas/:id/cancelar', subscriptionController.cancelarEmpresa);
 router.post('/empresas/:id/reactivar', subscriptionController.reactivarEmpresa);
 router.post('/empresas/:id/administrador', controller.createEmpresaAdministrador);
+router.get('/empresas/:id/sucursales', sucursalController.listar);
+router.post('/empresas/:id/sucursales', sucursalController.crear);
+router.put('/empresas/:id/sucursales/:sucursalId', sucursalController.editar);
+router.patch('/empresas/:id/sucursales/:sucursalId/estado', sucursalController.cambiarEstado);
 router.get('/empresas/:id/suscripcion', subscriptionController.getSuscripcion);
 router.patch('/empresas/:id/suscripcion', subscriptionController.updateSuscripcion);
 router.patch(

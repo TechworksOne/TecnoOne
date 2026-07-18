@@ -5,6 +5,7 @@ const { validatePhone } = require('../utils/phoneValidation');
 const superAdminAudit = require('../services/superAdminAuditService');
 const subscriptionAccess = require('../services/subscriptionAccessService');
 const planAccess = require('../services/planAccessService');
+const sucursalService = require('../services/sucursalService');
 
 const ESTADOS_EMPRESA = new Set(['demo', 'prueba', 'activa', 'suspendida', 'cancelada']);
 const ORDER_FIELDS = {
@@ -808,6 +809,10 @@ exports.createEmpresa = async (req, res) => {
         JSON.stringify(subscriptionData),
       ]
     );
+    const sucursalPrincipal = await sucursalService.asegurarSucursalPrincipal(
+      result.insertId,
+      connection
+    );
     await connection.commit();
 
     await superAdminAudit.registrar({
@@ -815,7 +820,11 @@ exports.createEmpresa = async (req, res) => {
       accion: 'CREAR_EMPRESA',
       entidad: 'EMPRESA',
       entidadId: result.insertId,
-      datosNuevos: { ...req.body, suscripcion: subscriptionData },
+      datosNuevos: {
+        ...req.body,
+        suscripcion: subscriptionData,
+        sucursal_principal_id: sucursalPrincipal.sucursal.id,
+      },
     });
     return res.status(201).json({ success: true, data: { id: result.insertId, slug, estado } });
   } catch (error) {
