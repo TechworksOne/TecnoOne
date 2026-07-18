@@ -347,6 +347,35 @@ async function listarSucursalesUsuario(empresaId, usuarioId, connection = db) {
   return rows;
 }
 
+async function listarSucursalesActivasUsuario(empresaId, usuarioId, connection = db) {
+  const companyId = positiveId(empresaId, 'Empresa');
+  const userId = positiveId(usuarioId, 'Usuario');
+  const [[usuario]] = await connection.query(
+    'SELECT id FROM users WHERE id = ? AND empresa_id = ? LIMIT 1',
+    [userId, companyId]
+  );
+  if (!usuario) throw serviceError('Usuario no encontrado', 404, 'USER_NOT_FOUND');
+
+  const [rows] = await connection.query(
+    `SELECT s.id, s.empresa_id, s.codigo, s.nombre, s.direccion,
+            s.es_principal, us.es_predeterminada
+     FROM usuario_sucursales us
+     INNER JOIN sucursales s
+       ON s.id = us.sucursal_id AND s.empresa_id = us.empresa_id
+     WHERE us.usuario_id = ? AND us.empresa_id = ? AND s.activa = 1
+     ORDER BY us.es_predeterminada DESC, s.es_principal DESC, s.nombre, s.id`,
+    [userId, companyId]
+  );
+  if (!rows.length) {
+    throw serviceError(
+      'El usuario no tiene sucursales activas asignadas',
+      409,
+      'USER_BRANCH_REQUIRED'
+    );
+  }
+  return rows;
+}
+
 async function guardarAsignacionSucursales(
   empresaId,
   usuarioId,
@@ -420,6 +449,7 @@ module.exports = {
   editarSucursal,
   cambiarEstadoSucursal,
   listarSucursalesUsuario,
+  listarSucursalesActivasUsuario,
   actualizarSucursalesUsuario,
   asignarSucursalPrincipalUsuario,
 };
