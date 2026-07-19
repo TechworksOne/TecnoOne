@@ -8,7 +8,7 @@ const pool = {
 require.cache[require.resolve('../config/database')] = { exports: pool };
 const service = require('../services/sucursalService');
 
-function makeConnection({ limit = 2, active = 0, principal = null, branch = null } = {}) {
+function makeConnection({ limit = 2, total = 0, active = 0, principal = null, branch = null } = {}) {
   const calls = [];
   const parameters = [];
   return {
@@ -24,8 +24,11 @@ function makeConnection({ limit = 2, active = 0, principal = null, branch = null
     async query(sql, params = []) {
       calls.push(sql);
       parameters.push(params);
-      if (/FROM suscripciones s/.test(sql)) {
-        return [[{ plan_id: 5, plan_codigo: 'multi', max_sucursales: limit }]];
+      if (/FROM empresas e/.test(sql) && /limite_sucursales/.test(sql)) {
+        return [[{ limite_sucursales: limit, plan_id: 5, plan_codigo: 'multi', max_sucursales: 99 }]];
+      }
+      if (/SELECT id FROM sucursales\s+WHERE empresa_id = \?(?: FOR UPDATE)?/.test(sql) && !/activa = 1/.test(sql)) {
+        return [Array.from({ length: total }, (_, index) => ({ id: index + 1 }))];
       }
       if (/SELECT id FROM sucursales\s+WHERE empresa_id = \? AND activa = 1/.test(sql)) {
         return [Array.from({ length: active }, (_, index) => ({ id: index + 1 }))];
@@ -50,18 +53,18 @@ function makeConnection({ limit = 2, active = 0, principal = null, branch = null
 }
 
 async function main() {
-  connection = makeConnection({ limit: 2, active: 2 });
+  connection = makeConnection({ limit: 2, total: 2 });
   await assert.rejects(
     service.validarLimiteSucursales(10),
-    error => error.code === 'PLAN_LIMIT_CONFLICT' && error.used === 2 && error.limit === 2
+    error => error.code === 'BRANCH_LIMIT_REACHED' && error.used === 2 && error.limit === 2 && error.message === 'La empresa alcanzó el límite de sucursales permitido.'
   );
 
-  connection = makeConnection({ limit: null, active: 50 });
-  const unlimited = await service.validarLimiteSucursales(10);
-  assert.strictEqual(unlimited.permitido, true);
-  assert.strictEqual(unlimited.limit, null);
+  connection = makeConnection({ limit: 3, total: 2 });
+  const available = await service.validarLimiteSucursales(10);
+  assert.strictEqual(available.permitido, true);
+  assert.strictEqual(available.limit, 3);
 
-  connection = makeConnection({ limit: 2, active: 0, principal: null });
+  connection = makeConnection({ limit: 2, total: 0, principal: null });
   const firstBranch = await service.crearSucursal(10, {
     codigo: 'centro',
     nombre: 'Sucursal Centro',
@@ -70,7 +73,7 @@ async function main() {
   const insertIndex = connection.calls.findIndex(sql => /INSERT INTO sucursales/.test(sql));
   assert.strictEqual(connection.parameters[insertIndex].at(-1), 1);
 
-  connection = makeConnection({ limit: 2, active: 0 });
+  connection = makeConnection({ limit: 2, total: 0 });
   const ensured = await service.asegurarSucursalPrincipal(10);
   assert.strictEqual(ensured.creada, true);
   assert.strictEqual(ensured.sucursal.id, 77);
@@ -81,15 +84,13 @@ async function main() {
 
   connection = makeConnection({
     limit: 1,
+    total: 2,
     active: 1,
     principal: { id: 1, empresa_id: 10, activa: 1, es_principal: 1 },
     branch: { id: 77, empresa_id: 10, codigo: 'norte', nombre: 'Norte', activa: 0, es_principal: 0 },
   });
-  await assert.rejects(
-    service.editarSucursal(10, 77, { es_principal: true }),
-    error => error.code === 'PLAN_LIMIT_CONFLICT'
-  );
-  assert(!connection.calls.some(sql => /SET es_principal = 0/.test(sql)));
+  await service.editarSucursal(10, 77, { es_principal: true });
+  assert(connection.calls.some(sql => /SET es_principal = 0/.test(sql)));
 
   connection = makeConnection({
     limit: 2,

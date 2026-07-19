@@ -60,6 +60,7 @@ export default function SuperAdminEmpresaFormPage() {
       telefono: '',
       email: '',
       direccion: '',
+      limite_sucursales: 1,
     });
 
   const [saving, setSaving] =
@@ -159,6 +160,10 @@ export default function SuperAdminEmpresaFormPage() {
 
       return;
     }
+    if (!Number.isInteger(Number(form.limite_sucursales)) || Number(form.limite_sucursales) < 1) {
+      setError('La cantidad máxima de sucursales debe ser un entero mayor o igual a 1.');
+      return;
+    }
 
     setSaving(true);
 
@@ -174,6 +179,7 @@ export default function SuperAdminEmpresaFormPage() {
               Number(
                 form.dias_gracia
               ),
+            limite_sucursales: Number(form.limite_sucursales),
           });
 
       navigate(
@@ -348,6 +354,19 @@ export default function SuperAdminEmpresaFormPage() {
                   event.target.value,
               })
             }
+            className={inputClass}
+          />
+        </label>
+
+        <label className="text-sm font-semibold">
+          Cantidad máxima de sucursales
+          <input
+            type="number"
+            min={1}
+            step={1}
+            required
+            value={form.limite_sucursales}
+            onChange={event => setForm({ ...form, limite_sucursales: Number(event.target.value) })}
             className={inputClass}
           />
         </label>

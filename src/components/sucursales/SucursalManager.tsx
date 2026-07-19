@@ -99,8 +99,7 @@ export default function SucursalManager({
     }
   }
 
-  const activeCount = rows.filter(row => Boolean(row.activa)).length;
-  const displayedUsed = loading && used != null ? used : activeCount;
+  const displayedUsed = loading && used != null ? used : rows.length;
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-[#191a1d]">
@@ -109,7 +108,7 @@ export default function SucursalManager({
           <h2 className="flex items-center gap-2 font-bold"><Building2 size={19} />{title}</h2>
           {(used !== undefined || limit !== undefined) && (
             <p className="mt-1 text-sm text-slate-500">
-              Activas: {displayedUsed} de {limit == null ? 'ilimitadas' : limit}
+              Registradas: {displayedUsed} de {limit == null ? 'ilimitadas' : limit}
             </p>
           )}
         </div>
