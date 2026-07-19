@@ -27,6 +27,8 @@ dist/
 !Tecnocell_backend/scripts/migration_super_admin_sprint_1_15_1.sql
 !Tecnocell_backend/scripts/migration_suscripciones_sprint_1_15_2.sql
 !Tecnocell_backend/scripts/migration_sucursales_sprint_1_19.sql
+!Tecnocell_backend/scripts/migration_cajas_sprint_1_19.sql
+!Tecnocell_backend/scripts/migration_limite_sucursales_empresa_sprint_1_19.sql
 !Tecnocell_backend/scripts/migration_empresas_config_saas_sprint_1_9_12.sql
 backups_codigo/
 backups_pre_pull_*

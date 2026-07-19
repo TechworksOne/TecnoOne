@@ -9,6 +9,9 @@ import {
 } from '../../services/superAdminService';
 import SucursalManager from '../../components/sucursales/SucursalManager';
 import { superAdminSucursalApi } from '../../services/sucursalService';
+import type { Sucursal } from '../../services/sucursalService';
+import CajaManager from '../../components/cajas/CajaManager';
+import { superAdminCajaApi } from '../../services/cajaCatalogoService';
 
 const badgeStyles: Record<string, string> = {
   prueba: 'bg-violet-100 text-violet-700',
@@ -96,6 +99,11 @@ export default function SuperAdminEmpresaDetailPage() {
     () => superAdminSucursalApi(id),
     [id]
   );
+  const cajasApi = useMemo(() => superAdminCajaApi(id), [id]);
+  const [sucursalesCajas, setSucursalesCajas] = useState<Sucursal[]>([]);
+  useEffect(() => {
+    void sucursalesApi.listar().then(setSucursalesCajas).catch(() => setSucursalesCajas([]));
+  }, [sucursalesApi]);
 
   const [searchParams] =
     useSearchParams();
@@ -272,6 +280,10 @@ export default function SuperAdminEmpresaDetailPage() {
     if (!empresa) return;
 
     clearAlerts();
+    if (!Number.isInteger(Number(empresa.limite_sucursales)) || Number(empresa.limite_sucursales) < 1) {
+      setError('La cantidad máxima de sucursales debe ser un entero mayor o igual a 1.');
+      return;
+    }
 
     try {
       await superAdminService
@@ -649,6 +661,20 @@ export default function SuperAdminEmpresaDetailPage() {
           </label>
         ))}
 
+        <label className="text-xs font-bold uppercase text-slate-500">
+          Cantidad máxima de sucursales
+          <input
+            type="number"
+            min={1}
+            step={1}
+            disabled={!edit}
+            value={empresa.limite_sucursales}
+            onChange={event => setEmpresa({ ...empresa, limite_sucursales: Number(event.target.value) })}
+            className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-transparent px-3 text-sm font-normal text-slate-900 disabled:opacity-70 dark:border-slate-700 dark:text-slate-100"
+          />
+          <span className="mt-1 block normal-case font-normal">Sucursales: {Number(empresa.total_sucursales || 0)} de {empresa.limite_sucursales}</span>
+        </label>
+
         {edit && (
           <div className="text-right sm:col-span-2">
             <button
@@ -663,9 +689,11 @@ export default function SuperAdminEmpresaDetailPage() {
 
       <SucursalManager
         api={sucursalesApi}
-        used={suscripcion.consumo?.sucursales_usadas}
-        limit={suscripcion.consumo?.sucursales_limite}
+        used={Number(empresa.total_sucursales || 0)}
+        limit={empresa.limite_sucursales}
       />
+
+      <CajaManager api={cajasApi} sucursales={sucursalesCajas} />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-[#191a1d]">
         <div className="flex flex-wrap items-center justify-between gap-3">

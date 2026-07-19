@@ -62,13 +62,13 @@ export default function SuperAdminEmpresasPage() {
         <div className="overflow-x-auto">
           <table className="min-w-[1100px] w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500 dark:bg-slate-900">
-              <tr>{['Empresa', 'NIT', 'Estado', 'Suscripción', 'Vencimiento', 'Días', 'Plan', 'Usuarios', 'Acciones'].map(item => <th key={item} className="px-4 py-3">{item}</th>)}</tr>
+              <tr>{['Empresa', 'NIT', 'Estado', 'Suscripción', 'Vencimiento', 'Días', 'Plan', 'Usuarios', 'Sucursales', 'Acciones'].map(item => <th key={item} className="px-4 py-3">{item}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
               {loading ? (
-                <tr><td colSpan={9} className="p-10 text-center text-slate-500">Cargando…</td></tr>
+                <tr><td colSpan={10} className="p-10 text-center text-slate-500">Cargando…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={9} className="p-10 text-center text-slate-500">No hay empresas.</td></tr>
+                <tr><td colSpan={10} className="p-10 text-center text-slate-500">No hay empresas.</td></tr>
               ) : rows.map(row => {
                 const [badge, badgeClass] = subscriptionBadge(row);
                 return (
@@ -81,6 +81,7 @@ export default function SuperAdminEmpresasPage() {
                     <td className="px-4 py-3">{row.dias_restantes ?? '—'}</td>
                     <td className="px-4 py-3">{row.suscripcion_plan || row.plan}</td>
                     <td className="px-4 py-3">{row.total_usuarios}</td>
+                    <td className="px-4 py-3">Sucursales: {Number(row.total_sucursales || 0)} de {row.limite_sucursales}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <Link title="Ver" to={`/superadmin/empresas/${row.id}`} className="rounded-lg border p-2 dark:border-slate-700"><Eye size={15} /></Link>

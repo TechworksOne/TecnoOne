@@ -1,0 +1,16 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const read = file => fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
+const types = read('src/services/superAdminService.ts');
+const form = read('src/pages/SuperAdmin/SuperAdminEmpresaFormPage.tsx');
+const detail = read('src/pages/SuperAdmin/SuperAdminEmpresaDetailPage.tsx');
+const list = read('src/pages/SuperAdmin/SuperAdminEmpresasPage.tsx');
+assert.match(types, /limite_sucursales: number/);
+assert.match(types, /total_sucursales: number/);
+assert.match(form, /Cantidad máxima de sucursales/);
+assert.match(form, /min=\{1\}/);
+assert.match(detail, /Cantidad máxima de sucursales/);
+assert.match(detail, /Sucursales: \{Number\(empresa\.total_sucursales/);
+assert.match(list, /Sucursales: \{Number\(row\.total_sucursales/);
+console.log('OK limiteSucursalesFrontend: tipos, alta, edicion y consumo calculado');

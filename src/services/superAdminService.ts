@@ -42,6 +42,8 @@ export interface EmpresaGlobal {
   email: string | null;
   direccion: string | null;
   total_usuarios: number;
+  total_sucursales: number;
+  limite_sucursales: number;
   created_at: string;
   administrador_principal?: {
     id: number;

@@ -16,6 +16,7 @@ export const PERMISSIONS = {
   AUDITORIA_VER: 'auditoria.ver',
   REPORTES_VER: 'reportes.ver',
   CAJA_VER: 'caja.ver',
+  CAJAS_VER: 'cajas.ver',
 } as const;
 
 /** Rutas exclusivas de ADMINISTRADOR */

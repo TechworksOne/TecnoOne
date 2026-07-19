@@ -66,7 +66,7 @@ function validDate(value) {
 function empresaSelect() {
   return `
     SELECT e.id, e.nombre, e.nombre_comercial, e.razon_social, e.nit,
-           e.slug, e.estado, e.plan, e.fecha_inicio, e.fecha_vencimiento,
+           e.slug, e.estado, e.plan, e.limite_sucursales, e.fecha_inicio, e.fecha_vencimiento,
            e.telefono, COALESCE(NULLIF(e.correo, ''), e.email) AS email,
            e.direccion, e.logo_url, e.color_principal, e.moneda_codigo,
            e.moneda_simbolo, e.zona_horaria, e.created_at, e.updated_at,
@@ -95,7 +95,8 @@ function empresaSelect() {
               AND DATEDIFF(s.fecha_vencimiento, CURDATE()) BETWEEN 0 AND s.proxima_a_vencer_dias
              THEN 1 ELSE 0
            END AS proxima_a_vencer,
-           COUNT(DISTINCT u.id) AS total_usuarios
+           COUNT(DISTINCT u.id) AS total_usuarios,
+           (SELECT COUNT(*) FROM sucursales sx WHERE sx.empresa_id = e.id) AS total_sucursales
     FROM empresas e
     LEFT JOIN suscripciones s ON s.empresa_id = e.id
     LEFT JOIN users u
@@ -295,6 +296,28 @@ exports.updateEmpresa = async (req, res) => {
     if (phone && !phone.ok) {
       return res.status(400).json({ success: false, message: phone.message });
     }
+    let limiteSucursales;
+    if (req.body?.limite_sucursales !== undefined) {
+      limiteSucursales = Number(req.body.limite_sucursales);
+      if (!Number.isInteger(limiteSucursales) || limiteSucursales < 1) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_BRANCH_LIMIT',
+          message: 'limite_sucursales debe ser un entero mayor o igual a 1',
+        });
+      }
+      const [[usage]] = await db.query(
+        'SELECT COUNT(*) AS total FROM sucursales WHERE empresa_id = ?',
+        [req.params.id]
+      );
+      if (limiteSucursales < Number(usage.total)) {
+        return res.status(409).json({
+          success: false,
+          code: 'BRANCH_LIMIT_BELOW_USAGE',
+          message: 'El límite no puede ser menor que la cantidad de sucursales existentes.',
+        });
+      }
+    }
 
     const allowed = {
       nombre: text(req.body?.nombre, 150),
@@ -312,6 +335,7 @@ exports.updateEmpresa = async (req, res) => {
       moneda_codigo: text(req.body?.moneda_codigo, 10),
       moneda_simbolo: text(req.body?.moneda_simbolo, 10),
       zona_horaria: text(req.body?.zona_horaria, 80),
+      limite_sucursales: limiteSucursales,
     };
     const fields = [];
     const params = [];
@@ -694,6 +718,7 @@ exports.createEmpresa = async (req, res) => {
     const fechaInicio = text(req.body?.fecha_inicio, 10) || subscriptionAccess.todayString();
     const fechaVencimiento = text(req.body?.fecha_vencimiento, 10);
     const diasGracia = req.body?.dias_gracia === undefined ? 0 : Number(req.body.dias_gracia);
+    const limiteSucursales = Number(req.body?.limite_sucursales);
 
     if (!nombre || !slug) {
       return res.status(400).json({ success: false, message: 'Nombre y slug son requeridos' });
@@ -709,6 +734,13 @@ exports.createEmpresa = async (req, res) => {
     }
     if (!Number.isInteger(diasGracia) || diasGracia < 0) {
       return res.status(400).json({ success: false, message: 'dias_gracia debe ser un entero mayor o igual a cero' });
+    }
+    if (!Number.isInteger(limiteSucursales) || limiteSucursales < 1) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_BRANCH_LIMIT',
+        message: 'limite_sucursales debe ser un entero mayor o igual a 1',
+      });
     }
     if (fechaVencimiento && subscriptionAccess.diffDays(fechaInicio, fechaVencimiento) < 0) {
       return res.status(400).json({ success: false, message: 'fecha_inicio no puede ser posterior a fecha_vencimiento' });
@@ -735,8 +767,9 @@ exports.createEmpresa = async (req, res) => {
       `INSERT INTO empresas (
         nombre, nombre_comercial, razon_social, nit, slug, estado, plan,
         fecha_inicio, fecha_vencimiento, telefono, email, correo, direccion,
-        color_primario, color_principal, moneda_codigo, moneda_simbolo, zona_horaria
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        color_primario, color_principal, moneda_codigo, moneda_simbolo, zona_horaria,
+        limite_sucursales
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         nombre,
         text(req.body?.nombre_comercial, 150),
@@ -756,6 +789,7 @@ exports.createEmpresa = async (req, res) => {
         text(req.body?.moneda_codigo, 10) || 'GTQ',
         text(req.body?.moneda_simbolo, 10) || 'Q',
         text(req.body?.zona_horaria, 80) || 'America/Guatemala',
+        limiteSucursales,
       ]
     );
 

@@ -40,11 +40,11 @@ async function inTransaction(work) {
   }
 }
 
-async function contarSucursalesActivas(empresaId, connection = db, { lock = false } = {}) {
+async function contarSucursales(empresaId, connection = db, { lock = false } = {}) {
   const id = positiveId(empresaId, 'Empresa');
   const [rows] = await connection.query(
     `SELECT id FROM sucursales
-     WHERE empresa_id = ? AND activa = 1${lock ? ' FOR UPDATE' : ''}`,
+     WHERE empresa_id = ?${lock ? ' FOR UPDATE' : ''}`,
     [id]
   );
   return rows.length;
@@ -53,23 +53,26 @@ async function contarSucursalesActivas(empresaId, connection = db, { lock = fals
 async function obtenerLimiteSucursales(empresaId, connection = db) {
   const id = positiveId(empresaId, 'Empresa');
   const [rows] = await connection.query(
-    `SELECT p.id AS plan_id, p.codigo AS plan_codigo, p.max_sucursales
-     FROM suscripciones s
-     INNER JOIN planes p ON p.id = s.plan_id
-     WHERE s.empresa_id = ?
+    `SELECT e.limite_sucursales, p.id AS plan_id, p.codigo AS plan_codigo,
+            p.max_sucursales
+     FROM empresas e
+     LEFT JOIN suscripciones s ON s.empresa_id = e.id
+     LEFT JOIN planes p ON p.id = s.plan_id
+     WHERE e.id = ?
      LIMIT 1`,
     [id]
   );
   if (!rows.length) {
     throw serviceError(
-      'La empresa no tiene un plan configurado',
-      409,
-      'EMPRESA_PLAN_NOT_FOUND'
+      'Empresa no encontrada',
+      404,
+      'EMPRESA_NOT_FOUND'
     );
   }
   return {
     plan_id: Number(rows[0].plan_id),
     plan_codigo: rows[0].plan_codigo,
+    limite_sucursales: Number(rows[0].limite_sucursales),
     max_sucursales: rows[0].max_sucursales == null
       ? null
       : Number(rows[0].max_sucursales),
@@ -81,22 +84,26 @@ async function validarLimiteSucursales(
   connection = db,
   { incremento = 1 } = {}
 ) {
-  // Una conexion transaccional no debe ejecutar consultas concurrentes.
+  // Serializa creaciones concurrentes incluso cuando la empresa aun no tiene
+  // sucursales: bloquear solo filas de sucursales no protege el conjunto vacio.
+  if (connection !== db) {
+    await connection.query('SELECT id FROM empresas WHERE id = ? FOR UPDATE', [positiveId(empresaId, 'Empresa')]);
+  }
   const plan = await obtenerLimiteSucursales(empresaId, connection);
-  const usadas = await contarSucursalesActivas(
+  const usadas = await contarSucursales(
     empresaId,
     connection,
     { lock: connection !== db }
   );
-  if (plan.max_sucursales !== null && usadas + incremento > plan.max_sucursales) {
+  if (usadas + incremento > plan.limite_sucursales) {
     throw serviceError(
-      'La empresa alcanzo el limite de sucursales activas de su plan',
+      'La empresa alcanzó el límite de sucursales permitido.',
       409,
-      'PLAN_LIMIT_CONFLICT',
+      'BRANCH_LIMIT_REACHED',
       {
         resource: 'sucursales',
         used: usadas,
-        limit: plan.max_sucursales,
+        limit: plan.limite_sucursales,
         plan: plan.plan_codigo,
       }
     );
@@ -104,10 +111,8 @@ async function validarLimiteSucursales(
   return {
     permitido: true,
     used: usadas,
-    limit: plan.max_sucursales,
-    available: plan.max_sucursales === null
-      ? null
-      : Math.max(0, plan.max_sucursales - usadas - incremento),
+    limit: plan.limite_sucursales,
+    available: Math.max(0, plan.limite_sucursales - usadas - incremento),
     plan,
   };
 }
@@ -142,7 +147,6 @@ async function asegurarSucursalPrincipal(empresaId, connection = null) {
     let sucursalId;
     if (existing.length) {
       sucursalId = existing[0].id;
-      if (!existing[0].activa) await validarLimiteSucursales(id, conn);
       await conn.query(
         'UPDATE sucursales SET es_principal = 1, activa = 1 WHERE id = ? AND empresa_id = ?',
         [sucursalId, id]
@@ -231,7 +235,6 @@ async function editarSucursal(empresaId, sucursalId, data) {
     if (!nombre || !codigo) throw serviceError('Datos de sucursal no validos', 400, 'INVALID_BRANCH_DATA');
 
     if (data?.es_principal === true && !current.es_principal) {
-      if (!current.activa) await validarLimiteSucursales(id, connection);
       await connection.query(
         'UPDATE sucursales SET es_principal = 0 WHERE empresa_id = ? AND es_principal = 1',
         [id]
@@ -272,10 +275,12 @@ async function cambiarEstadoSucursal(empresaId, sucursalId, activa) {
     const nextActive = Boolean(activa);
     if (Boolean(current.activa) === nextActive) return current;
 
-    if (nextActive) {
-      await validarLimiteSucursales(id, connection);
-    } else if (current.es_principal) {
-      const activas = await contarSucursalesActivas(id, connection, { lock: true });
+    if (!nextActive && current.es_principal) {
+      const [sucursalesActivas] = await connection.query(
+        'SELECT id FROM sucursales WHERE empresa_id = ? AND activa = 1 FOR UPDATE',
+        [id]
+      );
+      const activas = sucursalesActivas.length;
       if (activas <= 1) {
         throw serviceError(
           'No se puede desactivar la unica sucursal activa principal',
@@ -440,7 +445,8 @@ async function asignarSucursalPrincipalUsuario(empresaId, usuarioId, connection 
 }
 
 module.exports = {
-  contarSucursalesActivas,
+  contarSucursales,
+  contarSucursalesActivas: contarSucursales,
   validarLimiteSucursales,
   obtenerSucursalPrincipal,
   asegurarSucursalPrincipal,
