@@ -1,0 +1,18 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const routes = fs.readFileSync(path.join(__dirname, '..', 'routes', 'ventaRoutes.js'), 'utf8');
+const controller = fs.readFileSync(path.join(__dirname, '..', 'controllers', 'ventaController.js'), 'utf8');
+assert.match(routes, /router\.use\(branchScope\)/);
+assert.match(controller, /saleScopeClause\(req\.branchScope/);
+assert.match(controller, /requireSpecific\(req\.branchScope\)/);
+assert.match(controller, /applySale\(connection/);
+assert.match(controller, /reverseSale\(connection/);
+assert.match(controller, /registerFinancialMovement\(connection/);
+assert.match(controller, /reverseFinancialMovements\(connection/);
+assert.doesNotMatch(controller, /Error al registrar en caja \(no crÃ­tico\)/);
+assert.match(controller, /LIMIT 1 FOR UPDATE/);
+assert.doesNotMatch(controller, /UPDATE productos[\s\S]{0,80}SET stock/);
+assert.doesNotMatch(controller, /UPDATE repuestos[\s\S]{0,80}SET stock/);
+assert.doesNotMatch(controller, /req\.body\.(empresa_id|sucursal_id|allowedSucursalIds)/);
+console.log('OK ventasMultisucursalRoutes: branchScope, ID scoped, stock nuevo y caja validada');

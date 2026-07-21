@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search, Eye, Printer, FileText, ShoppingBag, DollarSign,
@@ -21,6 +21,8 @@ import type { VentaData, VentaEstadisticas } from '../../services/ventaService';
 import { formatDate } from '../../lib/format';
 import { printSaleReceipt } from '../../lib/printSaleReceipt';
 import { getImageUrl } from '../../utils/getImageUrl';
+import { useSucursalContext } from '../../store/useSucursalContext';
+import { empresaCajaApi, type CajaCatalogo } from '../../services/cajaCatalogoService';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -69,6 +71,12 @@ export default function SalesPage() {
   const canEditPayments = hasPermission('ventas.editar');
   const canCancelSales = hasPermission('ventas.anular');
   const { empresa, loadEmpresa } = useEmpresa();
+  const branchMode = useSucursalContext((state) => state.mode);
+  const sucursalActiva = useSucursalContext((state) => state.sucursalActiva);
+  const contextVersion = useSucursalContext((state) => state.contextVersion);
+  const ventasSequence = useRef(0);
+  const statsSequence = useRef(0);
+  const readOnlyConsolidated = branchMode === 'consolidated';
 
   useEffect(() => {
     loadEmpresa();
@@ -108,6 +116,8 @@ export default function SalesPage() {
   const [pagoComprobanteUrl, setPagoComprobanteUrl] = useState('');
   const [pagoComprobanteUploading, setPagoComprobanteUploading] = useState(false);
   const [pagoLoading, setPagoLoading] = useState(false);
+  const [cajas, setCajas] = useState<CajaCatalogo[]>([]);
+  const [pagoCajaId, setPagoCajaId] = useState('');
 
   // ── Load ────────────────────────────────────────────────────────────────
 
@@ -118,6 +128,7 @@ export default function SalesPage() {
   }, [search]);
 
   const loadVentas = useCallback(async () => {
+    const sequence = ++ventasSequence.current;
     setLoading(true);
     try {
       const dateRange = filterDate ? getDateRange(filterDate) : null;
@@ -130,17 +141,20 @@ export default function SalesPage() {
         ...(!filterDate && fechaHasta && { fecha_hasta: fechaHasta }),
       };
       const data = await ventaService.getAllVentas(filters);
+      if (sequence !== ventasSequence.current) return;
       setVentas(data);
     } catch {
       toast.add('Error al cargar ventas', 'error');
     } finally {
-      setLoading(false);
+      if (sequence === ventasSequence.current) setLoading(false);
     }
   }, [filterEstado, filterMetodo, debouncedSearch, filterDate, fechaDesde, fechaHasta, toast]);
 
   const loadStats = useCallback(async () => {
+    const sequence = ++statsSequence.current;
     try {
       const data = await ventaService.getEstadisticas();
+      if (sequence !== statsSequence.current) return;
       setStats(data);
     } catch {
       // stats are non-critical
@@ -148,15 +162,36 @@ export default function SalesPage() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    ventasSequence.current += 1;
+    statsSequence.current += 1;
+    setVentas([]);
+    setStats(null);
+    setSelectedVenta(null);
+    setShowDetail(false);
+    setShowPagoModal(false);
+    setShowAnularDialog(false);
+    setShowQuotePicker(false);
+    setShowNuevaVentaModal(false);
+    setShowSaleForm(false);
     loadVentas();
     loadStats();
-  }, [loadVentas, loadStats]);
+    if (branchMode === 'specific') {
+      empresaCajaApi.listar()
+        .then(rows => { if (!cancelled) setCajas(rows.filter(row => Boolean(row.activa))); })
+        .catch(() => { if (!cancelled) setCajas([]); });
+    } else {
+      setCajas([]);
+    }
+    return () => { cancelled = true; };
+  }, [loadVentas, loadStats, contextVersion, branchMode]);
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
   const openDetail = (v: VentaData) => { setSelectedVenta(v); setShowDetail(true); };
 
   const openPago = (v: VentaData) => {
+    if (readOnlyConsolidated) return;
     setSelectedVenta(v);
     const saldo = (v.saldo_pendiente ?? (v.total - (v.monto_pagado ?? 0)));
     setPagoMonto((saldo / 100).toFixed(2));
@@ -164,10 +199,12 @@ export default function SalesPage() {
     setPagoRef('');
     setPagoComprobanteUrl('');
     setPagoComprobanteUploading(false);
+    setPagoCajaId('');
     setShowPagoModal(true);
   };
 
   const openAnular = (v: VentaData) => {
+    if (readOnlyConsolidated) return;
     setAnularTarget(v);
     setMotivo('');
     setShowAnularDialog(true);
@@ -277,6 +314,11 @@ export default function SalesPage() {
       return;
     }
 
+    if (pagoMetodo === 'EFECTIVO' && !pagoCajaId) {
+      toast.add('Selecciona una caja activa de la sucursal', 'error');
+      return;
+    }
+
     setPagoLoading(true);
     try {
       await ventaService.registrarPago(selectedVenta.id!, {
@@ -299,6 +341,7 @@ export default function SalesPage() {
         referencia: pagoRef || undefined,
         comprobanteUrl: pagoComprobanteUrl || undefined,
         usuario_id: user?.id,
+        caja_id: pagoMetodo === 'EFECTIVO' ? Number(pagoCajaId) : undefined,
       });
       toast.add('Pago registrado correctamente', 'success');
       setShowPagoModal(false);
@@ -359,14 +402,19 @@ export default function SalesPage() {
           title="Gestión de Ventas"
           subtitle="Control y seguimiento de todas las ventas"
         />
+        <p className="text-xs font-semibold text-[#2EA7D8] self-center">
+          {readOnlyConsolidated
+            ? 'Todas las sucursales · solo consulta'
+            : `Sucursal: ${sucursalActiva?.nombre || 'sin seleccionar'}`}
+        </p>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={() => { loadVentas(); loadStats(); }} title="Actualizar">
             <RefreshCw size={16} />
           </Button>
-          <Button onClick={() => setShowQuotePicker(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+          <Button disabled={readOnlyConsolidated} onClick={() => setShowQuotePicker(true)} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white">
             <FileText size={16} /> Desde Cotización
           </Button>
-          <Button onClick={() => setShowNuevaVentaModal(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+          <Button disabled={readOnlyConsolidated} onClick={() => setShowNuevaVentaModal(true)} className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white">
             <Plus size={16} /> Nueva Venta
           </Button>
         </div>
@@ -481,10 +529,10 @@ export default function SalesPage() {
           description={hasFilters ? 'Ajusta los filtros de búsqueda' : 'Crea una nueva venta directa o convierte una cotización'}
           action={
             <div className="flex gap-3 flex-wrap justify-center">
-              <Button onClick={() => setShowNuevaVentaModal(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              <Button disabled={readOnlyConsolidated} onClick={() => setShowNuevaVentaModal(true)} className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white">
                 <Plus size={16} /> Nueva Venta
               </Button>
-              <Button onClick={() => setShowQuotePicker(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+              <Button disabled={readOnlyConsolidated} onClick={() => setShowQuotePicker(true)} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white">
                 <FileText size={16} /> Desde Cotización
               </Button>
             </div>
@@ -763,7 +811,7 @@ export default function SalesPage() {
               <Button variant="ghost" onClick={() => handlePrint(selectedVenta)} className="flex-1">
                 <Printer size={14} /> Imprimir
               </Button>
-              {canEditPayments && (selectedVenta.estado === 'PENDIENTE' || selectedVenta.estado === 'PARCIAL') && (
+              {!readOnlyConsolidated && canEditPayments && (selectedVenta.estado === 'PENDIENTE' || selectedVenta.estado === 'PARCIAL') && (
                 <Button
                   onClick={() => { setShowDetail(false); setTimeout(() => openPago(selectedVenta), 100); }}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -771,7 +819,7 @@ export default function SalesPage() {
                   <CreditCard size={14} /> Registrar Pago
                 </Button>
               )}
-              {canCancelSales && selectedVenta.estado !== 'ANULADA' && (
+              {!readOnlyConsolidated && canCancelSales && selectedVenta.estado !== 'ANULADA' && (
                 <Button
                   variant="ghost"
                   onClick={() => { setShowDetail(false); setTimeout(() => openAnular(selectedVenta), 100); }}
@@ -851,6 +899,25 @@ export default function SalesPage() {
                 <option value="TRANSFERENCIA">Transferencia</option>
               </select>
             </div>
+
+            {pagoMetodo === 'EFECTIVO' && (
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">
+                  Caja de la sucursal <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={pagoCajaId}
+                  onChange={e => setPagoCajaId(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#48B9E6]/40 transition-colors"
+                  style={{ background: 'var(--color-input-bg)', color: 'var(--color-text)', borderColor: 'var(--color-border)' }}
+                >
+                  <option value="">Selecciona una caja</option>
+                  {cajas.map(caja => (
+                    <option key={caja.id} value={caja.id}>{caja.nombre} ({caja.codigo})</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {(pagoMetodo === 'TARJETA' || pagoMetodo === 'TRANSFERENCIA') && (
               <div>

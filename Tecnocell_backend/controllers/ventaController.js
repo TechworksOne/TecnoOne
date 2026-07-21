@@ -10,6 +10,7 @@ const {
 } = require('../utils/uploadSecurity');
 const { validatePhone } = require('../utils/phoneValidation');
 const auditoriaService = require('../services/auditoriaService');
+const saleInventoryService = require('../services/saleInventoryService');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -76,6 +77,7 @@ exports.uploadComprobante = uploadComprobante;
 
 exports.subirComprobante = async (req, res) => {
   try {
+    saleInventoryService.requireSpecific(req.branchScope);
     const empresaId = requireTenantEmpresaId(req);
 
     if (!req.file) {
@@ -135,6 +137,7 @@ exports.createVenta = async (req, res) => {
   let connection;
 
   try {
+    saleInventoryService.requireSpecific(req.branchScope);
     const {
       cliente_id,
       cliente_nombre,
@@ -157,6 +160,7 @@ exports.createVenta = async (req, res) => {
       notas_internas,
       created_by,
       interes_tarjeta,
+      caja_id,
     } = req.body;
 
     const telefonoValidado = validatePhone(cliente_telefono, {
@@ -173,6 +177,7 @@ exports.createVenta = async (req, res) => {
     const clienteTelefonoNormalizado = telefonoValidado.value;
 
     const empresaId = requireTenantEmpresaId(req);
+    const sucursalId = Number(req.branchScope.sucursalId);
 
     if (!cliente_id || !cliente_nombre) {
       return res.status(400).json({
@@ -298,6 +303,7 @@ exports.createVenta = async (req, res) => {
     const query = `
       INSERT INTO ventas (
         empresa_id,
+        sucursal_id,
         cliente_id,
         cliente_nombre,
         cliente_telefono,
@@ -319,11 +325,12 @@ exports.createVenta = async (req, res) => {
         observaciones,
         notas_internas,
         created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await connection.query(query, [
       empresaId,
+      sucursalId,
       cliente_id,
       cliente_nombre,
       clienteTelefonoNormalizado,
@@ -347,16 +354,27 @@ exports.createVenta = async (req, res) => {
       created_by || null,
     ]);
 
-    await descontarStock(
+    await saleInventoryService.applySale(connection, {
+      branchScope: req.branchScope,
+      ventaId: result.insertId,
       items,
-      empresaId,
-      connection
-    );
+      usuarioId: req.user?.id ?? req.user?.userId ?? null,
+    });
 
     if (metodoPagoNorm && Number(total) > 0) {
       if (pagosNormalizados) {
-        for (const pago of pagosNormalizados) {
-          await cajaController.registrarMovimientoVenta(
+        for (const [pagoIndice, pago] of pagosNormalizados.entries()) {
+          const financial = await saleInventoryService.registerFinancialMovement(connection, {
+            branchScope: req.branchScope,
+            ventaId: result.insertId,
+            pagoIndice,
+            metodo: pago.metodo,
+            monto: Number(pago.monto),
+            cajaId: pago.caja_id ?? caja_id,
+            usuarioId: req.user?.id ?? req.user?.userId ?? null,
+            referencia: pago.referencia,
+          });
+          if (financial.requiresLegacyBankMovement) await cajaController.registrarMovimientoVenta(
             result.insertId,
             pago.metodo,
             pago.monto,
@@ -369,7 +387,16 @@ exports.createVenta = async (req, res) => {
           );
         }
       } else {
-        await cajaController.registrarMovimientoVenta(
+        const financial = await saleInventoryService.registerFinancialMovement(connection, {
+          branchScope: req.branchScope,
+          ventaId: result.insertId,
+          pagoIndice: 0,
+          metodo: metodoPagoNorm,
+          monto: Number(total),
+          cajaId: caja_id,
+          usuarioId: req.user?.id ?? req.user?.userId ?? null,
+        });
+        if (financial.requiresLegacyBankMovement) await cajaController.registrarMovimientoVenta(
           result.insertId,
           metodoPagoNorm,
           total,
@@ -459,9 +486,11 @@ exports.createVentaFromQuote = async (req, res) => {
   let connection;
 
   try {
+    saleInventoryService.requireSpecific(req.branchScope);
     const cotizacionId = req.params.cotizacionId || req.params.id;
-    const { pagos, metodo_pago, observaciones, created_by } = req.body || {};
+    const { pagos, metodo_pago, observaciones, created_by, caja_id } = req.body || {};
     const empresaId = requireTenantEmpresaId(req);
+    const sucursalId = Number(req.branchScope.sucursalId);
 
     const metodoPagoNorm = normalizeMetodoPago(metodo_pago);
     if (metodo_pago && !metodoPagoNorm) {
@@ -581,15 +610,16 @@ exports.createVentaFromQuote = async (req, res) => {
 
     const query = `
       INSERT INTO ventas (
-        empresa_id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
+        empresa_id, sucursal_id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
         cliente_nit, cliente_direccion, cotizacion_id, numero_cotizacion,
         tipo_venta, items, subtotal, impuestos, descuento, total,
         metodo_pago, pagos, monto_pagado, observaciones, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await connection.query(query, [
       empresaId,
+      sucursalId,
       cotizacion.cliente_id,
       cotizacion.cliente_nombre,
       cotizacion.cliente_telefono,
@@ -616,12 +646,27 @@ exports.createVentaFromQuote = async (req, res) => {
       [result.insertId, cotizacionId, ...cotizacionTenant.params]
     );
 
-    await descontarStock(itemsParaVenta, empresaId, connection);
+    await saleInventoryService.applySale(connection, {
+      branchScope: req.branchScope,
+      ventaId: result.insertId,
+      items: itemsParaVenta,
+      usuarioId: req.user?.id ?? req.user?.userId ?? null,
+    });
 
     if (metodo_pago && totalCentavos > 0) {
       if (pagos && Array.isArray(pagos)) {
-        for (const pago of pagos) {
-          await cajaController.registrarMovimientoVenta(
+        for (const [pagoIndice, pago] of pagos.entries()) {
+          const financial = await saleInventoryService.registerFinancialMovement(connection, {
+            branchScope: req.branchScope,
+            ventaId: result.insertId,
+            pagoIndice,
+            metodo: pago.metodo,
+            monto: Number(pago.monto),
+            cajaId: pago.caja_id ?? caja_id,
+            usuarioId: req.user?.id ?? req.user?.userId ?? null,
+            referencia: pago.referencia,
+          });
+          if (financial.requiresLegacyBankMovement) await cajaController.registrarMovimientoVenta(
             result.insertId,
             pago.metodo,
             pago.monto,
@@ -634,7 +679,16 @@ exports.createVentaFromQuote = async (req, res) => {
           );
         }
       } else {
-        await cajaController.registrarMovimientoVenta(
+        const financial = await saleInventoryService.registerFinancialMovement(connection, {
+          branchScope: req.branchScope,
+          ventaId: result.insertId,
+          pagoIndice: 0,
+          metodo: metodo_pago,
+          monto: totalCentavos,
+          cajaId: caja_id,
+          usuarioId: req.user?.id ?? req.user?.userId ?? null,
+        });
+        if (financial.requiresLegacyBankMovement) await cajaController.registrarMovimientoVenta(
           result.insertId,
           metodo_pago,
           totalCentavos,
@@ -706,9 +760,9 @@ exports.getAllVentas = async (req, res) => {
       FROM ventas v
       LEFT JOIN users u ON v.created_by = u.id
       WHERE 1=1`;
-    const tenant = ventaTenantClause(req, 'v');
-    const params = [...tenant.params];
-    query += tenant.sql;
+    const scope = saleInventoryService.saleScopeClause(req.branchScope, 'v');
+    const params = [...scope.params];
+    query += scope.sql;
 
     // Filtros
     if (estado) {
@@ -781,11 +835,11 @@ exports.getAllVentas = async (req, res) => {
 exports.getVentaById = async (req, res) => {
   try {
     const { id } = req.params;
-    const tenant = ventaTenantClause(req);
+    const scope = saleInventoryService.saleScopeClause(req.branchScope, 'v');
 
     const [ventas] = await db.query(
-      `SELECT * FROM ventas v WHERE v.id = ?${tenant.sql}`,
-      [id, ...tenant.params]
+      `SELECT * FROM ventas v WHERE v.id = ?${scope.sql}`,
+      [id, ...scope.params]
     );
 
     if (ventas.length === 0) {
@@ -811,7 +865,9 @@ exports.getVentaById = async (req, res) => {
  * POST /api/ventas/:id/pagos
  */
 exports.registrarPago = async (req, res) => {
+  let connection;
   try {
+    saleInventoryService.requireSpecific(req.branchScope);
     const { id } = req.params;
     const {
       monto,
@@ -820,10 +876,12 @@ exports.registrarPago = async (req, res) => {
       metodo,
       referencia,
       comprobanteUrl,
-      usuario_id
+      usuario_id,
+      caja_id,
     } = req.body;
-    const tenant = ventaTenantClause(req);
+    const scope = saleInventoryService.saleScopeClause(req.branchScope, 'v');
     const empresaId = requireTenantEmpresaId(req);
+    const usuarioId = req.user?.id ?? req.user?.userId ?? null;
 
     const metodoNormalizado = String(metodo || '').trim().toUpperCase();
     const comprobanteNormalizado =
@@ -860,11 +918,15 @@ exports.registrarPago = async (req, res) => {
     }
 
     // Obtener venta actual
-    const [ventasRows] = await db.query(
-      `SELECT * FROM ventas v WHERE v.id = ? AND v.estado != "ANULADA"${tenant.sql}`,
-      [id, ...tenant.params]
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    const [ventasRows] = await connection.query(
+      `SELECT * FROM ventas v WHERE v.id = ? AND v.estado != "ANULADA"${scope.sql} LIMIT 1 FOR UPDATE`,
+      [id, ...scope.params]
     );
     if (ventasRows.length === 0) {
+      await connection.rollback();
       return res.status(404).json({ error: 'Venta no encontrada o ya está anulada' });
     }
     const ventaActual = ventasRows[0];
@@ -888,6 +950,7 @@ exports.registrarPago = async (req, res) => {
       !esEfectivo &&
       montoIngresadoCentavos > saldoPendiente
     ) {
+      await connection.rollback();
       return res.status(400).json({
         error:
           `El monto (Q${(montoIngresadoCentavos / 100).toFixed(2)}) ` +
@@ -902,6 +965,11 @@ exports.registrarPago = async (req, res) => {
             saldoPendiente
           )
         : montoIngresadoCentavos;
+
+    if (montoAplicadoCentavos <= 0) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'La venta no tiene saldo pendiente' });
+    }
 
     const montoRecibidoCentavos =
       esEfectivo
@@ -926,6 +994,7 @@ exports.registrarPago = async (req, res) => {
       ? (typeof ventaActual.pagos === 'string' ? JSON.parse(ventaActual.pagos) : ventaActual.pagos)
       : [];
 
+    const pagoIndice = pagosActuales.length;
     pagosActuales.push({
       metodo: metodoNormalizado,
       monto: montoAplicadoCentavos,
@@ -940,7 +1009,7 @@ exports.registrarPago = async (req, res) => {
       referencia: referencia || null,
       comprobanteUrl: comprobanteNormalizado || null,
       fecha: new Date().toISOString(),
-      usuario_id: usuario_id || null
+      usuario_id: usuarioId
     });
 
     const nuevoMontoPagado = Number(ventaActual.monto_pagado || 0) + montoAplicadoCentavos;
@@ -949,34 +1018,45 @@ exports.registrarPago = async (req, res) => {
         ? 'MIXTO'
         : metodoNormalizado;
 
-    await db.query(
-      `UPDATE ventas SET pagos = ?, monto_pagado = ?, metodo_pago = ?, updated_by = ? WHERE id = ?${ventaTenantClause(req, 'ventas').sql}`,
-      [JSON.stringify(pagosActuales), nuevoMontoPagado, metodoFinal, usuario_id || null, id, ...ventaTenantClause(req, 'ventas').params]
+    const financial = await saleInventoryService.registerFinancialMovement(connection, {
+      branchScope: req.branchScope,
+      ventaId: Number(id),
+      pagoIndice,
+      metodo: metodoNormalizado,
+      monto: montoAplicadoCentavos,
+      cajaId: caja_id,
+      usuarioId,
+      referencia,
+    });
+
+    await connection.query(
+      `UPDATE ventas SET pagos = ?, monto_pagado = ?, metodo_pago = ?, updated_by = ? WHERE id = ? AND empresa_id = ? AND sucursal_id = ?`,
+      [JSON.stringify(pagosActuales), nuevoMontoPagado, metodoFinal, usuarioId,
+        id, empresaId, Number(req.branchScope.sucursalId)]
     );
 
     // Registrar en caja/bancos
-    try {
+    if (financial.requiresLegacyBankMovement) {
       await cajaController.registrarMovimientoVenta(
         Number(id),
         metodoNormalizado,
         montoAplicadoCentavos,
-        usuario_id || 'Sistema',
-        null,
+        req.user?.username || req.user?.nombre || 'Sistema',
+        connection,
         null,
         null,
         referencia || null,
         empresaId
       );
-    } catch (cajaErr) {
-      console.error('Error al registrar en caja (no crítico):', cajaErr);
     }
 
     // Obtener venta actualizada
-    const [ventasUpdated] = await db.query(
-      `SELECT * FROM ventas v WHERE v.id = ?${tenant.sql}`,
-      [id, ...tenant.params]
+    const [ventasUpdated] = await connection.query(
+      `SELECT * FROM ventas v WHERE v.id = ?${scope.sql}`,
+      [id, ...scope.params]
     );
     const venta = parseVentaJSON(ventasUpdated[0]);
+    await connection.commit();
 
     await auditoriaService.registrar({
       req,
@@ -990,6 +1070,13 @@ exports.registrarPago = async (req, res) => {
     });
     res.json(venta);
   } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Error haciendo rollback al registrar pago:', rollbackError);
+      }
+    }
     console.error('Error al registrar pago:', error);
     if (error.statusCode) {
       return res.status(error.statusCode).json({ error: error.message });
@@ -998,6 +1085,8 @@ exports.registrarPago = async (req, res) => {
       error: 'Error al registrar pago',
       details: error.message 
     });
+  } finally {
+    if (connection) connection.release();
   }
 };
 
@@ -1009,9 +1098,10 @@ exports.anularVenta = async (req, res) => {
   let connection;
 
   try {
+    saleInventoryService.requireSpecific(req.branchScope);
     const { id } = req.params;
     const { motivo, usuario_id } = req.body;
-    const tenant = ventaTenantClause(req);
+    const scope = saleInventoryService.saleScopeClause(req.branchScope, 'v');
     const empresaId = requireTenantEmpresaId(req);
 
     if (!motivo) {
@@ -1025,8 +1115,8 @@ exports.anularVenta = async (req, res) => {
 
     // Verificar que la venta existe y no está ya anulada
     const [ventasRows] = await connection.query(
-      `SELECT * FROM ventas v WHERE v.id = ?${tenant.sql} LIMIT 1`,
-      [id, ...tenant.params]
+      `SELECT * FROM ventas v WHERE v.id = ?${scope.sql} LIMIT 1 FOR UPDATE`,
+      [id, ...scope.params]
     );
 
     if (ventasRows.length === 0) {
@@ -1047,6 +1137,13 @@ exports.anularVenta = async (req, res) => {
       });
     }
 
+    await saleInventoryService.reverseSale(connection, {
+      branchScope: req.branchScope,
+      ventaId: Number(id),
+      usuarioId: req.user?.id ?? req.user?.userId ?? null,
+      items: typeof ventaActual.items === 'string' ? JSON.parse(ventaActual.items) : ventaActual.items,
+    });
+
     // Agregar nota de anulación
     const fechaAnulacion = new Date().toISOString();
     const notasActuales = ventaActual.notas_internas || '';
@@ -1060,8 +1157,8 @@ exports.anularVenta = async (req, res) => {
        SET estado = 'ANULADA',
            notas_internas = ?,
            updated_by = ?
-       WHERE id = ?${ventaTenantClause(req, 'ventas').sql}`,
-      [nuevasNotas, usuario_id || null, id, ...ventaTenantClause(req, 'ventas').params]
+       WHERE id = ? AND empresa_id = ? AND sucursal_id = ?`,
+      [nuevasNotas, usuario_id || null, id, empresaId, Number(req.branchScope.sucursalId)]
     );
 
     // Revertir cotización si existía
@@ -1094,17 +1191,32 @@ exports.anularVenta = async (req, res) => {
       usuario_id ||
       'Sistema';
 
-    await cajaController.registrarReversaMovimientoVenta(
-      ventaActual,
-      usuarioNombre,
-      connection,
-      empresaId
-    );
+    const financialReversal = await saleInventoryService.reverseFinancialMovements(connection, {
+      branchScope: req.branchScope,
+      ventaId: Number(id),
+      usuarioId: req.user?.id ?? req.user?.userId ?? null,
+    });
+
+    if (financialReversal.count === 0 && Number(ventaActual.monto_pagado || 0) > 0) {
+      const error = new Error('Los movimientos financieros de esta venta no estÃ¡n registrados; no es seguro anularla');
+      error.statusCode = 409;
+      error.code = 'SALE_FINANCIAL_APPLICATION_NOT_FOUND';
+      throw error;
+    }
+
+    if (financialReversal.hasNonCash) {
+      await cajaController.registrarReversaMovimientoVenta(
+        ventaActual,
+        usuarioNombre,
+        connection,
+        empresaId
+      );
+    }
 
     // Obtener venta actualizada
     const [ventasUpdated] = await connection.query(
-      `SELECT * FROM ventas v WHERE v.id = ?${tenant.sql} LIMIT 1`,
-      [id, ...tenant.params]
+      `SELECT * FROM ventas v WHERE v.id = ?${scope.sql} LIMIT 1`,
+      [id, ...scope.params]
     );
 
     await connection.commit();
@@ -1152,7 +1264,7 @@ exports.anularVenta = async (req, res) => {
  */
 exports.getEstadisticas = async (req, res) => {
   try {
-    const tenant = ventaTenantClause(req, 'v');
+    const scope = saleInventoryService.saleScopeClause(req.branchScope, 'v');
     const [stats] = await db.query(
       `SELECT
         COUNT(*) as total_ventas,
@@ -1167,8 +1279,8 @@ exports.getEstadisticas = async (req, res) => {
         SUM(CASE WHEN MONTH(v.fecha_venta) = MONTH(CURDATE()) AND YEAR(v.fecha_venta) = YEAR(CURDATE()) THEN 1 ELSE 0 END) as ventas_mes_actual,
         COALESCE(SUM(CASE WHEN MONTH(v.fecha_venta) = MONTH(CURDATE()) AND YEAR(v.fecha_venta) = YEAR(CURDATE()) AND v.estado != 'ANULADA' THEN v.total ELSE 0 END), 0) as ingresos_mes_actual
        FROM ventas v
-       WHERE 1=1${tenant.sql}`,
-      tenant.params
+       WHERE 1=1${scope.sql}`,
+      scope.params
     );
     res.json(stats[0] || {});
   } catch (error) {
@@ -1182,101 +1294,6 @@ exports.getEstadisticas = async (req, res) => {
     });
   }
 };
-
-/**
- * Helper: Descontar stock del inventario
- */
-async function descontarStock(items, empresaId, client = db) {
-  for (const item of items) {
-    const itemId = item.refId || item.ref_id || item.id;
-    const cantidad = Number(item.cantidad);
-    const source = String(item.source || item.tipo || '').toUpperCase();
-
-    if (!itemId) {
-      const error = new Error('Uno de los artículos no tiene identificador de inventario');
-      error.statusCode = 400;
-      throw error;
-    }
-
-    if (!Number.isInteger(cantidad) || cantidad <= 0) {
-      const error = new Error('La cantidad de cada artículo debe ser un número entero mayor a cero');
-      error.statusCode = 400;
-      throw error;
-    }
-
-    if (source === 'PRODUCTO' || source === 'PRODUCTOS') {
-      const [result] = await client.query(
-        `UPDATE productos
-         SET stock = stock - ?
-         WHERE id = ?
-           AND empresa_id = ?
-           AND stock >= ?`,
-        [cantidad, itemId, empresaId, cantidad]
-      );
-
-      if (result.affectedRows === 0) {
-        const [productos] = await client.query(
-          'SELECT id, nombre, stock FROM productos WHERE id = ? AND empresa_id = ? LIMIT 1',
-          [itemId, empresaId]
-        );
-
-        if (productos.length === 0) {
-          const error = new Error(`Producto ${itemId} no encontrado para esta empresa`);
-          error.statusCode = 404;
-          throw error;
-        }
-
-        const producto = productos[0];
-        const error = new Error(
-          `Stock insuficiente para "${producto.nombre}". Disponible: ${producto.stock}, solicitado: ${cantidad}`
-        );
-        error.statusCode = 409;
-        throw error;
-      }
-
-      console.log(`Stock descontado: Producto ${itemId}, cantidad: ${cantidad}`);
-      continue;
-    }
-
-    if (source === 'REPUESTO' || source === 'REPUESTOS') {
-      const [result] = await client.query(
-        `UPDATE repuestos
-         SET stock = stock - ?
-         WHERE id = ?
-           AND empresa_id = ?
-           AND stock >= ?`,
-        [cantidad, itemId, empresaId, cantidad]
-      );
-
-      if (result.affectedRows === 0) {
-        const [repuestos] = await client.query(
-          'SELECT id, nombre, stock FROM repuestos WHERE id = ? AND empresa_id = ? LIMIT 1',
-          [itemId, empresaId]
-        );
-
-        if (repuestos.length === 0) {
-          const error = new Error(`Repuesto ${itemId} no encontrado para esta empresa`);
-          error.statusCode = 404;
-          throw error;
-        }
-
-        const repuesto = repuestos[0];
-        const error = new Error(
-          `Stock insuficiente para "${repuesto.nombre}". Disponible: ${repuesto.stock}, solicitado: ${cantidad}`
-        );
-        error.statusCode = 409;
-        throw error;
-      }
-
-      console.log(`Stock descontado: Repuesto ${itemId}, cantidad: ${cantidad}`);
-      continue;
-    }
-
-    const error = new Error(`Tipo de artículo inválido: "${source || 'SIN TIPO'}"`);
-    error.statusCode = 400;
-    throw error;
-  }
-}
 
 /**
  * Helper: Parsear campos JSON de una venta

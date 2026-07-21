@@ -22,6 +22,7 @@ import * as customerService from '../../services/customerService';
 import * as ventaService from '../../services/ventaService';
 import API_URL from '../../services/config';
 import { getImageUrl } from '../../utils/getImageUrl';
+import { empresaCajaApi, type CajaCatalogo } from '../../services/cajaCatalogoService';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -108,6 +109,8 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
   const [montoBanco, setMontoBanco] = useState(0);
   const [confirmarPago, setConfirmarPago] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [cajas, setCajas] = useState<CajaCatalogo[]>([]);
+  const [cajaId, setCajaId] = useState('');
 
   // ── Reset state when modal opens ──────────────────────────────────────────
   useEffect(() => {
@@ -131,6 +134,7 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
     setInteresTarjeta(0); setBancoSeleccionado('');
     setMontoEfectivo(0); setMontoBanco(0);
     setConfirmarPago(false);
+    setCajaId('');
 
     // pre-load quote if provided
     if (origenVenta === 'COTIZACION' && preloadedQuote) {
@@ -146,6 +150,15 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
       setShowCustomerPicker(true);
     }
   }, [isOpen, origenVenta, preloadedQuote]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    empresaCajaApi.listar()
+      .then(rows => { if (!cancelled) setCajas(rows.filter(row => Boolean(row.activa))); })
+      .catch(() => { if (!cancelled) setCajas([]); });
+    return () => { cancelled = true; };
+  }, [isOpen]);
 
   // ── Load banks ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -401,6 +414,9 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
     if (origenVenta === 'COTIZACION' && !quoteId) { toast.add('Debes seleccionar una cotización', 'error'); return false; }
     if (items.length === 0) { toast.add('No hay items en la venta', 'error'); return false; }
     if (!confirmarPago) { toast.add('Debes confirmar que has recibido el pago', 'error'); return false; }
+    const tieneEfectivo = metodo === 'EFECTIVO' ||
+      (metodo === 'MIXTO' && pagosMixtos.some(p => p.metodo === 'EFECTIVO' && Number(p.monto) > 0));
+    if (tieneEfectivo && !cajaId) { toast.add('Debes seleccionar una caja activa de la sucursal', 'error'); return false; }
     if (metodo === 'EFECTIVO' && montoRecibido < total) { toast.add('El monto recibido debe ser mayor o igual al total', 'error'); return false; }
     if (metodo === 'TRANSFERENCIA') {
       if (!referencia) { toast.add('Debes ingresar la referencia de la transferencia', 'error'); return false; }
@@ -436,6 +452,7 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
           fecha: now,
           pos_seleccionado: getPosFromMethod(p.metodo),
           banco_id: p.metodo === 'TRANSFERENCIA' ? bancoSeleccionado : null,
+          caja_id: p.metodo === 'EFECTIVO' ? Number(cajaId) : null,
         }));
       } else {
         // El pago aplicado es el total de la venta.
@@ -463,6 +480,7 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
           banco_id: metodo === 'TRANSFERENCIA' ? bancoSeleccionado : null,
           interes_porcentaje: isCardMethod(metodo) ? interesTarjeta : null,
           interes_monto: isCardMethod(metodo) ? interesMontoTarjeta : null,
+          caja_id: metodo === 'EFECTIVO' ? Number(cajaId) : null,
         }];
       }
 
@@ -733,6 +751,20 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
                 );
               })}
             </div>
+
+            {(metodo === 'EFECTIVO' || metodo === 'MIXTO') && (
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">
+                  Caja de la sucursal <span className="text-red-500">*</span>
+                </label>
+                <select value={cajaId} onChange={e => setCajaId(e.target.value)} className={inputCls} style={inputStyle}>
+                  <option value="">Selecciona una caja</option>
+                  {cajas.map(caja => (
+                    <option key={caja.id} value={caja.id}>{caja.nombre} ({caja.codigo})</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Efectivo */}
             {metodo === 'EFECTIVO' && (

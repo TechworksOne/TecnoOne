@@ -70,7 +70,7 @@ async function main() {
   const authRoutes = fs.readFileSync(path.join(__dirname, '..', 'routes', 'authRoutes.js'), 'utf8');
   assert.match(authRoutes, /mis-sucursales', verifyToken/);
   const untouchedRoutes = [
-    'ventaRoutes.js', 'cajaRoutes.js',
+    'cajaRoutes.js',
     'reportesRoutes.js', 'dashboardRoutes.js',
   ].map(file => fs.readFileSync(path.join(__dirname, '..', 'routes', file), 'utf8')).join('\n');
   assert.doesNotMatch(untouchedRoutes, /branchScope/);
