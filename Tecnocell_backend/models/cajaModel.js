@@ -4,10 +4,15 @@ const SELECT = `SELECT c.id, c.empresa_id, c.sucursal_id, c.nombre, c.codigo,
   c.descripcion, c.activa, c.created_at, c.updated_at, s.nombre AS sucursal_nombre
   FROM cajas c INNER JOIN sucursales s ON s.id = c.sucursal_id AND s.empresa_id = c.empresa_id`;
 
-exports.listar = async ({ empresaId, sucursalId }) => {
+exports.listar = async ({ empresaId, sucursalId, allowedSucursalIds }) => {
   const params = [empresaId];
   let where = ' WHERE c.empresa_id = ?';
   if (sucursalId) { where += ' AND c.sucursal_id = ?'; params.push(sucursalId); }
+  else if (Array.isArray(allowedSucursalIds)) {
+    if (!allowedSucursalIds.length) return [];
+    where += ` AND c.sucursal_id IN (${allowedSucursalIds.map(() => '?').join(',')})`;
+    params.push(...allowedSucursalIds);
+  }
   const [rows] = await db.query(`${SELECT}${where} ORDER BY c.nombre, c.id`, params);
   return rows;
 };

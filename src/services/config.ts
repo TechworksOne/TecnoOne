@@ -1,11 +1,11 @@
 // Configuración de la API
 import axios from 'axios';
+import { ACTIVE_BRANCH_STORAGE_KEY } from '../lib/branchContext';
 
-const ACTIVE_BRANCH_STORAGE_KEY = 'tecnoone.sucursalActivaId';
 const axiosWithBranchContext = axios as typeof axios & { __branchContextInstalled?: boolean };
 
 // Agrega el contexto a todas las instancias Axios sin modificar los servicios
-// operativos. El backend aun no consume este header en esas rutas.
+// operativos. El valor compatible es un id numerico o ALL.
 if (!axiosWithBranchContext.__branchContextInstalled) {
   const attachBranchContext = (config: Parameters<Parameters<typeof axios.interceptors.request.use>[0]>[0]) => {
     const sucursalId = localStorage.getItem(ACTIVE_BRANCH_STORAGE_KEY);

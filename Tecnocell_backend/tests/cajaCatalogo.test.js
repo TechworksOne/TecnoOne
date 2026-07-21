@@ -15,22 +15,27 @@ require.cache[require.resolve('../models/cajaModel')] = { exports: model };
 const controller = require('../controllers/cajaCatalogoController');
 function response() { return { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } }; }
 async function invoke(method, req) { const res = response(); await controller[method](req, res); return res; }
-const normal = (overrides = {}) => ({ user: { id: 5, empresaId: 10 }, tenant: { empresa_id: 10 }, sucursal: { id: 7 }, params: {}, query: {}, body: {}, ...overrides });
+const normal = (overrides = {}) => ({ user: { id: 5, empresaId: 10 }, tenant: { empresa_id: 10 }, branchScope: { mode: 'specific', empresaId: 10, sucursalId: 7, allowedSucursalIds: [7, 8] }, params: {}, query: {}, body: {}, ...overrides });
 
 async function main() {
   calls.length = 0;
   await invoke('listar', normal());
-  assert.deepStrictEqual(calls[0][1], { empresaId: 10, sucursalId: 7 });
+  assert.deepStrictEqual(calls[0][1], { empresaId: 10, sucursalId: 7, allowedSucursalIds: [7, 8], mode: 'specific' });
   await invoke('crear', normal({ body: { nombre: 'Caja A', codigo: 'a', sucursal_id: 999, empresa_id: 999 } }));
   assert.strictEqual(calls.at(-1)[1].empresaId, 10);
   assert.strictEqual(calls.at(-1)[1].sucursalId, 7);
   assert.strictEqual(calls.at(-1)[1].codigo, 'A');
-  await invoke('editar', normal({ params: { cajaId: '2' }, body: { nombre: 'X', codigo: 'X' }, sucursal: { id: 8 } }));
+  await invoke('editar', normal({ params: { cajaId: '2' }, body: { nombre: 'X', codigo: 'X' }, branchScope: { mode: 'specific', empresaId: 10, sucursalId: 8, allowedSucursalIds: [7, 8] } }));
   assert.strictEqual(calls.at(-1)[1].sucursalId, 8);
   existing = false;
   const rejected = await invoke('cambiarEstado', normal({ params: { cajaId: '2' }, body: { activa: false } }));
   assert.strictEqual(rejected.statusCode, 404);
   existing = true;
+  await invoke('listar', normal({ branchScope: { mode: 'consolidated', empresaId: 10, sucursalId: null, allowedSucursalIds: [7, 8] } }));
+  assert.deepStrictEqual(calls.at(-1)[1], { empresaId: 10, sucursalId: null, allowedSucursalIds: [7, 8], mode: 'consolidated' });
+  const consolidatedWrite = await invoke('crear', normal({ branchScope: { mode: 'consolidated', empresaId: 10, sucursalId: null, allowedSucursalIds: [7, 8] }, body: { nombre: 'X', codigo: 'X' } }));
+  assert.strictEqual(consolidatedWrite.statusCode, 409);
+  assert.strictEqual(consolidatedWrite.body.code, 'BRANCH_SPECIFIC_REQUIRED');
   await invoke('listar', { user: { esSuperAdmin: true }, params: { empresaId: '22' }, query: {}, body: {} });
   assert.deepStrictEqual(calls.at(-1)[1], { empresaId: 22, sucursalId: null });
   const mismatch = await invoke('crear', { user: { esSuperAdmin: true }, params: { empresaId: '22' }, query: {}, body: { sucursal_id: 7, nombre: 'X', codigo: 'X' } });
@@ -42,7 +47,7 @@ async function main() {
   assert.match(migration, /UNIQUE KEY uk_cajas_sucursal_codigo/);
   assert.doesNotMatch(migration, /ALTER TABLE (caja_chica|cuentas_bancarias)/i);
   const routes = fs.readFileSync(path.join(__dirname, '..', 'routes', 'cajaCatalogoRoutes.js'), 'utf8');
-  assert.match(routes, /tenantScope, checkEmpresaActiva, sucursalContext/);
+  assert.match(routes, /tenantScope, checkEmpresaActiva, branchScope/);
   assert.match(routes, /cajas\.ver/);
   assert.match(routes, /cajas\.administrar/);
   console.log('OK cajaCatalogo: tenants, sucursales, creacion, rechazo, backfill, permisos y Super Admin');

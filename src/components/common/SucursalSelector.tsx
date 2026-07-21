@@ -4,7 +4,15 @@ import { useSucursalContext } from '../../store/useSucursalContext';
 
 export default function SucursalSelector() {
   const user = useAuth(state => state.user);
-  const { sucursales, sucursalActiva, loading, error, seleccionar } = useSucursalContext();
+  const {
+    sucursales,
+    sucursalActiva,
+    mode,
+    canUseConsolidated,
+    loading,
+    error,
+    seleccionar,
+  } = useSucursalContext();
   if (!user || user.es_super_admin || user.role === 'superadmin') return null;
 
   return (
@@ -16,13 +24,17 @@ export default function SucursalSelector() {
         {loading ? <Loader2 size={14} className="animate-spin" /> : <Building2 size={14} />}
         <select
           aria-label="Sucursal activa"
-          value={sucursalActiva?.id ?? ''}
+          value={mode === 'consolidated' ? 'ALL' : (sucursalActiva?.id ?? '')}
           disabled={loading || sucursales.length === 0}
-          onChange={event => seleccionar(user.id, Number(event.target.value))}
+          onChange={event => seleccionar(
+            user.id,
+            event.target.value === 'ALL' ? 'ALL' : Number(event.target.value),
+          )}
           className="max-w-[170px] bg-transparent text-xs font-semibold outline-none disabled:opacity-60"
           style={{ color: 'var(--color-text)' }}
         >
           {sucursales.length === 0 && <option value="">Sin sucursales</option>}
+          {canUseConsolidated && <option value="ALL">Todas las sucursales</option>}
           {sucursales.map(sucursal => (
             <option key={sucursal.id} value={sucursal.id}>{sucursal.nombre}</option>
           ))}

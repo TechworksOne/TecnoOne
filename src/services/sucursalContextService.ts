@@ -1,7 +1,8 @@
 import axios from 'axios';
 import API_URL from './config';
+import { ACTIVE_BRANCH_STORAGE_KEY } from '../lib/branchContext';
 
-export const ACTIVE_BRANCH_STORAGE_KEY = 'tecnoone.sucursalActivaId';
+export { ACTIVE_BRANCH_STORAGE_KEY } from '../lib/branchContext';
 
 export interface MiSucursal {
   id: number;
@@ -11,6 +12,12 @@ export interface MiSucursal {
   direccion?: string | null;
   es_principal: boolean | number;
   es_predeterminada: boolean | number;
+}
+
+export interface MisSucursalesResponse {
+  sucursales: MiSucursal[];
+  canUseConsolidated: boolean;
+  defaultSucursalId: number | null;
 }
 
 const api = axios.create({ baseURL: API_URL });
@@ -24,7 +31,7 @@ api.interceptors.request.use(config => {
 });
 
 export const sucursalContextService = {
-  async getMisSucursales(): Promise<MiSucursal[]> {
+  async getMisSucursales(): Promise<MisSucursalesResponse> {
     const { data } = await api.get('/auth/mis-sucursales');
     return data.data;
   },

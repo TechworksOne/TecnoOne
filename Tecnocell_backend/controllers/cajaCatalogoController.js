@@ -10,7 +10,14 @@ function scope(req, { bodySucursal = false } = {}) {
       sucursalId: Number(bodySucursal ? req.body?.sucursal_id : (req.query?.sucursal_id || req.body?.sucursal_id)) || null,
     };
   }
-  return { empresaId: Number(req.tenant?.empresa_id), sucursalId: Number(req.sucursal?.id || req.sucursal_id) };
+  return {
+    empresaId: Number(req.branchScope?.empresaId),
+    sucursalId: req.branchScope?.sucursalId == null
+      ? null
+      : Number(req.branchScope.sucursalId),
+    allowedSucursalIds: req.branchScope?.allowedSucursalIds || [],
+    mode: req.branchScope?.mode,
+  };
 }
 
 function payload(req) {
@@ -31,6 +38,19 @@ function handle(error, res) {
   return fail(res, 500, 'CASH_REGISTER_ERROR', 'Error administrando cajas');
 }
 
+function requireSpecific(selected, res) {
+  if (selected.mode === 'consolidated') {
+    fail(
+      res,
+      409,
+      'BRANCH_SPECIFIC_REQUIRED',
+      'Seleccione una sucursal especifica para realizar esta operacion'
+    );
+    return false;
+  }
+  return true;
+}
+
 exports.listar = async (req, res) => {
   try {
     const selected = scope(req);
@@ -43,6 +63,7 @@ exports.crear = async (req, res) => {
   try {
     const selected = scope(req, { bodySucursal: true });
     const data = payload(req);
+    if (!isSuperAdmin(req) && !requireSpecific(selected, res)) return;
     if (!selected.empresaId || !selected.sucursalId) return fail(res, 400, 'BRANCH_REQUIRED', 'Sucursal requerida');
     if (!data.nombre || !data.codigo) return fail(res, 400, 'INVALID_CASH_REGISTER', 'Nombre y codigo son obligatorios');
     if (!await Caja.sucursalPertenece(selected.empresaId, selected.sucursalId)) {
@@ -56,6 +77,7 @@ exports.editar = async (req, res) => {
   try {
     const selected = scope(req);
     const data = payload(req);
+    if (!isSuperAdmin(req) && !requireSpecific(selected, res)) return;
     if (!data.nombre || !data.codigo) return fail(res, 400, 'INVALID_CASH_REGISTER', 'Nombre y codigo son obligatorios');
     const result = await Caja.editar({ id: Number(req.params.cajaId), ...selected, ...data });
     if (!result) return fail(res, 404, 'CASH_REGISTER_NOT_FOUND', 'Caja no encontrada en el contexto permitido');
@@ -67,6 +89,7 @@ exports.cambiarEstado = async (req, res) => {
   try {
     if (typeof req.body?.activa !== 'boolean') return fail(res, 400, 'INVALID_STATE', 'activa debe ser booleano');
     const selected = scope(req);
+    if (!isSuperAdmin(req) && !requireSpecific(selected, res)) return;
     const result = await Caja.cambiarEstado({ id: Number(req.params.cajaId), activa: req.body.activa, ...selected });
     if (!result) return fail(res, 404, 'CASH_REGISTER_NOT_FOUND', 'Caja no encontrada en el contexto permitido');
     return res.json({ success: true, data: result });
@@ -76,6 +99,7 @@ exports.cambiarEstado = async (req, res) => {
 exports.eliminar = async (req, res) => {
   try {
     const selected = scope(req);
+    if (!isSuperAdmin(req) && !requireSpecific(selected, res)) return;
     const removed = await Caja.eliminar({ id: Number(req.params.cajaId), ...selected });
     if (!removed) return fail(res, 404, 'CASH_REGISTER_NOT_FOUND', 'Caja no encontrada en el contexto permitido');
     return res.json({ success: true, message: 'Caja eliminada' });
