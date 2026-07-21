@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { imageFileFilter, getSafeImageExtension, sanitizeBaseName } = require('../utils/uploadSecurity');
+const repuestoInventoryService = require('../services/repuestoInventoryService');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 const REPUESTOS_UPLOAD_DIR = path.join(UPLOADS_BASE, 'repuestos');
@@ -150,6 +151,14 @@ exports.createRepuesto = async (req, res) => {
     } = req.body;
     const empresaId = requireTenantEmpresaId(req);
 
+    if (toNumber(stock, 0) !== 0) {
+      await connection.rollback();
+      return res.status(409).json({
+        code: 'DIRECT_STOCK_UPDATE_FORBIDDEN',
+        error: 'Cree el repuesto con stock cero y registre una entrada en una sucursal específica',
+      });
+    }
+
     if (!nombre || !tipo || !marca) {
       await connection.rollback();
 
@@ -200,7 +209,7 @@ exports.createRepuesto = async (req, res) => {
       toNumber(precio_publico, 0),
       toNumber(precio_costo, 0),
       proveedor || null,
-      toNumber(stock, 0),
+      0,
       toNumber(stock_minimo, 1),
       imagenesJSON,
       tagsJSON,
@@ -251,8 +260,10 @@ exports.getAllRepuestos = async (req, res) => {
       limit = 100,
     } = req.query;
 
-    let query = 'SELECT * FROM repuestos r WHERE 1=1';
-    const params = [];
+    const stockScope = repuestoInventoryService.stockProjection(req.branchScope, 'r');
+    let query = `SELECT r.*, ${stockScope.sql} AS stock,
+      ? AS branch_mode, ? AS sucursal_id_contexto FROM repuestos r WHERE 1=1`;
+    const params = [...stockScope.params, req.branchScope.mode, req.branchScope.sucursalId];
     const tenant = repuestoTenantClause(req, 'r');
 
     query += tenant.sql;
@@ -279,7 +290,8 @@ exports.getAllRepuestos = async (req, res) => {
     }
 
     if (soloConStock === 'true') {
-      query += ' AND stock > 0';
+      query += ` AND ${stockScope.sql} > 0`;
+      params.push(...stockScope.params);
     }
 
     if (precioMin) {
@@ -333,10 +345,13 @@ exports.getRepuestoById = async (req, res) => {
   try {
     const { id } = req.params;
     const tenant = repuestoTenantClause(req, 'r');
+    const stockScope = repuestoInventoryService.stockProjection(req.branchScope, 'r');
 
     const [repuestos] = await db.query(
-      `SELECT * FROM repuestos r WHERE r.id = ?${tenant.sql}`,
-      [id, ...tenant.params]
+      `SELECT r.*, ${stockScope.sql} AS stock,
+       ? AS branch_mode, ? AS sucursal_id_contexto
+       FROM repuestos r WHERE r.id = ?${tenant.sql}`,
+      [...stockScope.params, req.branchScope.mode, req.branchScope.sucursalId, id, ...tenant.params]
     );
 
     if (repuestos.length === 0) {
@@ -369,6 +384,14 @@ exports.updateRepuesto = async (req, res) => {
     const { id } = req.params;
     const updateData = req.body;
     const tenant = repuestoTenantClause(req, 'r');
+
+    if (updateData.stock !== undefined) {
+      await connection.rollback();
+      return res.status(409).json({
+        code: 'DIRECT_STOCK_UPDATE_FORBIDDEN',
+        error: 'Utilice el endpoint de movimientos para modificar existencias',
+      });
+    }
 
     console.log('=== UPDATE REPUESTO ===');
     console.log('ID:', id);
@@ -451,11 +474,6 @@ exports.updateRepuesto = async (req, res) => {
     if (updateData.proveedor !== undefined) {
       updates.push('proveedor = ?');
       values.push(updateData.proveedor || null);
-    }
-
-    if (updateData.stock !== undefined) {
-      updates.push('stock = ?');
-      values.push(toNumber(updateData.stock, 0));
     }
 
     if (updateData.stock_minimo !== undefined) {
@@ -568,13 +586,14 @@ exports.deleteRepuesto = async (req, res) => {
 exports.getStockBajo = async (req, res) => {
   try {
     const tenant = repuestoTenantClause(req, 'r');
+    const stockScope = repuestoInventoryService.stockProjection(req.branchScope, 'r');
     const [repuestos] = await db.query(
-      `SELECT *
+      `SELECT r.*, ${stockScope.sql} AS stock
        FROM repuestos r
        WHERE r.activo = 1${tenant.sql}
-         AND r.stock < r.stock_minimo
-       ORDER BY (r.stock_minimo - r.stock) DESC, r.stock ASC, r.nombre ASC`,
-      tenant.params
+         AND ${stockScope.sql} < r.stock_minimo
+       ORDER BY (r.stock_minimo - stock) DESC, stock ASC, r.nombre ASC`,
+      [...stockScope.params, ...tenant.params, ...stockScope.params]
     );
 
     res.json(repuestos);
@@ -595,30 +614,37 @@ exports.getStockBajo = async (req, res) => {
 exports.getEstadisticas = async (req, res) => {
   try {
     const tenant = repuestoTenantClause(req, 'r');
+    const stockScope = repuestoInventoryService.stockProjection(req.branchScope, 'r');
     const [estadisticas] = await db.query(`
       SELECT
-        r.tipo,
-        r.marca,
+        scoped.tipo,
+        scoped.marca,
         COUNT(*) as total_repuestos,
-        SUM(r.stock) as stock_total,
-        SUM(r.precio_costo * r.stock) / 100 as valor_total_costo,
-        SUM(r.precio_publico * r.stock) / 100 as valor_total_publico
-      FROM repuestos r
-      WHERE r.activo = TRUE${tenant.sql}
-      GROUP BY r.tipo, r.marca
-      ORDER BY r.tipo ASC, r.marca ASC
-    `, tenant.params);
+        SUM(scoped.stock) as stock_total,
+        SUM(scoped.precio_costo * scoped.stock) / 100 as valor_total_costo,
+        SUM(scoped.precio_publico * scoped.stock) / 100 as valor_total_publico
+      FROM (
+        SELECT r.tipo, r.marca, r.precio_costo, r.precio_publico,
+               ${stockScope.sql} AS stock
+        FROM repuestos r WHERE r.activo = TRUE${tenant.sql}
+      ) scoped
+      GROUP BY scoped.tipo, scoped.marca
+      ORDER BY scoped.tipo ASC, scoped.marca ASC
+    `, [...stockScope.params, ...tenant.params]);
 
     const totalTenant = repuestoTenantClause(req, 'r');
+    const totalStockScope = repuestoInventoryService.stockProjection(req.branchScope, 'r');
     const [totales] = await db.query(`
       SELECT
         COUNT(*) as total_repuestos,
-        SUM(r.stock) as stock_total,
-        SUM(r.precio_costo * r.stock) / 100 as valor_total_costo,
-        SUM(r.precio_publico * r.stock) / 100 as valor_total_publico
-      FROM repuestos r
-      WHERE r.activo = TRUE${totalTenant.sql}
-    `, totalTenant.params);
+        SUM(scoped.stock) as stock_total,
+        SUM(scoped.precio_costo * scoped.stock) / 100 as valor_total_costo,
+        SUM(scoped.precio_publico * scoped.stock) / 100 as valor_total_publico
+      FROM (
+        SELECT r.precio_costo, r.precio_publico, ${totalStockScope.sql} AS stock
+        FROM repuestos r WHERE r.activo = TRUE${totalTenant.sql}
+      ) scoped
+    `, [...totalStockScope.params, ...totalTenant.params]);
 
     res.json({
       por_tipo_marca: estadisticas,
@@ -639,25 +665,16 @@ exports.getEstadisticas = async (req, res) => {
  * POST /api/repuestos/:id/movimiento
  */
 exports.registrarMovimiento = async (req, res) => {
-  const connection = await db.getConnection();
-
   try {
-    await connection.beginTransaction();
-
     const { id } = req.params;
 
     const {
       tipo_movimiento,
       cantidad,
-      precio_unitario,
-      referencia_tipo,
-      referencia_id,
-      usuario_id,
       notas,
     } = req.body;
 
     if (!tipo_movimiento || !cantidad) {
-      await connection.rollback();
       return res.status(400).json({
         error: 'Tipo de movimiento y cantidad son requeridos',
       });
@@ -666,94 +683,49 @@ exports.registrarMovimiento = async (req, res) => {
     const cantidadNumerica = toNumber(cantidad, 0);
 
     if (cantidadNumerica === 0) {
-      await connection.rollback();
       return res.status(400).json({
         error: 'La cantidad debe ser diferente de cero',
       });
     }
 
-    const tenant = repuestoTenantClause(req, 'r');
-    const [repuestos] = await connection.query(
-      `SELECT id, stock FROM repuestos r WHERE r.id = ?${tenant.sql} FOR UPDATE`,
-      [id, ...tenant.params]
-    );
-
-    if (repuestos.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({
-        error: 'Repuesto no encontrado',
-      });
-    }
-
-    const stockAnterior = toNumber(repuestos[0].stock, 0);
     const tipoMovimiento = String(tipo_movimiento).toUpperCase();
-    let stockNuevo;
+    let diferencia;
 
     if (['ENTRADA', 'DEVOLUCION'].includes(tipoMovimiento)) {
-      stockNuevo = stockAnterior + Math.abs(cantidadNumerica);
+      diferencia = Math.abs(cantidadNumerica);
     } else if (['SALIDA', 'VENTA', 'REPARACION'].includes(tipoMovimiento)) {
-      stockNuevo = stockAnterior - Math.abs(cantidadNumerica);
+      diferencia = -Math.abs(cantidadNumerica);
     } else if (tipoMovimiento === 'AJUSTE') {
-      stockNuevo = stockAnterior + cantidadNumerica;
+      diferencia = cantidadNumerica;
     } else {
-      await connection.rollback();
       return res.status(400).json({
         error: 'Tipo de movimiento no soportado',
       });
     }
 
-    if (stockNuevo < 0) {
-      await connection.rollback();
-      return res.status(400).json({
-        error: 'Stock insuficiente',
-      });
-    }
-
-    const updateTenant = repuestoTenantClause(req, 'repuestos');
-    await connection.query(
-      `UPDATE repuestos SET stock = ? WHERE id = ?${updateTenant.sql}`,
-      [stockNuevo, id, ...updateTenant.params]
-    );
-
-    await connection.query(
-      `INSERT INTO repuestos_movimientos (
-        repuesto_id, tipo_movimiento, cantidad, stock_anterior, stock_nuevo,
-        precio_unitario, referencia_tipo, referencia_id, usuario_id, notas
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        tipoMovimiento,
-        cantidadNumerica,
-        stockAnterior,
-        stockNuevo,
-        precio_unitario || 0,
-        referencia_tipo || 'AJUSTE_MANUAL',
-        referencia_id || null,
-        usuario_id || req.user?.id || null,
-        notas || null,
-      ]
-    );
-
-    await connection.commit();
+    const resultado = await repuestoInventoryService.adjust({
+      branchScope: req.branchScope,
+      repuestoId: Number(id),
+      cantidad: diferencia,
+      tipo: tipoMovimiento.toLowerCase(),
+      nota: notas || null,
+      usuarioId: req.user?.id ?? req.user?.userId ?? null,
+    });
 
     res.json({
       message: 'Movimiento registrado exitosamente',
       resultado: {
         repuesto_id: Number(id),
-        stock_anterior: stockAnterior,
-        stock_nuevo: stockNuevo,
+        ...resultado,
       },
     });
   } catch (error) {
-    await connection.rollback();
     console.error('Error al registrar movimiento:', error);
 
     res.status(error.statusCode || 500).json({
       error: 'Error al registrar movimiento',
       details: error.message,
     });
-  } finally {
-    connection.release();
   }
 };
 
@@ -913,17 +885,11 @@ exports.createLineaRepuesto = exports.createModeloRepuesto;
 exports.getMovimientosRepuesto = async (req, res) => {
   try {
     const { id } = req.params;
-    const tenant = repuestoTenantClause(req, 'r');
-    const [rows] = await db.query(
-      `SELECT rm.*, u.username AS usuario_nombre
-       FROM repuestos_movimientos rm
-       INNER JOIN repuestos r ON r.id = rm.repuesto_id
-       LEFT JOIN users u ON u.id = rm.usuario_id
-       WHERE rm.repuesto_id = ?${tenant.sql}
-       ORDER BY rm.created_at DESC
-       LIMIT 200`,
-      [id, ...tenant.params]
-    );
+    const rows = await repuestoInventoryService.listMovements({
+      branchScope: req.branchScope,
+      repuestoId: Number(id),
+      limit: 200,
+    });
     res.json(rows);
   } catch (error) {
     console.error('Error al obtener movimientos de repuesto:', error);

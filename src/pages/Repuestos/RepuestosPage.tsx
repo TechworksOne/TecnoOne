@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSucursalContext } from '../../store/useSucursalContext';
 import {
   Plus,
   Search,
@@ -277,6 +278,9 @@ export function RepuestosPage() {
   const { user } = useAuth();
   const showCost = canViewCosts(user?.roles);
   const { repuestos, removeRepuesto, duplicateRepuesto, loadRepuestos, isLoading } = useRepuestosStore();
+  const branchMode = useSucursalContext((state) => state.mode);
+  const sucursalActiva = useSucursalContext((state) => state.sucursalActiva);
+  const contextVersion = useSucursalContext((state) => state.contextVersion);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -301,7 +305,12 @@ export function RepuestosPage() {
   const [kardexData, setKardexData] = useState<any[]>([]);
   const [kardexLoading, setKardexLoading] = useState(false);
 
-  useEffect(() => { loadRepuestos(); }, [loadRepuestos]);
+  useEffect(() => {
+    setSelectedRepuesto(null);
+    setShowDetailModal(false);
+    setShowKardexModal(false);
+    loadRepuestos();
+  }, [loadRepuestos, contextVersion]);
 
   // Image modal keyboard nav
   useEffect(() => {
@@ -406,6 +415,11 @@ export function RepuestosPage() {
             Repuestos
           </h1>
           <p className="text-xs text-[#5E7184] dark:text-[#B8C2D1] mt-0.5">Gestión de repuestos y compatibilidades</p>
+          <p className="text-xs font-semibold text-[#2EA7D8] mt-1">
+            {branchMode === 'consolidated'
+              ? 'Todas las sucursales · existencias consolidadas'
+              : `Sucursal: ${sucursalActiva?.nombre || 'sin seleccionar'}`}
+          </p>
         </div>
         <Button
           onClick={openNewModal}

@@ -21,6 +21,8 @@ interface RepuestosState {
   applyFilters: () => void;
 }
 
+let repuestoLoadSequence = 0;
+
 export const useRepuestosStore = create<RepuestosState>((set, get) => ({
   repuestos: [],
   filteredRepuestos: [],
@@ -29,9 +31,11 @@ export const useRepuestosStore = create<RepuestosState>((set, get) => ({
   error: null,
 
   loadRepuestos: async (filters) => {
-    set({ isLoading: true, error: null });
+    const sequence = ++repuestoLoadSequence;
+    set({ repuestos: [], filteredRepuestos: [], isLoading: true, error: null });
     try {
       const data = await repuestoService.getAllRepuestos(filters || { limit: 500 });
+      if (sequence !== repuestoLoadSequence) return;
       
       // Mapear datos de BD a formato frontend
       const repuestosMapped: Repuesto[] = data.map(rep => ({
@@ -62,6 +66,7 @@ export const useRepuestosStore = create<RepuestosState>((set, get) => ({
       set({ repuestos: repuestosMapped, filteredRepuestos: repuestosMapped, isLoading: false });
       get().applyFilters();
     } catch (error: any) {
+      if (sequence !== repuestoLoadSequence) return;
       console.error('Error al cargar repuestos:', error);
       set({ error: error.message, isLoading: false });
     }

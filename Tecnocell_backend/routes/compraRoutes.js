@@ -7,12 +7,14 @@ const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
 const requirePlanModule = require('../middleware/requirePlanModule');
+const branchScope = require('../middleware/branchScope');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 router.use(requirePlanModule('compras'));
+router.use(branchScope);
 
 // Fuentes financieras disponibles para registrar compras
 router.get('/fuentes-pago', requirePermission('compras.crear'), compraController.getFuentesPago);

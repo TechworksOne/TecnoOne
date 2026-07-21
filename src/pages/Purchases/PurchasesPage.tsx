@@ -14,13 +14,14 @@ import {
   RefreshCw,
   Ban,
 } from "lucide-react";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useCatalog } from "../../store/useCatalog";
 import { useRepuestosStore } from "../../store/useRepuestosStore";
 import { getAllCompras, anularCompra } from "../../services/purchaseService";
 import { useToast } from "../../components/ui/Toast";
 import Modal from "../../components/ui/Modal";
 import NuevaCompraModal from "./NuevaCompraModal";
+import { useSucursalContext } from "../../store/useSucursalContext";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const toNum = (v: unknown): number => {
@@ -72,22 +73,35 @@ export default function PurchasesPage() {
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [anulando, setAnulando] = useState(false);
   const toast = useToast();
+  const branchMode = useSucursalContext((state) => state.mode);
+  const sucursalActiva = useSucursalContext((state) => state.sucursalActiva);
+  const contextVersion = useSucursalContext((state) => state.contextVersion);
+  const requestSequence = useRef(0);
+  const readOnlyConsolidated = branchMode === "consolidated";
 
   useEffect(() => {
+    requestSequence.current += 1;
+    setCompras([]);
+    setSelectedCompra(null);
+    setShowDetailModal(false);
+    setShowNuevaCompra(false);
+    setConfirmAnular(null);
     loadProducts();
     loadRepuestos();
     loadCompras();
-  }, []);
+  }, [contextVersion]);
 
   const loadCompras = async () => {
+    const sequence = ++requestSequence.current;
     try {
       setLoadingCompras(true);
       const response = await getAllCompras({ limit: 100 });
+      if (sequence !== requestSequence.current) return;
       setCompras(response.data || []);
     } catch (error) {
       console.error("Error al cargar compras:", error);
     } finally {
-      setLoadingCompras(false);
+      if (sequence === requestSequence.current) setLoadingCompras(false);
     }
   };
 
@@ -97,7 +111,7 @@ export default function PurchasesPage() {
   };
 
   const handleConfirmAnular = async () => {
-    if (!confirmAnular) return;
+    if (!confirmAnular || readOnlyConsolidated) return;
     setAnulando(true);
     try {
       await anularCompra(confirmAnular.id, motivoAnulacion);
@@ -205,10 +219,16 @@ export default function PurchasesPage() {
           <p className="text-sm text-[#5E7184] dark:text-[#B8C2D1] mt-0.5">
             Inventario de productos, repuestos e historial de compras
           </p>
+          <p className="text-xs font-semibold text-[#2EA7D8] mt-1">
+            {readOnlyConsolidated
+              ? "Todas las sucursales · solo consulta"
+              : `Sucursal: ${sucursalActiva?.nombre || "sin seleccionar"}`}
+          </p>
         </div>
         <button
-          onClick={() => setShowNuevaCompra(true)}
-          className="shrink-0 flex items-center gap-2 bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] hover:brightness-110 text-white font-semibold rounded-2xl px-5 py-2.5 text-sm shadow-sm transition-all self-start"
+          onClick={() => { if (!readOnlyConsolidated) setShowNuevaCompra(true); }}
+          disabled={readOnlyConsolidated}
+          className="shrink-0 flex items-center gap-2 bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 text-white font-semibold rounded-2xl px-5 py-2.5 text-sm shadow-sm transition-all self-start"
         >
           <Plus size={16} />
           Nueva Compra
@@ -495,8 +515,9 @@ export default function PurchasesPage() {
               <p className="font-semibold text-[#14324A] dark:text-[#F8FAFC]">No hay compras registradas</p>
               <p className="text-sm text-[#5E7184] dark:text-[#B8C2D1]">Aún no has registrado ninguna compra</p>
               <button
-                onClick={() => setShowNuevaCompra(true)}
-                className="mt-1 flex items-center gap-1.5 bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] text-white text-sm rounded-xl px-4 py-2 hover:brightness-110"
+                onClick={() => { if (!readOnlyConsolidated) setShowNuevaCompra(true); }}
+                disabled={readOnlyConsolidated}
+                className="mt-1 flex items-center gap-1.5 bg-gradient-to-r from-[#2EA7D8] to-[#2563EB] disabled:cursor-not-allowed disabled:opacity-50 text-white text-sm rounded-xl px-4 py-2 hover:brightness-110"
               >
                 <Plus size={14} /> Registrar Primera Compra
               </button>
@@ -549,7 +570,8 @@ export default function PurchasesPage() {
                         <button
                           onClick={() => { setConfirmAnular({ id: compra.id, numero: compra.numero_compra }); setMotivoAnulacion(""); }}
                           title="Anular compra"
-                          className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 border border-[#D6EEF8] dark:border-[rgba(72,185,230,0.18)] hover:border-red-300 dark:hover:border-red-800 text-[#5E7184] dark:text-[#B8C2D1] hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                          disabled={readOnlyConsolidated}
+                          className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 disabled:cursor-not-allowed disabled:opacity-40 border border-[#D6EEF8] dark:border-[rgba(72,185,230,0.18)] hover:border-red-300 dark:hover:border-red-800 text-[#5E7184] dark:text-[#B8C2D1] hover:text-red-600 dark:hover:text-red-400 transition-colors"
                         >
                           <Ban size={14} />
                         </button>

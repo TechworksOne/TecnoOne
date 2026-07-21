@@ -6,6 +6,7 @@ const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePlanModule = require('../middleware/requirePlanModule');
 const requirePermission = require('../middleware/requirePermission');
+const branchScope = require('../middleware/branchScope');
 
 router.use(verifyToken);
 router.use(tenantScope);
@@ -13,10 +14,10 @@ router.use(checkEmpresaActiva);
 router.use(requirePlanModule('taller_operativo'));
 
 // GET /api/repuestos/stock-bajo - Debe ir antes de /:id
-router.get('/stock-bajo', requirePermission('repuestos.ver'), repuestoController.getStockBajo);
+router.get('/stock-bajo', requirePermission('repuestos.ver'), branchScope, repuestoController.getStockBajo);
 
 // GET /api/repuestos/estadisticas - Debe ir antes de /:id
-router.get('/estadisticas', requirePermission('repuestos.ver'), repuestoController.getEstadisticas);
+router.get('/estadisticas', requirePermission('repuestos.ver'), branchScope, repuestoController.getEstadisticas);
 
 // ── Catálogos jerárquicos ─────────────────────────────────────────────────
 // GET  /api/repuestos/tipos
@@ -37,13 +38,13 @@ router.post('/lineas', requirePermission('repuestos.administrar'), repuestoContr
 // ─────────────────────────────────────────────────────────────────────────
 
 // GET /api/repuestos - Obtener todos los repuestos (con filtros)
-router.get('/', requirePermission('repuestos.ver'), repuestoController.getAllRepuestos);
+router.get('/', requirePermission('repuestos.ver'), branchScope, repuestoController.getAllRepuestos);
 
 // POST /api/repuestos - Crear nuevo repuesto
 router.post('/', requirePermission('repuestos.administrar'), repuestoController.uploadRepuestos, repuestoController.createRepuesto);
 
 // GET /api/repuestos/:id - Obtener repuesto por ID
-router.get('/:id', requirePermission('repuestos.ver'), repuestoController.getRepuestoById);
+router.get('/:id', requirePermission('repuestos.ver'), branchScope, repuestoController.getRepuestoById);
 
 // PUT /api/repuestos/:id - Actualizar repuesto
 router.put('/:id', requirePermission('repuestos.administrar'), repuestoController.uploadRepuestos, repuestoController.updateRepuesto);
@@ -52,9 +53,9 @@ router.put('/:id', requirePermission('repuestos.administrar'), repuestoControlle
 router.delete('/:id', requirePermission('repuestos.administrar'), repuestoController.deleteRepuesto);
 
 // GET /api/repuestos/:id/movimientos - Historial de movimientos de stock
-router.get('/:id/movimientos', requirePermission('repuestos.ver'), repuestoController.getMovimientosRepuesto);
+router.get('/:id/movimientos', requirePermission('repuestos.ver'), branchScope, repuestoController.getMovimientosRepuesto);
 
 // POST /api/repuestos/:id/movimiento - Registrar movimiento de stock
-router.post('/:id/movimiento', requirePermission('repuestos.administrar'), repuestoController.registrarMovimiento);
+router.post('/:id/movimiento', requirePermission('repuestos.administrar'), branchScope, repuestoController.registrarMovimiento);
 
 module.exports = router;
