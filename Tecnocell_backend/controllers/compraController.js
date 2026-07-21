@@ -1,6 +1,8 @@
 // Controller para gestionar compras de productos y repuestos
 const db = require('../config/database');
 const { parsePagination } = require('../utils/pagination');
+const purchaseInventoryService = require('../services/purchaseInventoryService');
+const repuestoInventoryService = require('../services/repuestoInventoryService');
 const { validatePhone } = require('../utils/phoneValidation');
 const tarjetaCtrl = require('./tarjetaCreditoController');
 const auditoriaService = require('../services/auditoriaService');
@@ -499,6 +501,7 @@ exports.createCompraProductos = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    purchaseInventoryService.requireSpecific(req.branchScope);
     await connection.beginTransaction();
 
     const {
@@ -538,6 +541,7 @@ exports.createCompraProductos = async (req, res) => {
       });
     }
     const empresaId = requireCompraEmpresaId(req);
+    const sucursalId = Number(req.branchScope.sucursalId);
 
     const proveedorValido = await validateProveedorForCompra(connection, proveedor_id, empresaId);
     if (!proveedorValido) {
@@ -564,10 +568,10 @@ exports.createCompraProductos = async (req, res) => {
     // Insertar compra
     const [compraResult] = await connection.query(
       `INSERT INTO compras
-        (empresa_id, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedor_telefono,
+        (empresa_id, sucursal_id, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedor_telefono,
          proveedor_nit, proveedor_direccion, subtotal, impuestos, total, estado, notas, tipo)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'PRODUCTO')`,
-      [empresaId, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedorTelefonoNormalizado,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'PRODUCTO')`,
+      [empresaId, sucursalId, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedorTelefonoNormalizado,
        proveedor_nit, proveedor_direccion, subtotal, total, estado, notas]
     );
 
@@ -626,9 +630,18 @@ exports.createCompraProductos = async (req, res) => {
         const precioVentaCalculado = item.precio_unitario * margen;
 
         await connection.query(
-          'UPDATE productos SET stock = stock + ?, precio_costo = ?, precio_venta = ? WHERE id = ? AND empresa_id = ?',
-          [item.cantidad, item.precio_unitario, precioVentaCalculado, item.producto_id, empresaId]
+          'UPDATE productos SET precio_costo = ?, precio_venta = ? WHERE id = ? AND empresa_id = ?',
+          [item.precio_unitario, precioVentaCalculado, item.producto_id, empresaId]
         );
+        await purchaseInventoryService.receiveProduct(connection, {
+          branchScope: req.branchScope,
+          compraId,
+          compraItemId,
+          productoId: Number(item.producto_id),
+          cantidad: Number(item.cantidad),
+          usuarioId: req.user?.id ?? req.user?.userId ?? null,
+          numeroCompra: numero_compra,
+        });
 
         console.log(`✅ Producto ${item.producto_id}: +${item.cantidad} stock, Costo: Q${item.precio_unitario}, Venta: Q${precioVentaCalculado.toFixed(2)}`);
       }
@@ -668,6 +681,7 @@ exports.createCompraRepuestos = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    purchaseInventoryService.requireSpecific(req.branchScope);
     await connection.beginTransaction();
 
     const {
@@ -707,6 +721,7 @@ exports.createCompraRepuestos = async (req, res) => {
       });
     }
     const empresaId = requireCompraEmpresaId(req);
+    const sucursalId = Number(req.branchScope.sucursalId);
 
     const proveedorValido = await validateProveedorForCompra(connection, proveedor_id, empresaId);
     if (!proveedorValido) {
@@ -733,10 +748,10 @@ exports.createCompraRepuestos = async (req, res) => {
     // Insertar compra
     const [compraResult] = await connection.query(
       `INSERT INTO compras
-        (empresa_id, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedor_telefono,
+        (empresa_id, sucursal_id, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedor_telefono,
          proveedor_nit, proveedor_direccion, subtotal, impuestos, total, estado, notas, tipo)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'REPUESTO')`,
-      [empresaId, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedorTelefonoNormalizado,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'REPUESTO')`,
+      [empresaId, sucursalId, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedorTelefonoNormalizado,
        proveedor_nit, proveedor_direccion, subtotal, total, estado, notas]
     );
 
@@ -757,8 +772,11 @@ exports.createCompraRepuestos = async (req, res) => {
 
     // Procesar items
     for (const item of items) {
+      if (!Number.isInteger(Number(item.cantidad)) || Number(item.cantidad) <= 0) {
+        throw compraHttpError('La cantidad de cada repuesto debe ser un entero positivo');
+      }
       const [repuestos] = await connection.query(
-        'SELECT id FROM repuestos WHERE id = ? AND empresa_id = ? LIMIT 1',
+        'SELECT id FROM repuestos WHERE id = ? AND empresa_id = ? LIMIT 1 FOR UPDATE',
         [item.producto_id, empresaId]
       );
       if (!repuestos.length) {
@@ -783,9 +801,18 @@ exports.createCompraRepuestos = async (req, res) => {
         const publicoCentavos = Math.round(item.precio_unitario * margen * 100);
 
         await connection.query(
-          'UPDATE repuestos SET stock = stock + ?, precio_costo = ?, precio_publico = ? WHERE id = ? AND empresa_id = ?',
-          [item.cantidad, costoCentavos, publicoCentavos, item.producto_id, empresaId]
+          'UPDATE repuestos SET precio_costo = ?, precio_publico = ? WHERE id = ? AND empresa_id = ?',
+          [costoCentavos, publicoCentavos, item.producto_id, empresaId]
         );
+        await repuestoInventoryService.receivePurchase(connection, {
+          branchScope: req.branchScope,
+          compraId,
+          compraItemId: Number(itemResult.insertId),
+          repuestoId: Number(item.producto_id),
+          cantidad: Number(item.cantidad),
+          usuarioId: req.user?.id ?? req.user?.userId ?? null,
+          numeroCompra: numero_compra,
+        });
 
         console.log(`✅ Repuesto ${item.producto_id}: +${item.cantidad} stock, Costo: Q${item.precio_unitario}, Público: Q${(item.precio_unitario * margen).toFixed(2)}`);
       }
@@ -825,6 +852,7 @@ exports.createCompra = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    purchaseInventoryService.requireSpecific(req.branchScope);
     await connection.beginTransaction();
 
     const {
@@ -865,6 +893,7 @@ exports.createCompra = async (req, res) => {
       });
     }
     const empresaId = requireCompraEmpresaId(req);
+    const sucursalId = Number(req.branchScope.sucursalId);
 
     const proveedorValido = await validateProveedorForCompra(connection, proveedor_id, empresaId);
     if (!proveedorValido) {
@@ -925,10 +954,10 @@ exports.createCompra = async (req, res) => {
     // Insertar compra (con proveedor_id si existe)
     const [compraResult] = await connection.query(
       `INSERT INTO compras
-        (empresa_id, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedor_telefono, proveedor_nit,
+        (empresa_id, sucursal_id, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedor_telefono, proveedor_nit,
          proveedor_direccion, subtotal, impuestos, total, notas, estado, tipo)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [empresaId, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedorTelefonoNormalizado, proveedor_nit,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [empresaId, sucursalId, numero_compra, fecha_compra, proveedor_id, proveedor_nombre, proveedorTelefonoNormalizado, proveedor_nit,
        proveedor_direccion, subtotal, impuestos, total, notas, estado, tipoCompra]
     );
 
@@ -963,7 +992,7 @@ exports.createCompra = async (req, res) => {
         }
       } else if (tipoItem === 'repuesto') {
         const [repuestos] = await connection.query(
-          'SELECT id FROM repuestos WHERE id = ? AND empresa_id = ? LIMIT 1',
+          'SELECT id FROM repuestos WHERE id = ? AND empresa_id = ? LIMIT 1 FOR UPDATE',
           [item.producto_id, empresaId]
         );
         if (!repuestos.length) {
@@ -1019,11 +1048,20 @@ exports.createCompra = async (req, res) => {
           const margen = 1.30; // 30% de ganancia
           const precioVentaCalculado = item.precio_unitario * margen;
 
-          // Actualizar stock, precio_costo y precio_venta del producto
+          // El precio es empresarial; la existencia se recibe en la sucursal activa.
           await connection.query(
-            'UPDATE productos SET stock = stock + ?, precio_costo = ?, precio_venta = ? WHERE id = ? AND empresa_id = ?',
-            [item.cantidad, item.precio_unitario, precioVentaCalculado, item.producto_id, empresaId]
+            'UPDATE productos SET precio_costo = ?, precio_venta = ? WHERE id = ? AND empresa_id = ?',
+            [item.precio_unitario, precioVentaCalculado, item.producto_id, empresaId]
           );
+          await purchaseInventoryService.receiveProduct(connection, {
+            branchScope: req.branchScope,
+            compraId,
+            compraItemId,
+            productoId: Number(item.producto_id),
+            cantidad: Number(item.cantidad),
+            usuarioId: req.user?.id ?? req.user?.userId ?? null,
+            numeroCompra: numero_compra,
+          });
           console.log(`✅ Stock actualizado: Producto ${item.producto_id}, +${item.cantidad}, Costo: Q${item.precio_unitario}, Venta: Q${precioVentaCalculado}`);
 
         } else if (tipoItem === 'repuesto') {
@@ -1033,9 +1071,18 @@ exports.createCompra = async (req, res) => {
           const publicoCentavos = Math.round(item.precio_unitario * margen * 100);
 
           await connection.query(
-            'UPDATE repuestos SET stock = stock + ?, precio_costo = ?, precio_publico = ? WHERE id = ? AND empresa_id = ?',
-            [item.cantidad, costoCentavos, publicoCentavos, item.producto_id, empresaId]
+            'UPDATE repuestos SET precio_costo = ?, precio_publico = ? WHERE id = ? AND empresa_id = ?',
+            [costoCentavos, publicoCentavos, item.producto_id, empresaId]
           );
+          await repuestoInventoryService.receivePurchase(connection, {
+            branchScope: req.branchScope,
+            compraId,
+            compraItemId,
+            repuestoId: Number(item.producto_id),
+            cantidad: Number(item.cantidad),
+            usuarioId: req.user?.id ?? req.user?.userId ?? null,
+            numeroCompra: numero_compra,
+          });
           console.log(`✅ Stock actualizado: Repuesto ${item.producto_id}, +${item.cantidad}, Costo: Q${item.precio_unitario}, Público: Q${(publicoCentavos / 100).toFixed(2)}`);
         }
       }
@@ -1078,14 +1125,14 @@ exports.getAllCompras = async (req, res) => {
       defaultLimit: 20,
       maxLimit: 100,
     });
-    const tenant = compraTenantClause(req);
+    const scope = purchaseInventoryService.purchaseScopeClause(req.branchScope, 'compras');
 
     let query = 'SELECT * FROM compras WHERE 1=1';
     let countQuery = 'SELECT COUNT(*) as total FROM compras WHERE 1=1';
-    const params = [...tenant.params];
-    const countParams = [...tenant.params];
-    query += tenant.sql;
-    countQuery += tenant.sql;
+    const params = [...scope.params];
+    const countParams = [...scope.params];
+    query += scope.sql;
+    countQuery += scope.sql;
 
     if (estado) {
       query += ' AND estado = ?';
@@ -1151,10 +1198,10 @@ exports.getAllCompras = async (req, res) => {
 exports.getCompraById = async (req, res) => {
   try {
     const { id } = req.params;
-    const tenant = compraTenantClause(req);
+    const scope = purchaseInventoryService.purchaseScopeClause(req.branchScope, 'compras');
 
     // Obtener compra
-    const [compras] = await db.query(`SELECT * FROM compras WHERE id = ?${tenant.sql}`, [id, ...tenant.params]);
+    const [compras] = await db.query(`SELECT * FROM compras WHERE id = ?${scope.sql}`, [id, ...scope.params]);
 
     if (compras.length === 0) {
       return res.status(404).json({
@@ -1220,15 +1267,19 @@ exports.getSeriesByProducto = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Producto no encontrado' });
     }
 
-    let query = 'SELECT * FROM producto_series WHERE producto_id = ? AND empresa_id = ?';
-    const params = [productoId, empresaId];
+    const scope = purchaseInventoryService.purchaseScopeClause(req.branchScope, 'c');
+    let query = `SELECT ps.* FROM producto_series ps
+      INNER JOIN compras c
+        ON c.id = ps.compra_id AND c.empresa_id = ps.empresa_id
+      WHERE ps.producto_id = ? AND ps.empresa_id = ?${scope.sql}`;
+    const params = [productoId, empresaId, ...scope.params];
 
     if (estado) {
-      query += ' AND estado = ?';
+      query += ' AND ps.estado = ?';
       params.push(estado);
     }
 
-    query += ' ORDER BY fecha_ingreso DESC';
+    query += ' ORDER BY ps.fecha_ingreso DESC';
 
     const [series] = await db.query(query, params);
 
@@ -1253,14 +1304,18 @@ exports.getSeriesByProducto = async (req, res) => {
 exports.anularCompra = async (req, res) => {
   const connection = await db.getConnection();
   try {
+    purchaseInventoryService.requireSpecific(req.branchScope);
     await connection.beginTransaction();
 
     const { id } = req.params;
     const { motivo = '' } = req.body;
-    const tenant = compraTenantClause(req);
+    const scope = purchaseInventoryService.purchaseScopeClause(req.branchScope, 'compras');
 
     // Obtener la compra
-    const [compras] = await connection.query(`SELECT * FROM compras WHERE id = ?${tenant.sql}`, [id, ...tenant.params]);
+    const [compras] = await connection.query(
+      `SELECT * FROM compras WHERE id = ?${scope.sql} FOR UPDATE`,
+      [id, ...scope.params]
+    );
     if (compras.length === 0) {
       await connection.rollback();
       return res.status(404).json({ success: false, message: 'Compra no encontrada' });
@@ -1285,15 +1340,25 @@ exports.anularCompra = async (req, res) => {
           : compra.tipo;
 
         if (tipoItem === 'PRODUCTO') {
-          await connection.query(
-            'UPDATE productos SET stock = GREATEST(0, stock - ?) WHERE id = ? AND empresa_id = ?',
-            [item.cantidad, item.producto_id, empresaId]
-          );
+          await purchaseInventoryService.reverseProduct(connection, {
+            branchScope: req.branchScope,
+            compraId: Number(id),
+            compraItemId: Number(item.id),
+            productoId: Number(item.producto_id),
+            cantidad: Number(item.cantidad),
+            usuarioId: req.user?.id ?? req.user?.userId ?? null,
+            numeroCompra: compra.numero_compra,
+          });
         } else if (tipoItem === 'REPUESTO') {
-          await connection.query(
-            'UPDATE repuestos SET stock = GREATEST(0, stock - ?) WHERE id = ? AND empresa_id = ?',
-            [item.cantidad, item.producto_id, empresaId]
-          );
+          await repuestoInventoryService.reversePurchase(connection, {
+            branchScope: req.branchScope,
+            compraId: Number(id),
+            compraItemId: Number(item.id),
+            repuestoId: Number(item.producto_id),
+            cantidad: Number(item.cantidad),
+            usuarioId: req.user?.id ?? req.user?.userId ?? null,
+            numeroCompra: compra.numero_compra,
+          });
         }
       }
     }
@@ -1303,8 +1368,8 @@ exports.anularCompra = async (req, res) => {
 
     // Marcar como cancelada
     await connection.query(
-      "UPDATE compras SET estado = 'CANCELADA', notas = CONCAT(COALESCE(notas,''), IF(notas IS NULL OR notas = '', '', ' | '), 'ANULADA: ', ?) WHERE id = ? AND empresa_id = ?",
-      [motivo || 'Sin motivo', id, empresaId]
+      "UPDATE compras SET estado = 'CANCELADA', notas = CONCAT(COALESCE(notas,''), IF(notas IS NULL OR notas = '', '', ' | '), 'ANULADA: ', ?) WHERE id = ? AND empresa_id = ? AND sucursal_id = ?",
+      [motivo || 'Sin motivo', id, empresaId, Number(req.branchScope.sucursalId)]
     );
 
     await connection.commit();

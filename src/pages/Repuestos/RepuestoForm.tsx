@@ -327,7 +327,8 @@ export default function RepuestoForm({
       };
 
       if (isEditing && id) {
-        await repuestoService.updateRepuesto(Number(id), dataToSave);
+        const { stock: _stockReadOnly, ...updatePayload } = dataToSave;
+        await repuestoService.updateRepuesto(Number(id), updatePayload);
       } else {
         await repuestoService.createRepuesto(dataToSave);
       }
@@ -838,14 +839,13 @@ export default function RepuestoForm({
                     type="number"
                     min="0"
                     value={formData.stock}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setFormData((prev) => ({ ...prev, stock: Number(e.target.value) }))
-                    }
-                    className="w-full rounded-2xl"
+                    readOnly
+                    disabled
+                    className="w-full rounded-2xl cursor-not-allowed opacity-70"
                     placeholder="0"
                   />
                   <p className="text-[10px] text-[#7F8A99] dark:text-[#7F8A99] mt-1">
-                    Unidades disponibles
+                    Existencia del contexto activo; se modifica mediante movimientos de stock
                   </p>
                 </div>
               )}
