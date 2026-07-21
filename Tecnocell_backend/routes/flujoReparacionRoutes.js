@@ -7,11 +7,23 @@ const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePlanModule = require('../middleware/requirePlanModule');
 const requirePermission = require('../middleware/requirePermission');
+const branchScope = require('../middleware/branchScope');
+const reparacionInventoryService = require('../services/reparacionInventoryService');
+
+const requireSpecificFlujo = (req, res, next) => {
+  try {
+    reparacionInventoryService.requireSpecific(req.branchScope);
+    next();
+  } catch (error) {
+    res.status(error.statusCode || 409).json({ code: error.code, error: error.message });
+  }
+};
 
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 router.use(requirePlanModule('taller_operativo'));
+router.use(branchScope);
 // ========== ENDPOINT LEGACY DE CHECKLIST ==========
 // El checklist activo se gestiona mediante /api/check-equipo.
 router.all(
@@ -40,6 +52,7 @@ router.get(
 router.put(
   '/:id/estado',
   requirePermission('flujo_reparaciones.editar'),
+  requireSpecificFlujo,
   flujoController.cambiarEstado
 );
 
@@ -55,6 +68,7 @@ router.get(
 router.put(
   '/:id/tecnico',
   requirePermission('flujo_reparaciones.editar'),
+  requireSpecificFlujo,
   flujoController.asignarTecnico
 );
 
@@ -62,6 +76,7 @@ router.put(
 router.put(
   '/:id/prioridad',
   requirePermission('flujo_reparaciones.editar'),
+  requireSpecificFlujo,
   flujoController.cambiarPrioridad
 );
 
@@ -69,6 +84,7 @@ router.put(
 router.post(
   '/:id/reingresar-garantia',
   requirePermission('flujo_reparaciones.editar'),
+  requireSpecificFlujo,
   flujoController.reingresarGarantia
 );
 

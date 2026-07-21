@@ -10,6 +10,7 @@ import { getTecnicos, asignarTecnico } from '../../services/otService';
 import type { Tecnico } from '../../types/ot';
 import { useAuth } from '../../store/useAuth';
 import { isAdmin } from '../../lib/permissions';
+import { useSucursalContext } from '../../store/useSucursalContext';
 import API_URL from '../../services/config';
 import axios from 'axios';
 import { useToast } from '../../components/ui/Toast';
@@ -45,6 +46,9 @@ export default function FlujoReparacionDetailPage() {
   const [saving, setSaving] = useState(false);
   const { user } = useAuth();
   const userIsAdmin = isAdmin(user?.roles);
+  const branchMode = useSucursalContext((s) => s.mode);
+  const contextVersion = useSucursalContext((s) => s.contextVersion);
+  const isConsolidated = branchMode === 'consolidated';
 
   // OT: técnico asignado
   const [tecnicos,       setTecnicos]       = useState<Tecnico[]>([]);
@@ -208,7 +212,7 @@ export default function FlujoReparacionDetailPage() {
 
   useEffect(() => {
     loadReparacion();
-  }, [id]);
+  }, [id, contextVersion]);
 
   useEffect(() => {
     if (userIsAdmin) {

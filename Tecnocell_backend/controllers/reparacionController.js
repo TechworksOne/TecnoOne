@@ -6,9 +6,9 @@ const path = require('path');
 const fs = require('fs');
 const { imageFileFilter, getSafeImageExtension, sanitizeBaseName } = require('../utils/uploadSecurity');
 const { validatePhone } = require('../utils/phoneValidation');
-const cajaController = require('./cajaController');
 const contratoService = require('../services/contratoService');
 const auditoriaService = require('../services/auditoriaService');
+const reparacionInventoryService = require('../services/reparacionInventoryService');
 
 // Métodos de pago válidos (igual que ventas)
 const VALID_METODOS_PAGO_REP = ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA_BAC', 'TARJETA_NEONET', 'TARJETA_OTRA'];
@@ -91,6 +91,17 @@ function repairTenantClause(req, alias = 'r') {
   return isSuperadminTenant(req)
     ? { sql: '', params: [] }
     : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
+}
+
+/**
+ * Cláusula de scope usando branchScope cuando está disponible (rutas nuevas)
+ * o repairTenantClause como fallback (rutas legado / super admin).
+ */
+function repairScopeClause(req, alias = 'r') {
+  if (req.branchScope) {
+    return reparacionInventoryService.reparacionScopeClause(req.branchScope, alias);
+  }
+  return repairTenantClause(req, alias);
 }
 
 // Ruta base de uploads — siempre absoluta para ser compatible con Docker bind mount
@@ -459,6 +470,8 @@ exports.createReparacion = async (req, res) => {
     // Generar ID único
     const repairId = `REP${Date.now()}`;
     const empresaId = requireTenantEmpresaId(req);
+    // sucursal_id proviene del branchScope (ya validado por middleware); nunca del body.
+    const sucursalId = Number(req.branchScope.sucursalId);
 
     if (clienteId && !isSuperadminTenant(req)) {
       const [[cliente]] = await connection.query(
@@ -487,7 +500,7 @@ exports.createReparacion = async (req, res) => {
     // 1. Insertar reparación
     await connection.query(
       `INSERT INTO reparaciones (
-        id, empresa_id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
+        id, empresa_id, sucursal_id, cliente_id, cliente_nombre, cliente_telefono, cliente_email,
         tipo_equipo, marca, modelo, color, imei_serie, patron_contrasena,
         acceso_tipo, acceso_valor,
         estado_fisico, diagnostico_inicial,
@@ -497,9 +510,9 @@ exports.createReparacion = async (req, res) => {
         fecha_ingreso, observaciones,
         precio_revision_contrato, condiciones_servicio_contrato,
         created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        repairId, empresaId, clienteId || null, clienteNombre, clienteTelefonoNormalizado, clienteEmail,
+        repairId, empresaId, sucursalId, clienteId || null, clienteNombre, clienteTelefonoNormalizado, clienteEmail,
         tipoEquipo, marca, modelo, color, imeiSerie, patronContrasena,
         acceso_tipo, acceso_valor,
         estadoFisico, diagnosticoInicial,
@@ -902,7 +915,7 @@ exports.getAllReparaciones = async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    const tenant = repairTenantClause(req, 'r');
+    const tenant = repairScopeClause(req, 'r');
     query += tenant.sql;
     params.push(...tenant.params);
     
@@ -970,7 +983,7 @@ exports.getReparacionById = async (req, res) => {
     const { id } = req.params;
     
     // Obtener reparación principal
-    const tenant = repairTenantClause(req);
+    const tenant = repairScopeClause(req);
     const [reparaciones] = await db.query(
       `SELECT r.* FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
       [id, ...tenant.params]
@@ -1106,7 +1119,7 @@ exports.changeRepairState = async (req, res) => {
     }
 
     const uploadedFiles = req.files || [];
-    const tenant = repairTenantClause(req);
+    const tenant = repairScopeClause(req);
     
     // Obtener reparación actual
     const [reparaciones] = await connection.query(
@@ -1132,7 +1145,8 @@ exports.changeRepairState = async (req, res) => {
 
     let costoRepuestosUsados = 0;
 
-    for (const item of repuestosUsadosEstado) {
+    for (let lineaIdx = 0; lineaIdx < repuestosUsadosEstado.length; lineaIdx++) {
+      const item = repuestosUsadosEstado[lineaIdx];
       const repuestoId = Number(
         item.repuesto_id ?? item.repuestoId
       );
@@ -1151,24 +1165,14 @@ exports.changeRepairState = async (req, res) => {
         });
       }
 
-      const [[repuesto]] = await connection.query(
-        `SELECT
-           id,
-           empresa_id,
-           nombre,
-           precio_costo,
-           stock
-         FROM repuestos
-         WHERE id = ?
-           AND empresa_id = ?
-         FOR UPDATE`,
-        [
-          repuestoId,
-          reparacion.empresa_id,
-        ]
+      // Obtener precio_costo para el cálculo de costos (solo lectura del catálogo)
+      const [[repuestoCatalog]] = await connection.query(
+        `SELECT id, nombre, precio_costo FROM repuestos
+         WHERE id = ? AND empresa_id = ? FOR UPDATE`,
+        [repuestoId, reparacion.empresa_id]
       );
 
-      if (!repuesto) {
+      if (!repuestoCatalog) {
         await connection.rollback();
         return res.status(400).json({
           success: false,
@@ -1176,85 +1180,31 @@ exports.changeRepairState = async (req, res) => {
         });
       }
 
-      const stockAnterior = Number(repuesto.stock || 0);
-
-      if (stockAnterior < cantidad) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: `Stock insuficiente para "${repuesto.nombre}". Disponible: ${stockAnterior}, solicitado: ${cantidad}`,
-        });
-      }
-
-      const stockNuevo = stockAnterior - cantidad;
-      const costoUnitario = Number(
-        repuesto.precio_costo || 0
-      );
+      const costoUnitario = Number(repuestoCatalog.precio_costo || 0);
       const subtotal = costoUnitario * cantidad;
-
       costoRepuestosUsados += subtotal;
 
-      await connection.query(
-        `UPDATE repuestos
-         SET stock = ?
-         WHERE id = ?
-           AND empresa_id = ?`,
-        [
-          stockNuevo,
-          repuesto.id,
-          reparacion.empresa_id,
-        ]
-      );
-
-      await connection.query(
-        `INSERT INTO repuestos_movimientos (
-          repuesto_id,
-          tipo_movimiento,
-          cantidad,
-          stock_anterior,
-          stock_nuevo,
-          precio_unitario,
-          referencia_tipo,
-          referencia_id,
-          usuario_id,
-          notas
-        ) VALUES (
-          ?,
-          'REPARACION',
-          ?,
-          ?,
-          ?,
-          ?,
-          'REPARACION',
-          ?,
-          ?,
-          ?
-        )`,
-        [
-          repuesto.id,
-          cantidad,
-          stockAnterior,
-          stockNuevo,
-          costoUnitario,
-          id,
-          authUserId,
-          `Repuesto utilizado en reparación ${id}: ${repuesto.nombre}`,
-        ]
-      );
+      // Consumir desde repuesto_existencias (no toca repuestos.stock)
+      await reparacionInventoryService.consumeRepuesto(connection, {
+        branchScope: req.branchScope,
+        reparacionId: id,
+        repuestoId,
+        cantidad,
+        linea: lineaIdx,
+        usuarioId: authUserId,
+      });
 
       await connection.query(
         `INSERT INTO reparacion_repuestos (
-          reparacion_id,
-          repuesto_id,
-          nombre,
-          cantidad,
-          costo_unitario,
-          subtotal
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
+          empresa_id, sucursal_id, reparacion_id,
+          repuesto_id, nombre, cantidad, costo_unitario, subtotal
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
+          reparacion.empresa_id,
+          Number(req.branchScope.sucursalId),
           id,
-          repuesto.id,
-          repuesto.nombre,
+          repuestoId,
+          repuestoCatalog.nombre,
           cantidad,
           costoUnitario,
           subtotal,
@@ -1405,7 +1355,7 @@ exports.changeRepairState = async (req, res) => {
     
     await auditoriaService.registrar({
       req,
-      empresaId: req.tenant?.empresa_id,
+      empresaId: req.tenant?.empresa_id ?? req.branchScope?.empresaId,
       accion: 'EDITAR',
       entidad: 'REPARACION',
       entidadId: id,
@@ -1449,7 +1399,7 @@ exports.updateEstadoReparacion = async (req, res) => {
     }
 
     // Obtener estado anterior antes de actualizar
-    const tenant = repairTenantClause(req);
+    const tenant = repairScopeClause(req);
     const [[repActual]] = await db.query(
       `SELECT r.estado FROM reparaciones r WHERE r.id = ?${tenant.sql}`, [id, ...tenant.params]
     );
@@ -1482,7 +1432,7 @@ exports.updateEstadoReparacion = async (req, res) => {
 
     await auditoriaService.registrar({
       req,
-      empresaId: req.tenant?.empresa_id,
+      empresaId: req.tenant?.empresa_id ?? req.branchScope?.empresaId,
       accion: 'EDITAR',
       entidad: 'REPARACION',
       entidadId: id,
@@ -1511,7 +1461,7 @@ exports.getHistorialCompleto = async (req, res) => {
     const { id } = req.params;
 
     // Verificar que la reparación exista
-    const tenant = repairTenantClause(req);
+    const tenant = repairScopeClause(req);
     const [[reparacion]] = await db.query(
       `SELECT r.* FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
       [id, ...tenant.params]
@@ -1720,7 +1670,7 @@ exports.updatePrioridad = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Prioridad inválida. Debe ser BAJA, MEDIA o ALTA' });
     }
 
-    const tenant = repairTenantClause(req);
+    const tenant = repairScopeClause(req);
     const [[rep]] = await connection.query(
       `SELECT r.id, r.estado, r.prioridad FROM reparaciones r WHERE r.id = ?${tenant.sql}`, [id, ...tenant.params]
     );
@@ -1768,8 +1718,9 @@ exports.registrarPagoSaldo = async (req, res) => {
   try {
     await connection.beginTransaction();
     const { id } = req.params;
-    const { monto, metodoPago } = req.body;
+    const { monto, metodoPago, cajaId } = req.body;
     const usuario = req.user?.username || req.user?.name || req.user?.nombre || 'Usuario';
+    const usuarioId = req.user?.id || req.user?.userId || null;
 
     const montoNum = parseFloat(monto);
     if (!monto || isNaN(montoNum) || montoNum <= 0) {
@@ -1777,15 +1728,20 @@ exports.registrarPagoSaldo = async (req, res) => {
       return res.status(400).json({ success: false, message: 'El monto debe ser un número mayor a cero' });
     }
 
-    const METODOS_VALIDOS = ['efectivo', 'tarjeta'];
-    if (!metodoPago || !METODOS_VALIDOS.includes(metodoPago)) {
+    const METODOS_VALIDOS = ['efectivo', 'transferencia', 'tarjeta', 'tarjeta_bac', 'tarjeta_neonet', 'tarjeta_otra'];
+    const metodoNorm = String(metodoPago || '').toLowerCase();
+    if (!metodoNorm || !METODOS_VALIDOS.includes(metodoNorm)) {
       await connection.rollback();
-      return res.status(400).json({ success: false, message: 'Método de pago inválido. Use efectivo o tarjeta' });
+      return res.status(400).json({ success: false, message: 'Método de pago inválido' });
     }
 
-    const tenant = repairTenantClause(req);
+    const tenant = repairScopeClause(req);
     const [[rep]] = await connection.query(
-      `SELECT r.id, r.estado, r.total, r.monto_anticipo, r.monto_pagado_adicional FROM reparaciones r WHERE r.id = ?${tenant.sql}`, [id, ...tenant.params]
+      `SELECT r.id, r.estado, r.total, r.monto_anticipo, r.monto_pagado_adicional
+       FROM reparaciones r
+       WHERE r.id = ?${tenant.sql}
+       FOR UPDATE`,
+      [id, ...tenant.params]
     );
     if (!rep) {
       await connection.rollback();
@@ -1814,10 +1770,29 @@ exports.registrarPagoSaldo = async (req, res) => {
       });
     }
 
+    // Validar caja scope para efectivo; registrar en ledger financiero.
+    const metodoLedger = metodoNorm.toUpperCase();
+    const [[pagoCount]] = await connection.query(
+      `SELECT COUNT(*) AS cnt FROM reparacion_movimientos_financieros
+       WHERE empresa_id = ? AND sucursal_id = ? AND reparacion_id = ? AND accion = 'INGRESO'`,
+      [Number(req.branchScope.empresaId), Number(req.branchScope.sucursalId), id]
+    );
+    const pagoIndice = Number(pagoCount.cnt);
+
+    await reparacionInventoryService.registerFinancialMovement(connection, {
+      branchScope: req.branchScope,
+      reparacionId: id,
+      pagoIndice,
+      metodo: metodoLedger,
+      montoCentavos,
+      cajaId: metodoLedger === 'EFECTIVO' ? cajaId : null,
+      usuarioId,
+    });
+
     const nuevoMontoPagadoAdicional = (rep.monto_pagado_adicional || 0) + montoCentavos;
     await connection.query(
       `UPDATE reparaciones SET monto_pagado_adicional = ?, metodo_pago_adicional = ?, updated_by = ? WHERE id = ?${tenant.sql}`,
-      [nuevoMontoPagadoAdicional, metodoPago, usuario, id, ...tenant.params]
+      [nuevoMontoPagadoAdicional, metodoNorm, usuario, id, ...tenant.params]
     );
 
     await connection.query(
@@ -1826,9 +1801,9 @@ exports.registrarPagoSaldo = async (req, res) => {
        VALUES (?, ?, ?, ?, 'PAGO_SALDO', NULL, ?)`,
       [
         id, safeEstadoHistorial(rep.estado),
-        `Pago de saldo registrado: Q${montoNum.toFixed(2)} (${metodoPago})`,
+        `Pago de saldo registrado: Q${montoNum.toFixed(2)} (${metodoNorm})`,
         usuario,
-        `Pago de saldo Q${montoNum.toFixed(2)} en ${metodoPago}`
+        `Pago de saldo Q${montoNum.toFixed(2)} en ${metodoNorm}`
       ]
     );
 
@@ -1892,11 +1867,13 @@ exports.cancelarReparacion = async (req, res) => {
     const motivoRetLimpio = motivoRetencion;
 
     // ── Cargar reparación ────────────────────────────────────────────────
-    const tenant = repairTenantClause(req, 'r');
+    const tenant = repairScopeClause(req, 'r');
     const [[rep]] = await connection.query(
       `SELECT r.id, r.estado, r.cliente_nombre, r.monto_anticipo, r.metodo_anticipo,
               r.cuenta_bancaria_anticipo_id
-         FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
+       FROM reparaciones r
+       WHERE r.id = ?${tenant.sql}
+       FOR UPDATE`,
       [id, ...tenant.params]
     );
     if (!rep) {
@@ -2019,7 +1996,54 @@ exports.cancelarReparacion = async (req, res) => {
       }
     }
 
-    // ── UPDATE reparaciones con trazabilidad completa ────────────────────
+    // ── Revertir inventario de repuestos (ledger; idempotente) ──────────────
+    // Si hay repuestos en reparacion_repuestos pero sin ledger → bloquea (histórico inseguro)
+    const [repuestosConsumo] = await connection.query(
+      'SELECT repuesto_id FROM reparacion_repuestos WHERE reparacion_id = ? LIMIT 10',
+      [id]
+    );
+    const inventarioResult = await reparacionInventoryService.reverseAllRepuestos(connection, {
+      branchScope: req.branchScope,
+      reparacionId: id,
+      usuarioId: req.user?.id || null,
+      fallbackItems: repuestosConsumo,
+    });
+    if (inventarioResult.reversed > 0) {
+      notasAnticipo.push(`Inventario revertido: ${inventarioResult.reversed} tipo(s) de repuesto`);
+    }
+
+    // ── Revertir movimientos financieros en ledger (idempotente) ─────────────
+    const [regaliasRegistradas] = await connection.query(
+      `SELECT item_id, tipo_inventario
+       FROM reparacion_regalias
+       WHERE reparacion_id = ?
+       LIMIT 100`,
+      [id]
+    );
+
+    const regaliasResult =
+      await reparacionInventoryService.reverseAllRegalias(connection, {
+        branchScope: req.branchScope,
+        reparacionId: id,
+        usuarioId: req.user?.id || req.user?.userId || null,
+        fallbackItems: regaliasRegistradas,
+      });
+
+    if (regaliasResult.reversed > 0) {
+      notasAnticipo.push(
+        `Regalías revertidas: ${regaliasResult.reversed}`
+      );
+    }
+
+    const financieroResult = await reparacionInventoryService.reverseFinancialMovements(connection, {
+      branchScope: req.branchScope,
+      reparacionId: id,
+      usuarioId: req.user?.id || null,
+    });
+    if (financieroResult.count > 0) {
+      notasAnticipo.push(`Pagos en ledger revertidos: ${financieroResult.count}`);
+    }
+
     await connection.query(
       `UPDATE reparaciones r
          SET estado                  = 'CANCELADA',
@@ -2074,7 +2098,7 @@ exports.cancelarReparacion = async (req, res) => {
     await connection.commit();
     await auditoriaService.registrar({
       req,
-      empresaId: req.tenant?.empresa_id,
+      empresaId: req.tenant?.empresa_id ?? req.branchScope?.empresaId,
       accion: 'CANCELAR',
       entidad: 'REPARACION',
       entidadId: id,
@@ -2129,9 +2153,13 @@ exports.completarReparacion = async (req, res) => {
     const uploadedFiles    = req.files || [];
 
     // ── 1. Obtener reparación ─────────────────────────────────────────────
-    const tenant = repairTenantClause(req);
+    const tenant = repairScopeClause(req);
     const [[reparacion]] = await connection.query(
-      `SELECT r.* FROM reparaciones r WHERE r.id = ?${tenant.sql}`, [id, ...tenant.params]
+      `SELECT r.*
+       FROM reparaciones r
+       WHERE r.id = ?${tenant.sql}
+       FOR UPDATE`,
+      [id, ...tenant.params]
     );
     if (!reparacion) {
       await connection.rollback();
@@ -2160,7 +2188,8 @@ exports.completarReparacion = async (req, res) => {
 
     let costoRepuestosTotal = 0;
 
-    for (const item of repuestosUsados) {
+    for (let lineaIdx = 0; lineaIdx < repuestosUsados.length; lineaIdx++) {
+      const item = repuestosUsados[lineaIdx];
       const cantidad = Number(item.cantidad);
 
       if (!Number.isInteger(cantidad) || cantidad <= 0) {
@@ -2171,8 +2200,9 @@ exports.completarReparacion = async (req, res) => {
         });
       }
 
+      // Leer solo precio_costo del catálogo (no modifica repuestos.stock)
       const [[rep]] = await connection.query(
-        `SELECT id, nombre, precio_costo, stock
+        `SELECT id, nombre, precio_costo
          FROM repuestos
          WHERE id = ? AND empresa_id = ?
          FOR UPDATE`,
@@ -2187,64 +2217,28 @@ exports.completarReparacion = async (req, res) => {
         });
       }
 
-      const stockAnterior = Number(rep.stock || 0);
-
-      if (stockAnterior < cantidad) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: `Stock insuficiente para "${rep.nombre}". Disponible: ${stockAnterior}, solicitado: ${cantidad}`,
-        });
-      }
-
-      const stockNuevo = stockAnterior - cantidad;
       const costoUnit = Number(rep.precio_costo || 0);
       const subtotal = costoUnit * cantidad;
-
       costoRepuestosTotal += subtotal;
 
-      await connection.query(
-        `UPDATE repuestos
-         SET stock = ?
-         WHERE id = ? AND empresa_id = ?`,
-        [stockNuevo, rep.id, inventarioEmpresaId]
-      );
-
-      await connection.query(
-        `INSERT INTO repuestos_movimientos (
-          repuesto_id,
-          tipo_movimiento,
-          cantidad,
-          stock_anterior,
-          stock_nuevo,
-          precio_unitario,
-          referencia_tipo,
-          referencia_id,
-          usuario_id,
-          notas
-        ) VALUES (?, 'REPARACION', ?, ?, ?, ?, 'REPARACION', ?, ?, ?)`,
-        [
-          rep.id,
-          cantidad,
-          stockAnterior,
-          stockNuevo,
-          costoUnit,
-          id,
-          authUserId,
-          `Repuesto utilizado en reparación ${id}: ${rep.nombre}`,
-        ]
-      );
+      // Consumir desde repuesto_existencias (no toca repuestos.stock)
+      await reparacionInventoryService.consumeRepuesto(connection, {
+        branchScope: req.branchScope,
+        reparacionId: id,
+        repuestoId: rep.id,
+        cantidad,
+        linea: lineaIdx,
+        usuarioId: authUserId,
+      });
 
       await connection.query(
         `INSERT INTO reparacion_repuestos (
-          reparacion_id,
-          repuesto_id,
-          nombre,
-          cantidad,
-          costo_unitario,
-          subtotal
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
+          empresa_id, sucursal_id, reparacion_id,
+          repuesto_id, nombre, cantidad, costo_unitario, subtotal
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
+          inventarioEmpresaId,
+          Number(req.branchScope.sucursalId),
           id,
           rep.id,
           rep.nombre,
@@ -2258,7 +2252,12 @@ exports.completarReparacion = async (req, res) => {
     // ── 3. Procesar regalías ──────────────────────────────────────────────
     let costoRegaliasTotal = 0;
 
-    for (const item of regaliasUsadas) {
+    for (
+      let regaliaIdx = 0;
+      regaliaIdx < regaliasUsadas.length;
+      regaliaIdx++
+    ) {
+      const item = regaliasUsadas[regaliaIdx];
       const cantidad = Number(item.cantidad);
 
       if (!Number.isInteger(cantidad) || cantidad <= 0) {
@@ -2269,12 +2268,17 @@ exports.completarReparacion = async (req, res) => {
         });
       }
 
+      const tipoRegalia =
+        String(item.tipo || '').toLowerCase() === 'producto'
+          ? 'PRODUCTO'
+          : 'REPUESTO';
+
       let costoUnit = 0;
       let nombreItem = item.nombre || '';
 
-      if (item.tipo === 'producto') {
+      if (tipoRegalia === 'PRODUCTO') {
         const [[prod]] = await connection.query(
-          `SELECT id, nombre, precio_costo, stock
+          `SELECT id, nombre, precio_costo
            FROM productos
            WHERE id = ? AND empresa_id = ?
            FOR UPDATE`,
@@ -2289,32 +2293,13 @@ exports.completarReparacion = async (req, res) => {
           });
         }
 
-        const stockAnterior = Number(prod.stock || 0);
-
-        if (stockAnterior < cantidad) {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: `Stock insuficiente para "${prod.nombre}". Disponible: ${stockAnterior}, solicitado: ${cantidad}`,
-          });
-        }
-
-        const stockNuevo = stockAnterior - cantidad;
-
         costoUnit = Math.round(
           Number(prod.precio_costo || 0) * 100
         );
         nombreItem = prod.nombre;
-
-        await connection.query(
-          `UPDATE productos
-           SET stock = ?
-           WHERE id = ? AND empresa_id = ?`,
-          [stockNuevo, prod.id, inventarioEmpresaId]
-        );
       } else {
         const [[rep]] = await connection.query(
-          `SELECT id, nombre, precio_costo, stock
+          `SELECT id, nombre, precio_costo
            FROM repuestos
            WHERE id = ? AND empresa_id = ?
            FOR UPDATE`,
@@ -2329,53 +2314,19 @@ exports.completarReparacion = async (req, res) => {
           });
         }
 
-        const stockAnterior = Number(rep.stock || 0);
-
-        if (stockAnterior < cantidad) {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: `Stock insuficiente para "${rep.nombre}". Disponible: ${stockAnterior}, solicitado: ${cantidad}`,
-          });
-        }
-
-        const stockNuevo = stockAnterior - cantidad;
-
         costoUnit = Number(rep.precio_costo || 0);
         nombreItem = rep.nombre;
-
-        await connection.query(
-          `UPDATE repuestos
-           SET stock = ?
-           WHERE id = ? AND empresa_id = ?`,
-          [stockNuevo, rep.id, inventarioEmpresaId]
-        );
-
-        await connection.query(
-          `INSERT INTO repuestos_movimientos (
-            repuesto_id,
-            tipo_movimiento,
-            cantidad,
-            stock_anterior,
-            stock_nuevo,
-            precio_unitario,
-            referencia_tipo,
-            referencia_id,
-            usuario_id,
-            notas
-          ) VALUES (?, 'REPARACION', ?, ?, ?, ?, 'REPARACION', ?, ?, ?)`,
-          [
-            rep.id,
-            cantidad,
-            stockAnterior,
-            stockNuevo,
-            costoUnit,
-            id,
-            authUserId,
-            `Repuesto entregado como regalía en reparación ${id}: ${rep.nombre}`,
-          ]
-        );
       }
+
+      await reparacionInventoryService.consumeRegalia(connection, {
+        branchScope: req.branchScope,
+        reparacionId: id,
+        tipoItem: tipoRegalia,
+        itemId: item.id,
+        cantidad,
+        linea: regaliaIdx,
+        usuarioId: authUserId,
+      });
 
       const subtotal = costoUnit * cantidad;
       costoRegaliasTotal += subtotal;
@@ -2395,7 +2346,7 @@ exports.completarReparacion = async (req, res) => {
           id,
           item.id,
           nombreItem,
-          item.tipo || 'repuesto',
+          tipoRegalia.toLowerCase(),
           cantidad,
           costoUnit,
           subtotal,
@@ -2538,27 +2489,22 @@ exports.completarReparacion = async (req, res) => {
       );
     }
 
-    await connection.commit();
-
-    // ── 9. Registrar movimiento financiero (fuera de la transacción principal) ──
+    // ── 9. Registrar movimiento financiero en ledger (dentro de la transacción) ──
+    // Pago + inventario + reparación son atómicos. Si el ledger falla → rollback total.
     if (metodoPagoFinal && montoPagoFinalCentavos > 0) {
-      try {
-        await cajaController.registrarMovimientoReparacion(
-          id,
-          reparacion.cliente_nombre || '',
-          metodoPagoFinal,
-          montoPagoFinalCentavos,
-          authUserName,
-          null,          // connection separada (fuera de TX)
-          cuentaBancariaId,
-          referenciaPago,
-          inventarioEmpresaId
-        );
-      } catch (cajaErr) {
-        // No revertir la reparación por error financiero; solo loguear
-        console.error('⚠️ Error al registrar movimiento financiero de reparación:', cajaErr.message);
-      }
+      const pagoFinalCajaId = pagoFinalRaw?.caja_id ? parseInt(pagoFinalRaw.caja_id, 10) : null;
+      await reparacionInventoryService.registerFinancialMovement(connection, {
+        branchScope: req.branchScope,
+        reparacionId: id,
+        pagoIndice: 0,
+        metodo: metodoPagoFinal,
+        montoCentavos: montoPagoFinalCentavos,
+        cajaId: metodoPagoFinal === 'EFECTIVO' ? pagoFinalCajaId : null,
+        usuarioId: authUserId,
+      });
     }
+
+    await connection.commit();
 
     res.json({
       success: true,
@@ -2589,7 +2535,7 @@ exports.descargarContrato = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const tenant = repairTenantClause(req, 'r');
+    const tenant = repairScopeClause(req, 'r');
     const [[rep]] = await db.query(
       `SELECT r.* FROM reparaciones r WHERE r.id = ?${tenant.sql}`,
       [id, ...tenant.params]

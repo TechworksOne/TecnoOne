@@ -40,6 +40,8 @@ const upload = multer({
 
 exports.uploadMiddleware = upload.array('fotos', 10);
 
+const reparacionInventoryService = require('../services/reparacionInventoryService');
+
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true;
 }
@@ -50,25 +52,43 @@ function getTenantEmpresaId(req) {
 
 function repairTenantClause(req, alias = 'r') {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
-
   return {
     sql: ` AND ${alias}.empresa_id = ?`,
     params: [getTenantEmpresaId(req)]
   };
 }
 
-async function validateReparacionForTenant(connectionOrDb, reparacionId, req) {
-  const tenant = repairTenantClause(req, 'r');
+/**
+ * Cláusula empresa+sucursal usando branchScope cuando está disponible.
+ * specific  → empresa_id = ? AND sucursal_id = ?
+ * consolidated → empresa_id = ? AND sucursal_id IN (?,...)
+ * fallback (no branchScope) → empresa_id = ?
+ */
+function flujoScopeClause(req, alias = 'r') {
+  if (req.branchScope) {
+    return reparacionInventoryService.reparacionScopeClause(req.branchScope, alias);
+  }
+  return repairTenantClause(req, alias);
+}
+
+/**
+ * Carga y valida una reparación contra empresa+sucursal del branchScope.
+ * Retorna null si no existe o si pertenece a otra sucursal.
+ */
+async function validateReparacionScope(connectionOrDb, reparacionId, req) {
+  const scope = flujoScopeClause(req, 'r');
   const [reparaciones] = await connectionOrDb.query(
     `SELECT r.*
      FROM reparaciones r
-     WHERE r.id = ?${tenant.sql}
+     WHERE r.id = ?${scope.sql}
      LIMIT 1`,
-    [reparacionId, ...tenant.params]
+    [reparacionId, ...scope.params]
   );
-
   return reparaciones[0] || null;
 }
+
+// Alias de compatibilidad para código interno que no fue migrado aún
+const validateReparacionForTenant = validateReparacionScope;
 
 // ========== GUARDAR/ACTUALIZAR CHECKLIST DE INGRESO DE EQUIPO ==========
 exports.legacyIngresoEquipoDisabled = (req, res) => {
@@ -104,7 +124,7 @@ exports.cambiarEstado = async (req, res) => {
       });
     }
     
-    const reparacion = await validateReparacionForTenant(connection, reparacionId, req);
+    const reparacion = await validateReparacionScope(connection, reparacionId, req);
     if (!reparacion) {
       await connection.rollback();
       return res.status(404).json({
@@ -116,13 +136,13 @@ exports.cambiarEstado = async (req, res) => {
     // Actualizar estado en reparaciones
     if (nuevoEstado === 'ENTREGADA') {
       await connection.query(
-        'UPDATE reparaciones SET estado = ?, fecha_entrega = NOW(), fecha_cierre = CURDATE(), updated_at = NOW() WHERE id = ? AND empresa_id = ?',
-        [nuevoEstado, reparacionId, reparacion.empresa_id]
+        'UPDATE reparaciones SET estado = ?, fecha_entrega = NOW(), fecha_cierre = CURDATE(), updated_at = NOW() WHERE id = ? AND empresa_id = ? AND sucursal_id = ?',
+        [nuevoEstado, reparacionId, reparacion.empresa_id, reparacion.sucursal_id]
       );
     } else {
       await connection.query(
-        'UPDATE reparaciones SET estado = ?, updated_at = NOW() WHERE id = ? AND empresa_id = ?',
-        [nuevoEstado, reparacionId, reparacion.empresa_id]
+        'UPDATE reparaciones SET estado = ?, updated_at = NOW() WHERE id = ? AND empresa_id = ? AND sucursal_id = ?',
+        [nuevoEstado, reparacionId, reparacion.empresa_id, reparacion.sucursal_id]
       );
     }
 
@@ -163,7 +183,7 @@ exports.getHistorial = async (req, res) => {
   try {
     const { id: reparacionId } = req.params;
 
-    const reparacion = await validateReparacionForTenant(db, reparacionId, req);
+    const reparacion = await validateReparacionScope(db, reparacionId, req);
     if (!reparacion) {
       return res.status(404).json({
         success: false,
@@ -214,7 +234,7 @@ exports.asignarTecnico = async (req, res) => {
     const { id: reparacionId } = req.params;
     const { tecnicoId, tecnicoNombre } = req.body;
 
-    const reparacion = await validateReparacionForTenant(db, reparacionId, req);
+    const reparacion = await validateReparacionScope(db, reparacionId, req);
     if (!reparacion) {
       return res.status(404).json({
         success: false,
@@ -237,8 +257,8 @@ exports.asignarTecnico = async (req, res) => {
     }
     
     await db.query(
-      'UPDATE reparaciones SET tecnico_asignado = ?, updated_at = NOW() WHERE id = ? AND empresa_id = ?',
-      [tecnicoNombre, reparacionId, reparacion.empresa_id]
+      'UPDATE reparaciones SET tecnico_asignado = ?, updated_at = NOW() WHERE id = ? AND empresa_id = ? AND sucursal_id = ?',
+      [tecnicoNombre, reparacionId, reparacion.empresa_id, reparacion.sucursal_id]
     );
     
     res.json({
@@ -271,7 +291,7 @@ exports.cambiarPrioridad = async (req, res) => {
       });
     }
     
-    const reparacion = await validateReparacionForTenant(db, reparacionId, req);
+    const reparacion = await validateReparacionScope(db, reparacionId, req);
     if (!reparacion) {
       return res.status(404).json({
         success: false,
@@ -280,8 +300,8 @@ exports.cambiarPrioridad = async (req, res) => {
     }
 
     await db.query(
-      'UPDATE reparaciones SET prioridad = ?, updated_at = NOW() WHERE id = ? AND empresa_id = ?',
-      [prioridad, reparacionId, reparacion.empresa_id]
+      'UPDATE reparaciones SET prioridad = ?, updated_at = NOW() WHERE id = ? AND empresa_id = ? AND sucursal_id = ?',
+      [prioridad, reparacionId, reparacion.empresa_id, reparacion.sucursal_id]
     );
     
     res.json({
@@ -305,7 +325,7 @@ const ESTADOS_EXCLUIDOS_FLUJO = ['ENTREGADA', 'CANCELADA', 'ANULADA', 'CANCELADO
 exports.getReparacionesFlujoActivo = async (req, res) => {
   try {
     const { search, prioridad, limit = 200 } = req.query;
-    const tenant = repairTenantClause(req, 'r');
+    const tenant = flujoScopeClause(req, 'r');
 
     let query = `
       SELECT 
@@ -358,7 +378,7 @@ exports.getReparacionesFlujoActivo = async (req, res) => {
 exports.getEntregadas = async (req, res) => {
   try {
     const { search, estado_garantia, fecha_inicio, fecha_fin, limit = 200 } = req.query;
-    const tenant = repairTenantClause(req, 'r');
+    const tenant = flujoScopeClause(req, 'r');
 
     let query = `
       SELECT
@@ -449,7 +469,7 @@ exports.reingresarGarantia = async (req, res) => {
     }
 
     // Obtener reparación
-    const rep = await validateReparacionForTenant(connection, reparacionId, req);
+    const rep = await validateReparacionScope(connection, reparacionId, req);
 
     if (!rep) {
       await connection.rollback();
@@ -498,8 +518,8 @@ exports.reingresarGarantia = async (req, res) => {
         fecha_reingreso = NOW(),
         tecnico_asignado = COALESCE(?, tecnico_asignado),
         updated_at      = NOW()
-       WHERE id = ? AND empresa_id = ?`,
-      [motivo.trim(), repuesto.trim(), tecnico || null, reparacionId, rep.empresa_id]
+       WHERE id = ? AND empresa_id = ? AND sucursal_id = ?`,
+      [motivo.trim(), repuesto.trim(), tecnico || null, reparacionId, rep.empresa_id, rep.sucursal_id]
     );
 
     // Registrar en historial

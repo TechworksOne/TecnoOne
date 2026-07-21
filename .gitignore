@@ -33,6 +33,7 @@ dist/
 !Tecnocell_backend/scripts/migration_inventario_multisucursal_sprint_1_21.sql
 !Tecnocell_backend/scripts/migration_compras_multisucursal_sprint_1_22.sql
 !Tecnocell_backend/scripts/migration_ventas_multisucursal_sprint_1_23.sql
+!Tecnocell_backend/scripts/migration_reparaciones_multisucursal_sprint_1_24.sql
 !Tecnocell_backend/scripts/migration_empresas_config_saas_sprint_1_9_12.sql
 backups_codigo/
 backups_pre_pull_*

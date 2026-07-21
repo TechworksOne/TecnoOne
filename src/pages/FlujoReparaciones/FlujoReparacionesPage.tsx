@@ -13,6 +13,7 @@ import ModalHistorialReparacion from "../../components/repairs/ModalHistorialRep
 import KanbanBoard from "../../components/repairs/KanbanBoard";
 import ChecklistIngresoModal from "../../components/repairs/ChecklistIngresoModal";
 import HistorialEntregadasTab from "../../components/repairs/HistorialEntregadasTab";
+import { useSucursalContext } from "../../store/useSucursalContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface CheckEquipo {
@@ -63,6 +64,12 @@ const ESTADO_MAP: Record<string, { label: string; cls: string }> = {
 export default function FlujoReparacionesPage() {
   const navigate = useNavigate();
 
+  // ── Branch context ───────────────────────────────────────────────────────────
+  const branchMode = useSucursalContext((s) => s.mode);
+  const contextVersion = useSucursalContext((s) => s.contextVersion);
+  const sucursalActiva = useSucursalContext((s) => s.sucursalActiva);
+  const isConsolidated = branchMode === 'consolidated';
+
   // ── Data state ──────────────────────────────────────────────────────────────
   const [reparaciones, setReparaciones]   = useState<any[]>([]);
   const [checksEquipo, setChecksEquipo]   = useState<CheckEquipo[]>([]);
@@ -95,8 +102,8 @@ export default function FlujoReparacionesPage() {
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }
 
-  // ── Load ────────────────────────────────────────────────────────────────────
-  useEffect(() => { loadData(); }, []);
+  // ── Load: react to contextVersion ────────────────────────────────────────────
+  useEffect(() => { loadData(); }, [contextVersion]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -129,6 +136,11 @@ export default function FlujoReparacionesPage() {
 
   // ── Optimistic estado change (used by Kanban DnD) ────────────────────────────
   const handleEstadoChange = useCallback(async (repId: string, newEstado: string) => {
+    // Bloquear escrituras en modo consolidado
+    if (isConsolidated) {
+      showToast('Selecciona una sucursal específica para cambiar estados.', 'error');
+      return;
+    }
     // Save snapshot for rollback
     const snapshot = reparaciones.slice();
 
@@ -251,6 +263,14 @@ export default function FlujoReparacionesPage() {
         </div>
       )}
 
+      {/* ── BANNER CONSOLIDADO ────────────────────────────────────────────── */}
+      {isConsolidated && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-xs text-amber-800 dark:text-amber-300 font-medium">
+          <AlertCircle size={14} className="shrink-0" />
+          Vista consolidada · Solo lectura. Selecciona una sucursal específica para realizar acciones.
+        </div>
+      )}
+
       {/* ── HEADER ────────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -259,6 +279,11 @@ export default function FlujoReparacionesPage() {
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
             Gestión del avance de equipos en servicio técnico
+          </p>
+          <p className="text-xs font-semibold text-[#2EA7D8] mt-1">
+            {isConsolidated
+              ? 'Todas las sucursales · solo lectura'
+              : `Sucursal: ${sucursalActiva?.nombre || 'sin seleccionar'}`}
           </p>
         </div>
         <button
