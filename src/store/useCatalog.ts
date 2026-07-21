@@ -43,6 +43,8 @@ interface CatalogState {
   getSubcategories: (category: string) => string[];
 }
 
+let productLoadSequence = 0;
+
 export const useCatalog = create<CatalogState>((set, get) => ({
   products: [],
   categoryStructure: {},
@@ -74,7 +76,8 @@ export const useCatalog = create<CatalogState>((set, get) => ({
   },
 
   loadProducts: async (page = 1, limit = 20, search?: string, categoria?: string, options = {}) => {
-    set({ isLoadingProducts: true });
+    const sequence = ++productLoadSequence;
+    set({ isLoadingProducts: true, products: [] });
     try {
       const response = await productService.getAllProducts({ 
         page,
@@ -84,6 +87,7 @@ export const useCatalog = create<CatalogState>((set, get) => ({
         ...(options.activo !== undefined ? { activo: options.activo } : {}),
         ...(options.conStock !== undefined ? { conStock: options.conStock } : {}),
       });
+      if (sequence !== productLoadSequence) return;
       if (response.success) {
         // Mapear productos de BD a formato frontend
         const mappedProducts = response.data.map((p: any) => ({
@@ -115,6 +119,7 @@ export const useCatalog = create<CatalogState>((set, get) => ({
         });
       }
     } catch (error) {
+      if (sequence !== productLoadSequence) return;
       console.error('Error al cargar productos:', error);
       set({ isLoadingProducts: false });
     }
@@ -187,7 +192,6 @@ export const useCatalog = create<CatalogState>((set, get) => ({
       if (updates.price !== undefined && updates.precioPublico === undefined) {
         productData.precio_venta = parseFloat(String(updates.price)) || 0;
       }
-      if (updates.stock !== undefined) productData.stock = parseInt(String(updates.stock)) || 0;
       if (updates.stockMin !== undefined) productData.stock_minimo = parseInt(String(updates.stockMin)) || 0;
       if (updates.aplica_serie !== undefined) productData.aplica_serie = updates.aplica_serie ? true : false;
       if (updates.active !== undefined) productData.activo = updates.active;

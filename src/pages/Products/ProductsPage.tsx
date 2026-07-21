@@ -16,6 +16,7 @@ import { useAuth } from "../../store/useAuth";
 import { canViewCosts } from "../../lib/permissions";
 import { getImageUrl } from "../../utils/getImageUrl";
 import { printBarcode } from "../../lib/printBarcode";
+import { useSucursalContext } from "../../store/useSucursalContext";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function KpiCard({ label, value, sub, icon: Icon, gradient }: {
@@ -41,7 +42,7 @@ function KpiCard({ label, value, sub, icon: Icon, gradient }: {
 
 const PLACEHOLDER_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Crect fill='%23e5e7eb' width='48' height='48'/%3E%3Ctext fill='%239ca3af' font-family='system-ui' font-size='9' x='50%25' y='57%25' dominant-baseline='middle' text-anchor='middle'%3ESin img%3C/text%3E%3C/svg%3E";
 
-function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capitalize }: {
+function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capitalize, stockReadOnly }: {
   product: Product;
   onEdit: (p: Product) => void;
   onView: (p: Product) => void;
@@ -49,6 +50,7 @@ function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capi
   onStock: (id: string) => void;
   getImage: (p: Product) => string;
   capitalize: (s: string) => string;
+  stockReadOnly: boolean;
 }) {
   const { user } = useAuth();
   const showCost = canViewCosts(user?.roles);
@@ -118,7 +120,7 @@ function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capi
           <button onClick={() => onToggle(product)} className={actionBtn} title={product.active ? "Desactivar" : "Activar"}>
             {product.active ? <PowerOff size={14} className="text-orange-400 dark:text-orange-300" /> : <Power size={14} className="text-emerald-500 dark:text-emerald-400" />}
           </button>
-          <button onClick={() => onStock(product.id)} className={actionBtn} title="Ajustar stock"><Package size={14} /></button>
+          <button disabled={stockReadOnly} onClick={() => onStock(product.id)} className={`${actionBtn} disabled:cursor-not-allowed disabled:opacity-40`} title="Ajustar stock"><Package size={14} /></button>
           <button onClick={() => printBarcode(product.sku, product.name, 'Producto')} className={actionBtn} title="Imprimir código de barras"><Tag size={14} /></button>
         </div>
       </div>
@@ -155,7 +157,7 @@ function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capi
             <button onClick={() => onToggle(product)} className={actionBtn} title={product.active ? "Desactivar" : "Activar"}>
               {product.active ? <PowerOff size={15} className="text-orange-400 dark:text-orange-300" /> : <Power size={15} className="text-emerald-500 dark:text-emerald-400" />}
             </button>
-            <button onClick={() => onStock(product.id)} className={actionBtn} title="Ajustar stock"><Package size={15} /></button>
+            <button disabled={stockReadOnly} onClick={() => onStock(product.id)} className={`${actionBtn} disabled:cursor-not-allowed disabled:opacity-40`} title="Ajustar stock"><Package size={15} /></button>
             <button onClick={() => printBarcode(product.sku, product.name, 'Producto')} className={actionBtn} title="Imprimir código de barras"><Tag size={15} /></button>
           </div>
         </div>
@@ -183,6 +185,10 @@ export default function ProductsPage() {
   const toast = useToast();
   const { user } = useAuth();
   const showCost = canViewCosts(user?.roles);
+  const branchMode = useSucursalContext(state => state.mode);
+  const sucursalActiva = useSucursalContext(state => state.sucursalActiva);
+  const contextVersion = useSucursalContext(state => state.contextVersion);
+  const readOnlyConsolidated = branchMode === 'consolidated';
 
   // Estados - TODOS los useState deben estar declarados ANTES de cualquier useEffect
   const [searchTerm, setSearchTerm] = useState("");
@@ -239,7 +245,7 @@ export default function ProductsPage() {
   // Re-fetch from server whenever search or category filter changes
   useEffect(() => {
     loadProducts(1, pagination.pageSize, debouncedSearch || undefined, categoryFilter || undefined);
-  }, [debouncedSearch, categoryFilter]);
+  }, [debouncedSearch, categoryFilter, contextVersion]);
 
   // Cargar datos completos de categorías cuando se abre el modal
   useEffect(() => {
@@ -313,6 +319,7 @@ export default function ProductsPage() {
   }
 
   function handleStockAdjust(productId: string) {
+    if (readOnlyConsolidated) return;
     const product = products.find(p => p.id === productId);
     if (product) {
       setSelectedProduct(product);
@@ -376,6 +383,7 @@ export default function ProductsPage() {
   }
 
   async function handleStockAdjustment() {
+    if (readOnlyConsolidated) return;
     try {
       await adjustStock(stockAdjustment.productId, stockAdjustment.quantity, stockAdjustment.note);
       toast.add("Stock ajustado correctamente");
@@ -404,13 +412,13 @@ export default function ProductsPage() {
 
   async function handleDeleteProduct() {
     setConfirmState({
-      message: '¿Estás seguro de que deseas eliminar este producto? Esta acción no se puede deshacer.',
+      message: '¿Estás seguro de que deseas desactivar este producto? Los datos y sus dependencias se conservarán.',
       onConfirm: async () => {
         setConfirmState(null);
         try {
           const { deleteProduct } = useCatalog.getState();
           await deleteProduct(stockAdjustment.productId);
-          toast.add("Producto eliminado exitosamente");
+          toast.add("Producto desactivado exitosamente");
           setShowStockModal(false);
         } catch (error) {
           toast.add("Error al eliminar el producto", "error");
@@ -554,6 +562,11 @@ export default function ProductsPage() {
             Productos
           </h1>
           <p className="text-xs text-[#5E7184] dark:text-[#B8C2D1] mt-0.5">Gestión del catálogo de productos</p>
+          <p className="text-xs font-semibold text-[#2EA7D8] mt-1">
+            {branchMode === 'consolidated'
+              ? 'Todas las sucursales · existencias en solo consulta'
+              : `Sucursal: ${sucursalActiva?.nombre || 'sin seleccionar'}`}
+          </p>
         </div>
         <div className="flex gap-2 shrink-0">
           <Button
@@ -607,7 +620,12 @@ export default function ProductsPage() {
       </div>
 
       {/* ── Stock Alerts ─────────────────────────────────────────────── */}
-      <StockAlertsWidget />
+      {readOnlyConsolidated && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+          Las existencias consolidadas son de solo consulta. El catálogo de productos continúa siendo empresarial.
+        </div>
+      )}
+      <StockAlertsWidget key={contextVersion} />
 
       {/* ── Toolbar ─────────────────────────────────────────────────── */}
       <div className="bg-white dark:bg-[var(--color-surface)] rounded-2xl border border-slate-100 dark:border-[var(--color-border)] px-4 py-3 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
@@ -682,6 +700,7 @@ export default function ProductsPage() {
                 onStock={handleStockAdjust}
                 getImage={getProductImage}
                 capitalize={capitalizeText}
+                stockReadOnly={readOnlyConsolidated}
               />
             ))}
           </div>

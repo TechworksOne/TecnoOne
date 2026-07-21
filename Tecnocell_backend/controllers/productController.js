@@ -2,6 +2,7 @@ const db = require('../config/database');
 const { parsePagination, parseLimit } = require('../utils/pagination');
 const fs = require('fs');
 const path = require('path');
+const productInventoryService = require('../services/productInventoryService');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -54,10 +55,14 @@ exports.getAllProducts = async (req, res) => {
       defaultLimit: 20,
       maxLimit: 100,
     });
+    const stockScope = productInventoryService.stockProjection(req.branchScope, 'p');
     
     let query = `
       SELECT 
         p.*,
+        ${stockScope.sql} AS stock,
+        ? AS branch_mode,
+        ? AS sucursal_id_contexto,
         GROUP_CONCAT(
           JSON_OBJECT(
             'id', pi.id,
@@ -74,7 +79,11 @@ exports.getAllProducts = async (req, res) => {
     
     let countQuery = 'SELECT COUNT(*) as total FROM productos p WHERE 1=1';
     
-    const params = [];
+    const params = [
+      ...stockScope.params,
+      req.branchScope.mode,
+      req.branchScope.sucursalId,
+    ];
     const countParams = [];
     const tenant = productTenantClause(req, 'p');
 
@@ -99,8 +108,10 @@ exports.getAllProducts = async (req, res) => {
     }
     
     if (conStock === 'true') {
-      query += ' AND p.stock > 0';
-      countQuery += ' AND p.stock > 0';
+      query += ` AND ${stockScope.sql} > 0`;
+      countQuery += ` AND ${stockScope.sql} > 0`;
+      params.push(...stockScope.params);
+      countParams.push(...stockScope.params);
     }
     
     if (search) {
@@ -162,10 +173,14 @@ exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
     const tenant = productTenantClause(req, 'p');
+    const stockScope = productInventoryService.stockProjection(req.branchScope, 'p');
 
     const [products] = await db.query(
       `SELECT 
         p.*,
+        ${stockScope.sql} AS stock,
+        ? AS branch_mode,
+        ? AS sucursal_id_contexto,
         GROUP_CONCAT(
           JSON_OBJECT(
             'id', pi.id,
@@ -179,7 +194,13 @@ exports.getProductById = async (req, res) => {
       LEFT JOIN producto_imagenes pi ON p.id = pi.producto_id
       WHERE p.id = ?${tenant.sql}
       GROUP BY p.id`,
-      [id, ...tenant.params]
+      [
+        ...stockScope.params,
+        req.branchScope.mode,
+        req.branchScope.sucursalId,
+        id,
+        ...tenant.params,
+      ]
     );
     
     if (products.length === 0) {
@@ -390,6 +411,15 @@ exports.updateProduct = async (req, res) => {
       activo,
     } = req.body;
 
+    if (stock !== undefined) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        code: 'DIRECT_STOCK_UPDATE_FORBIDDEN',
+        message: 'Utilice el endpoint de ajuste de existencias para modificar stock',
+      });
+    }
+
     console.log('🔄 Actualizando producto ID:', id);
     console.log('📦 Body:', req.body);
     console.log('📎 Archivos:', req.files?.length || 0);
@@ -449,7 +479,6 @@ exports.updateProduct = async (req, res) => {
     if (subcategoria !== undefined) { updates.push('subcategoria = ?'); values.push(subcategoria); }
     if (precio_costo !== undefined) { updates.push('precio_costo = ?'); values.push(precio_costo); }
     if (precio_venta !== undefined) { updates.push('precio_venta = ?'); values.push(precio_venta); }
-    if (stock !== undefined) { updates.push('stock = ?'); values.push(stock); }
     if (stock_minimo !== undefined) { updates.push('stock_minimo = ?'); values.push(stock_minimo); }
     if (aplica_serie !== undefined) {
       updates.push('aplica_serie = ?');
@@ -560,7 +589,8 @@ exports.deleteProduct = async (req, res) => {
     console.error('Error al desactivar producto:', error);
     res.status(error.statusCode || 500).json({ 
       success: false, 
-      message: 'Error al desactivar producto',
+      code: error.code,
+      message: error.statusCode ? error.message : 'Error al desactivar producto',
       error: error.message 
     });
   }
@@ -568,19 +598,13 @@ exports.deleteProduct = async (req, res) => {
 
 // Ajustar stock con registro en kardex
 exports.adjustStock = async (req, res) => {
-  const connection = await db.getConnection();
-
   try {
-    await connection.beginTransaction();
-
     const { id } = req.params;
     const { cantidad, tipo = 'ajuste', nota } = req.body;
 
     const cantidadAjuste = Number(cantidad);
 
     if (!Number.isInteger(cantidadAjuste) || cantidadAjuste === 0) {
-      await connection.rollback();
-
       return res.status(400).json({
         success: false,
         message: 'La cantidad debe ser un número entero distinto de cero'
@@ -595,101 +619,37 @@ exports.adjustStock = async (req, res) => {
         ? null
         : String(nota).trim().slice(0, 500) || null;
 
-    const tenant = productTenantClause(req, 'p');
-
-    const [products] = await connection.query(
-      `SELECT p.stock, p.empresa_id
-       FROM productos p
-       WHERE p.id = ?${tenant.sql}
-       FOR UPDATE`,
-      [id, ...tenant.params]
-    );
-
-    if (products.length === 0) {
-      await connection.rollback();
-
-      return res.status(404).json({
-        success: false,
-        message: 'Producto no encontrado'
-      });
-    }
-
-    const empresaId = Number(products[0].empresa_id);
-    const stockAnterior = Number(products[0].stock);
-    const stockNuevo = stockAnterior + cantidadAjuste;
-
-    if (stockNuevo < 0) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        success: false,
-        message: 'Stock insuficiente'
-      });
-    }
-
-    const updateTenant =
-      productTenantClause(req, 'productos');
-
-    await connection.query(
-      `UPDATE productos
-       SET stock = ?
-       WHERE id = ?${updateTenant.sql}`,
-      [stockNuevo, id, ...updateTenant.params]
-    );
-
     const usuarioId =
       req.user?.id ??
       req.user?.userId ??
       null;
-
-    await connection.query(
-      `INSERT INTO kardex (
-        empresa_id,
-        producto_id,
-        tipo,
-        cantidad,
-        cantidad_anterior,
-        cantidad_nueva,
-        nota,
-        usuario_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        empresaId,
-        id,
-        tipoNormalizado,
-        cantidadAjuste,
-        stockAnterior,
-        stockNuevo,
-        notaNormalizada,
-        usuarioId
-      ]
-    );
-
-    await connection.commit();
+    const result = await productInventoryService.ajustarExistencia({
+      branchScope: req.branchScope,
+      productoId: Number(id),
+      cantidad: cantidadAjuste,
+      tipo: tipoNormalizado,
+      nota: notaNormalizada,
+      usuarioId,
+    });
 
     return res.json({
       success: true,
       message: 'Stock ajustado exitosamente',
       data: {
-        stock_anterior: stockAnterior,
-        stock_nuevo: stockNuevo,
-        diferencia: cantidadAjuste
+        ...result,
+        branch_mode: req.branchScope.mode,
+        sucursal_id: req.branchScope.sucursalId,
       }
     });
   } catch (error) {
-    try {
-      await connection.rollback();
-    } catch (_) {}
-
     console.error('Error al ajustar stock:', error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: 'Error al ajustar stock',
+      code: error.code,
+      message: error.statusCode ? error.message : 'Error al ajustar stock',
       error: error.message
     });
-  } finally {
-    connection.release();
   }
 };
 
@@ -712,41 +672,18 @@ exports.getProductKardex = async (req, res) => {
       });
     }
 
-    const [tables] = await db.query(
-      `SELECT COUNT(*) as total
-       FROM information_schema.TABLES
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = 'kardex'`
-    );
-
-    if (!tables[0]?.total) {
-      return res.json({
-        success: true,
-        data: [],
-        message: 'Kardex no configurado'
-      });
-    }
-
     const safeLimit = parseLimit(limit, { defaultLimit: 50, maxLimit: 100 });
-
-    const [kardex] = await db.query(
-      `SELECT
-        k.*,
-        u.username as usuario_nombre
-      FROM kardex k
-      INNER JOIN productos p
-        ON p.id = k.producto_id
-       AND p.empresa_id = k.empresa_id
-      LEFT JOIN users u ON k.usuario_id = u.id
-      WHERE k.producto_id = ?${tenant.sql}
-      ORDER BY k.created_at DESC
-      LIMIT ?`,
-      [id, ...tenant.params, safeLimit]
-    );
+    const kardex = await productInventoryService.listarMovimientos({
+      branchScope: req.branchScope,
+      productoId: Number(id),
+      limit: safeLimit,
+    });
     
     res.json({
       success: true,
-      data: kardex
+      data: kardex,
+      branch_mode: req.branchScope.mode,
+      sucursal_id: req.branchScope.sucursalId,
     });
   } catch (error) {
     console.error('Error al obtener kardex:', error);
@@ -770,10 +707,14 @@ exports.searchProducts = async (req, res) => {
       });
     }
     const tenant = productTenantClause(req, 'p');
+    const stockScope = productInventoryService.stockProjection(req.branchScope, 'p');
 
     const [products] = await db.query(
       `SELECT 
         p.*,
+        ${stockScope.sql} AS stock,
+        ? AS branch_mode,
+        ? AS sucursal_id_contexto,
         GROUP_CONCAT(
           JSON_OBJECT(
             'id', pi.id,
@@ -790,7 +731,13 @@ exports.searchProducts = async (req, res) => {
       AND (p.nombre LIKE ? OR p.sku LIKE ? OR p.descripcion LIKE ?)
       GROUP BY p.id
       LIMIT 20`,
-      [...tenant.params, `%${q}%`, `%${q}%`, `%${q}%`]
+      [
+        ...stockScope.params,
+        req.branchScope.mode,
+        req.branchScope.sucursalId,
+        ...tenant.params,
+        `%${q}%`, `%${q}%`, `%${q}%`,
+      ]
     );
     
     const productsWithImages = products.map(p => ({
@@ -816,9 +763,16 @@ exports.searchProducts = async (req, res) => {
 exports.getCriticalStockProducts = async (req, res) => {
   try {
     const tenant = productTenantClause(req, 'p');
+    const stockScope = productInventoryService.stockProjection(req.branchScope, 'p');
     const [products] = await db.query(
       `SELECT
-        p.*,
+        p.id, p.empresa_id, p.sku, p.nombre, p.descripcion,
+        p.categoria, p.subcategoria, p.precio_costo, p.precio_venta,
+        p.stock_minimo, p.aplica_serie, p.sku_generado, p.activo,
+        p.created_at, p.updated_at,
+        ${stockScope.sql} AS stock,
+        ? AS branch_mode,
+        ? AS sucursal_id_contexto,
         GROUP_CONCAT(
           JSON_OBJECT(
             'id', pi.id,
@@ -827,14 +781,22 @@ exports.getCriticalStockProducts = async (req, res) => {
             'descripcion', pi.descripcion
           )
           ORDER BY pi.orden
-        ) as imagenes,
-        (p.stock_minimo - p.stock) as faltante
+        ) AS imagenes,
+        (p.stock_minimo - ${stockScope.sql}) AS faltante
       FROM productos p
       LEFT JOIN producto_imagenes pi ON p.id = pi.producto_id
-      WHERE p.activo = true${tenant.sql} AND p.stock <= p.stock_minimo
+      WHERE p.activo = true${tenant.sql}
+        AND ${stockScope.sql} <= p.stock_minimo
       GROUP BY p.id
-      ORDER BY faltante DESC, p.stock ASC`,
-      tenant.params
+      ORDER BY faltante DESC, stock ASC`,
+      [
+        ...stockScope.params,
+        req.branchScope.mode,
+        req.branchScope.sucursalId,
+        ...stockScope.params,
+        ...tenant.params,
+        ...stockScope.params,
+      ]
     );
     
     const productsWithImages = products.map(p => ({
