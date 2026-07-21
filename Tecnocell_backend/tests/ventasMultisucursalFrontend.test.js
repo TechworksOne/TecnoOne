@@ -1,0 +1,14 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const page = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pages', 'Sales', 'SalesPageNew.tsx'), 'utf8');
+const store = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'store', 'useSales.ts'), 'utf8');
+assert.match(page, /useSucursalContext/);
+assert.match(page, /contextVersion/);
+assert.match(page, /ventasSequence/);
+assert.match(page, /Todas las sucursales · solo consulta/);
+assert.match(page, /disabled=\{readOnlyConsolidated\}/);
+assert.doesNotMatch(page, /selector.*sucursal/i);
+assert.match(store, /salesLoadSequence/);
+assert.match(store, /sequence !== salesLoadSequence/);
+console.log('OK ventasMultisucursalFrontend: contexto, stale responses y consolidado de solo lectura');

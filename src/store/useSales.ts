@@ -15,14 +15,18 @@ interface SalesState {
   getTotalRevenue: () => number;
 }
 
+let salesLoadSequence = 0;
+
 export const useSales = create<SalesState>((set, get) => ({
   sales: [],
   loading: false,
 
   loadSales: async () => {
-    set({ loading: true });
+    const sequence = ++salesLoadSequence;
+    set({ sales: [], loading: true });
     try {
       const ventasData = await ventaService.getAllVentas();
+      if (sequence !== salesLoadSequence) return;
       
       // Mapear ventas del backend al formato del frontend
       const salesMapped: Sale[] = ventasData.map((venta): Sale => ({
@@ -64,6 +68,7 @@ export const useSales = create<SalesState>((set, get) => ({
       
       set({ sales: salesMapped, loading: false });
     } catch (error) {
+      if (sequence !== salesLoadSequence) return;
       console.error('Error al cargar ventas:', error);
       set({ loading: false });
     }
