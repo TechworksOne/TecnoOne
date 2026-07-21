@@ -1,4 +1,6 @@
 const sucursalService = require('../services/sucursalService');
+const permisoService = require('../services/permisoService');
+const branchScope = require('../middleware/branchScope');
 
 exports.listarMisSucursales = async (req, res) => {
   try {
@@ -11,11 +13,24 @@ exports.listarMisSucursales = async (req, res) => {
     }
     const empresaId = req.user?.empresaId ?? req.user?.empresa_id;
     const usuarioId = req.user?.userId ?? req.user?.id;
-    const data = await sucursalService.listarSucursalesActivasUsuario(
+    const sucursales = await sucursalService.listarSucursalesActivasUsuario(
       empresaId,
       usuarioId
     );
-    return res.json({ success: true, data });
+    const canUseConsolidated = await permisoService.hasPermission(
+      req,
+      branchScope.CONSOLIDATED_PERMISSION
+    );
+    const defaultSucursal = sucursales.find(item => Boolean(item.es_predeterminada))
+      || sucursales[0];
+    return res.json({
+      success: true,
+      data: {
+        sucursales,
+        canUseConsolidated,
+        defaultSucursalId: defaultSucursal ? Number(defaultSucursal.id) : null,
+      },
+    });
   } catch (error) {
     console.error('listarMisSucursales error:', error);
     return res.status(error.statusCode || 500).json({

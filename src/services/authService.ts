@@ -99,6 +99,7 @@ export const authService = {
    * Cerrar sesión
    */
   logout(): void {
+    const currentUser = this.getUser();
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('userName');
@@ -109,6 +110,9 @@ export const authService = {
     sessionStorage.removeItem('userName');
     sessionStorage.removeItem('role');
     localStorage.removeItem('tecnoone.sucursalActivaId');
+    if (currentUser?.id) {
+      localStorage.removeItem(`tecnoone.sucursalActivaId.${currentUser.id}`);
+    }
 
     window.dispatchEvent(new Event('auth-change'));
   },

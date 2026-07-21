@@ -5,11 +5,17 @@ const read = file => fs.readFileSync(path.join(__dirname, '..', '..', file), 'ut
 const page = read('src/pages/Cajas/CajasPage.tsx');
 const manager = read('src/components/cajas/CajaManager.tsx');
 const service = read('src/services/cajaCatalogoService.ts');
+
 assert.match(page, /sucursalActiva\?\.id/);
-assert.match(manager, /\[api, filter, platform, sucursalActivaId\]/);
+assert.match(page, /contextVersion/);
+assert.match(page, /mode === 'consolidated'/);
+assert.match(manager, /requestSequence/);
+assert.match(manager, /readOnlyConsolidated/);
+assert.match(manager, /Vista consolidada de solo consulta/);
 assert.doesNotMatch(page, /sucursal_id/);
 assert.match(service, /X-Sucursal-Id/);
 assert.match(service, /if \(!platform\)/);
 assert.match(manager, /platform && !editing/);
 assert.match(manager, /activar.*desactivar/);
-console.log('OK cajaCatalogoFrontend: contexto activo, recarga, formulario empresarial y administracion');
+
+console.log('OK cajaCatalogoFrontend: recarga segura y consolidado de solo consulta');
