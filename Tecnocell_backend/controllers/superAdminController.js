@@ -631,11 +631,33 @@ exports.createEmpresaAdministrador = async (req, res) => {
       ]
     );
 
-    await sucursalService.asignarSucursalPrincipalUsuario(
-      empresa.id,
-      userResult.insertId,
-      connection
-    );
+    const tieneAsignacionSucursales =
+      Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        'sucursal_ids'
+      ) ||
+      Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        'predeterminada_id'
+      );
+
+    if (tieneAsignacionSucursales) {
+      await sucursalService.actualizarSucursalesUsuario(
+        empresa.id,
+        userResult.insertId,
+        {
+          sucursal_ids: req.body?.sucursal_ids,
+          predeterminada_id: req.body?.predeterminada_id,
+        },
+        connection
+      );
+    } else {
+      await sucursalService.asignarSucursalPrincipalUsuario(
+        empresa.id,
+        userResult.insertId,
+        connection
+      );
+    }
 
     await connection.commit();
     committed = true;

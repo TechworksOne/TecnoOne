@@ -17,11 +17,13 @@ export default function SucursalManager({
   used,
   limit,
   title = 'Sucursales',
-}: {
+    onChange,
+  }: {
   api: SucursalApi;
   used?: number | null;
   limit?: number | null;
   title?: string;
+  onChange?: (rows: Sucursal[]) => void;
 }) {
   const [rows, setRows] = useState<Sucursal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,13 +38,17 @@ export default function SucursalManager({
     setLoading(true);
     setError('');
     try {
-      setRows(await api.listar());
+      const nextRows =
+          await api.listar();
+
+        setRows(nextRows);
+        onChange?.(nextRows);
     } catch (requestError) {
       setError(sucursalErrorMessage(requestError, 'No fue posible cargar las sucursales.'));
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, onChange]);
 
   useEffect(() => { void load(); }, [load]);
 

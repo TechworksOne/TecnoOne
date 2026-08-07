@@ -145,6 +145,35 @@ export default function SuperAdminEmpresaDetailPage() {
       apellidos: '',
     });
 
+    const [
+      adminSucursalIds,
+      setAdminSucursalIds,
+    ] = useState<number[]>([]);
+
+    const [
+      adminPredeterminadaId,
+      setAdminPredeterminadaId,
+    ] = useState<number | ''>('');
+
+    useEffect(() => {
+      if (!sucursalesCajas.length) {
+        setAdminSucursalIds([]);
+        setAdminPredeterminadaId('');
+        return;
+      }
+
+      const primeraSucursalId =
+        Number(sucursalesCajas[0].id);
+
+      setAdminSucursalIds([
+        primeraSucursalId
+      ]);
+
+      setAdminPredeterminadaId(
+        primeraSucursalId
+      );
+    }, [sucursalesCajas]);
+
   const [
     renewalReason,
     setRenewalReason,
@@ -317,12 +346,39 @@ export default function SuperAdminEmpresaDetailPage() {
     event.preventDefault();
     clearAlerts();
 
+      if (!adminSucursalIds.length) {
+        setError(
+          'Seleccione al menos una sucursal para el administrador.'
+        );
+        return;
+      }
+
+      if (
+        adminPredeterminadaId === '' ||
+        !adminSucursalIds.includes(
+          Number(adminPredeterminadaId)
+        )
+      ) {
+        setError(
+          'Seleccione una sucursal predeterminada válida.'
+        );
+        return;
+      }
+
     try {
       await superAdminService
         .createAdministrador(
           id,
-          admin
-        );
+            {
+              ...admin,
+              sucursal_ids:
+                adminSucursalIds,
+              predeterminada_id:
+                Number(
+                  adminPredeterminadaId
+                ),
+            }
+          );
 
       setEmpresa(
         await superAdminService
@@ -691,6 +747,7 @@ export default function SuperAdminEmpresaDetailPage() {
         api={sucursalesApi}
         used={Number(empresa.total_sucursales || 0)}
         limit={empresa.limite_sucursales}
+        onChange={setSucursalesCajas}
       />
 
       <CajaManager api={cajasApi} sucursales={sucursalesCajas} />
@@ -1303,7 +1360,144 @@ export default function SuperAdminEmpresaDetailPage() {
               )
             )}
 
-            <div className="sm:col-span-2">
+                          <fieldset className="sm:col-span-2 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+                <legend className="px-2 text-sm font-bold">
+                  Sucursales asignadas
+                </legend>
+
+                {sucursalesCajas.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    Primero debe crear al menos una sucursal.
+                  </p>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {sucursalesCajas.map(
+                      sucursal => {
+                        const sucursalId =
+                          Number(
+                            sucursal.id
+                          );
+
+                        const seleccionada =
+                          adminSucursalIds.includes(
+                            sucursalId
+                          );
+
+                        return (
+                          <label
+                            key={sucursal.id}
+                            className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal dark:border-slate-700"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={
+                                seleccionada
+                              }
+                              onChange={
+                                event => {
+                                  const siguiente =
+                                    event.target.checked
+                                      ? [
+                                          ...adminSucursalIds,
+                                          sucursalId,
+                                        ]
+                                      : adminSucursalIds.filter(
+                                          item =>
+                                            item !==
+                                            sucursalId
+                                        );
+
+                                  setAdminSucursalIds(
+                                    siguiente
+                                  );
+
+                                  if (
+                                    event.target.checked &&
+                                    adminPredeterminadaId === ''
+                                  ) {
+                                    setAdminPredeterminadaId(
+                                      sucursalId
+                                    );
+                                  }
+
+                                  if (
+                                    !event.target.checked &&
+                                    Number(
+                                      adminPredeterminadaId
+                                    ) === sucursalId
+                                  ) {
+                                    setAdminPredeterminadaId(
+                                      siguiente[0] ?? ''
+                                    );
+                                  }
+                                }
+                              }
+                            />
+
+                            <span>
+                              {sucursal.nombre}
+                            </span>
+                          </label>
+                        );
+                      }
+                    )}
+                  </div>
+                )}
+
+                <label className="mt-4 block text-sm font-semibold">
+                  Sucursal predeterminada
+
+                  <select
+                    value={
+                      adminPredeterminadaId
+                    }
+                    disabled={
+                      !adminSucursalIds.length
+                    }
+                    onChange={
+                      event =>
+                        setAdminPredeterminadaId(
+                          event.target.value
+                            ? Number(
+                                event.target.value
+                              )
+                            : ''
+                        )
+                    }
+                    className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-transparent px-3 font-normal dark:border-slate-700"
+                  >
+                    <option value="">
+                      Seleccione una sucursal
+                    </option>
+
+                    {sucursalesCajas
+                      .filter(
+                        sucursal =>
+                          adminSucursalIds.includes(
+                            Number(
+                              sucursal.id
+                            )
+                          )
+                      )
+                      .map(
+                        sucursal => (
+                          <option
+                            key={sucursal.id}
+                            value={sucursal.id}
+                          >
+                            {sucursal.nombre}
+                          </option>
+                        )
+                      )}
+                  </select>
+                </label>
+
+                <p className="mt-2 text-xs font-normal text-slate-500">
+                  El administrador tendrá acceso únicamente a las sucursales seleccionadas.
+                </p>
+              </fieldset>
+
+<div className="sm:col-span-2">
               <button className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white">
                 Crear administrador
               </button>
