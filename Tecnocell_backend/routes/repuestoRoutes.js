@@ -7,6 +7,7 @@ const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePlanModule = require('../middleware/requirePlanModule');
 const requirePermission = require('../middleware/requirePermission');
 const branchScope = require('../middleware/branchScope');
+const requireBranchSpecific = require('../middleware/requireBranchSpecific');
 
 router.use(verifyToken);
 router.use(tenantScope);
@@ -56,6 +57,6 @@ router.delete('/:id', requirePermission('repuestos.administrar'), repuestoContro
 router.get('/:id/movimientos', requirePermission('repuestos.ver'), branchScope, repuestoController.getMovimientosRepuesto);
 
 // POST /api/repuestos/:id/movimiento - Registrar movimiento de stock
-router.post('/:id/movimiento', requirePermission('repuestos.administrar'), branchScope, repuestoController.registrarMovimiento);
+router.post('/:id/movimiento', requirePermission('repuestos.administrar'), branchScope, requireBranchSpecific, repuestoController.registrarMovimiento);
 
 module.exports = router;

@@ -8,16 +8,7 @@ const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePlanModule = require('../middleware/requirePlanModule');
 const requirePermission = require('../middleware/requirePermission');
 const branchScope = require('../middleware/branchScope');
-const reparacionInventoryService = require('../services/reparacionInventoryService');
-
-const requireSpecificFlujo = (req, res, next) => {
-  try {
-    reparacionInventoryService.requireSpecific(req.branchScope);
-    next();
-  } catch (error) {
-    res.status(error.statusCode || 409).json({ code: error.code, error: error.message });
-  }
-};
+const requireBranchSpecific = require('../middleware/requireBranchSpecific');
 
 router.use(verifyToken);
 router.use(tenantScope);
@@ -52,7 +43,7 @@ router.get(
 router.put(
   '/:id/estado',
   requirePermission('flujo_reparaciones.editar'),
-  requireSpecificFlujo,
+  requireBranchSpecific,
   flujoController.cambiarEstado
 );
 
@@ -68,7 +59,7 @@ router.get(
 router.put(
   '/:id/tecnico',
   requirePermission('flujo_reparaciones.editar'),
-  requireSpecificFlujo,
+  requireBranchSpecific,
   flujoController.asignarTecnico
 );
 
@@ -76,7 +67,7 @@ router.put(
 router.put(
   '/:id/prioridad',
   requirePermission('flujo_reparaciones.editar'),
-  requireSpecificFlujo,
+  requireBranchSpecific,
   flujoController.cambiarPrioridad
 );
 
@@ -84,7 +75,7 @@ router.put(
 router.post(
   '/:id/reingresar-garantia',
   requirePermission('flujo_reparaciones.editar'),
-  requireSpecificFlujo,
+  requireBranchSpecific,
   flujoController.reingresarGarantia
 );
 

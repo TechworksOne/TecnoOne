@@ -8,16 +8,7 @@ const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
 const requirePlanModule = require('../middleware/requirePlanModule');
 const branchScope = require('../middleware/branchScope');
-const reparacionInventoryService = require('../services/reparacionInventoryService');
-
-const requireSpecificRepair = (req, res, next) => {
-  try {
-    reparacionInventoryService.requireSpecific(req.branchScope);
-    next();
-  } catch (error) {
-    res.status(error.statusCode || 409).json({ code: error.code, error: error.message });
-  }
-};
+const requireBranchSpecific = require('../middleware/requireBranchSpecific');
 
 router.use(verifyToken);
 router.use(tenantScope);
@@ -29,25 +20,25 @@ router.use(branchScope);
 router.get('/', requirePermission('reparaciones.ver'), reparacionController.getAllReparaciones);
 router.get('/:id/historial-completo', requirePermission('reparaciones.ver'), reparacionController.getHistorialCompleto);
 router.get('/:id', requirePermission('reparaciones.ver'), reparacionController.getReparacionById);
-router.post('/', requirePermission('reparaciones.crear'), requireSpecificRepair, reparacionController.createReparacion);
+router.post('/', requirePermission('reparaciones.crear'), requireBranchSpecific, reparacionController.createReparacion);
 
 // Actualizar solo el estado (simple) — PUT usa JSON plano desde el Kanban
-router.put('/:id/estado', requirePermission('reparaciones.editar'), requireSpecificRepair, reparacionController.updateEstadoReparacion);
+router.put('/:id/estado', requirePermission('reparaciones.editar'), requireBranchSpecific, reparacionController.updateEstadoReparacion);
 
 // Actualizar prioridad
-router.patch('/:id/prioridad', requirePermission('reparaciones.editar'), requireSpecificRepair, reparacionController.updatePrioridad);
+router.patch('/:id/prioridad', requirePermission('reparaciones.editar'), requireBranchSpecific, reparacionController.updatePrioridad);
 
 // Registrar pago de saldo pendiente
-router.post('/:id/pago', requirePermission('reparaciones.editar'), requireSpecificRepair, reparacionController.registrarPagoSaldo);
+router.post('/:id/pago', requirePermission('reparaciones.editar'), requireBranchSpecific, reparacionController.registrarPagoSaldo);
 
 // Cancelar reparación
-router.patch('/:id/cancelar', requirePermission('reparaciones.editar'), requireSpecificRepair, reparacionController.cancelarReparacion);
+router.patch('/:id/cancelar', requirePermission('reparaciones.editar'), requireBranchSpecific, reparacionController.cancelarReparacion);
 
 // Completar reparación (repuestos + regalías + pago final, con imágenes opcionales)
 router.post(
   '/:id/completar',
   requirePermission('reparaciones.editar'),
-  requireSpecificRepair,
+  requireBranchSpecific,
   reparacionController.uploadMiddleware,
   reparacionController.completarReparacion
 );
@@ -74,7 +65,7 @@ router.delete(
 router.post(
   '/:id/estado',
   requirePermission('reparaciones.editar'),
-  requireSpecificRepair,
+  requireBranchSpecific,
   reparacionController.uploadMiddleware,
   reparacionController.changeRepairState
 );

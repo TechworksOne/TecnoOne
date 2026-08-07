@@ -10,7 +10,7 @@ function scopeError(message, statusCode, code) {
 function requireSpecific(branchScope) {
   if (!branchScope || branchScope.mode !== 'specific' || !branchScope.sucursalId) {
     throw scopeError(
-      'Seleccione una sucursal especifica para modificar existencias',
+      'Seleccione una sucursal específica para realizar esta operación.',
       409,
       'BRANCH_SPECIFIC_REQUIRED'
     );

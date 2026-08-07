@@ -207,18 +207,18 @@ async function main() {
   // ── 14. Rutas: branchScope presente en reparacionRoutes ───────────────────
   const routes = fs.readFileSync(path.join(__dirname, '..', 'routes', 'reparacionRoutes.js'), 'utf8');
   assert.match(routes, /router\.use\(branchScope\)/);
-  assert.match(routes, /requireSpecificRepair/);
-  assert.match(routes, /requireSpecificRepair.*createReparacion/);
-  // completarReparacion tiene requireSpecificRepair en una línea separada (ruta multiline)
-  assert.ok(routes.includes('requireSpecificRepair') && routes.includes('completarReparacion'),
-    'requireSpecificRepair y completarReparacion deben estar en la ruta');
+  assert.match(routes, /requireBranchSpecific/);
+  assert.match(routes, /requireBranchSpecific.*createReparacion/);
+  // completarReparacion tiene requireBranchSpecific en una línea separada (ruta multiline)
+  assert.ok(routes.includes('requireBranchSpecific') && routes.includes('completarReparacion'),
+    'requireBranchSpecific y completarReparacion deben estar en la ruta');
   assert.doesNotMatch(routes, /req\.body\.(empresa_id|sucursal_id|allowedSucursalIds)/);
 
   // ── 15. Rutas: branchScope presente en flujoReparacionRoutes ─────────────
   const flujoRoutes = fs.readFileSync(path.join(__dirname, '..', 'routes', 'flujoReparacionRoutes.js'), 'utf8');
   assert.match(flujoRoutes, /router\.use\(branchScope\)/);
-  assert.ok(flujoRoutes.includes('requireSpecificFlujo') && flujoRoutes.includes('cambiarEstado'),
-    'requireSpecificFlujo debe estar en la ruta de cambiarEstado');
+  assert.ok(flujoRoutes.includes('requireBranchSpecific') && flujoRoutes.includes('cambiarEstado'),
+    'requireBranchSpecific debe estar en la ruta de cambiarEstado');
 
   // ── 16. Controlador: usa reparacionScopeClause / reparacionInventoryService
   const controller = fs.readFileSync(path.join(__dirname, '..', 'controllers', 'reparacionController.js'), 'utf8');

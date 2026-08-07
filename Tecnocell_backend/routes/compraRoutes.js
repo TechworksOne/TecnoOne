@@ -8,6 +8,7 @@ const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
 const requirePlanModule = require('../middleware/requirePlanModule');
 const branchScope = require('../middleware/branchScope');
+const requireBranchSpecific = require('../middleware/requireBranchSpecific');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
@@ -20,13 +21,13 @@ router.use(branchScope);
 router.get('/fuentes-pago', requirePermission('compras.crear'), compraController.getFuentesPago);
 
 // Rutas de compras de PRODUCTOS
-router.post('/productos', requirePermission('compras.crear'), compraController.createCompraProductos);
+router.post('/productos', requirePermission('compras.crear'), requireBranchSpecific, compraController.createCompraProductos);
 
 // Rutas de compras de REPUESTOS
-router.post('/repuestos', requirePermission('compras.crear'), compraController.createCompraRepuestos);
+router.post('/repuestos', requirePermission('compras.crear'), requireBranchSpecific, compraController.createCompraRepuestos);
 
 // Compra atómica de productos, repuestos o ambos
-router.post('/', requirePermission('compras.crear'), compraController.createCompra);
+router.post('/', requirePermission('compras.crear'), requireBranchSpecific, compraController.createCompra);
 
 // Rutas generales
 router.get('/', requirePermission('compras.ver'), compraController.getAllCompras);
@@ -35,6 +36,6 @@ router.get('/', requirePermission('compras.ver'), compraController.getAllCompras
 router.get('/series/producto/:productoId', requirePermission('compras.ver'), compraController.getSeriesByProducto);
 
 router.get('/:id', requirePermission('compras.ver'), compraController.getCompraById);
-router.post('/:id/anular', requirePermission('compras.anular'), compraController.anularCompra);
+router.post('/:id/anular', requirePermission('compras.anular'), requireBranchSpecific, compraController.anularCompra);
 
 module.exports = router;

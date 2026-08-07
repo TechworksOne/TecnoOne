@@ -1,7 +1,6 @@
 import { Building2, Info, Loader2 } from 'lucide-react';
 import { useAuth } from '../../store/useAuth';
 import { useSucursalContext } from '../../store/useSucursalContext';
-
 export default function SucursalSelector() {
   const user = useAuth(state => state.user);
   const {
@@ -40,14 +39,15 @@ export default function SucursalSelector() {
           ))}
         </select>
       </div>
-      <span
-        title="La selección de sucursal prepara el contexto; los módulos operativos se filtrarán en una fase posterior."
-        className="hidden 2xl:inline-flex items-center gap-1 max-w-[230px] text-[10px] leading-tight"
-        style={{ color: error ? '#ef4444' : 'var(--color-text-muted)' }}
-      >
-        <Info size={14} className="shrink-0" />
-        {error || 'La selección prepara el contexto; el filtrado operativo llegará en una fase posterior.'}
-      </span>
+      {error && (
+        <span
+          className="hidden 2xl:inline-flex items-center gap-1 max-w-[230px] text-[10px] leading-tight"
+          style={{ color: '#ef4444' }}
+        >
+          <Info size={14} className="shrink-0" />
+          {error}
+        </span>
+      )}
     </div>
   );
 }

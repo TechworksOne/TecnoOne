@@ -11,6 +11,7 @@ const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePlanModule = require('../middleware/requirePlanModule');
 const requirePermission = require('../middleware/requirePermission');
 const branchScope = require('../middleware/branchScope');
+const requireBranchSpecific = require('../middleware/requireBranchSpecific');
 const { imageFileFilter, getSafeImageExtension } = require('../utils/uploadSecurity');
 
 const storage = multer.diskStorage({
@@ -62,7 +63,7 @@ router.get('/:id/kardex', requirePlanModule('inventario'), requirePermission('pr
 
 router.post('/', requirePlanModule('productos'), requirePermission('productos.administrar'), uploadImagenesProducto, productController.createProduct);
 router.put('/:id', requirePlanModule('productos'), requirePermission('productos.administrar'), uploadImagenesProducto, productController.updateProduct);
-router.patch('/:id/stock', requirePlanModule('inventario'), requirePermission('productos.administrar'), branchScope, productController.adjustStock);
+router.patch('/:id/stock', requirePlanModule('inventario'), requirePermission('productos.administrar'), branchScope, requireBranchSpecific, productController.adjustStock);
 router.delete('/:id', requirePlanModule('productos'), requirePermission('productos.administrar'), productController.deleteProduct);
 
 module.exports = router;
