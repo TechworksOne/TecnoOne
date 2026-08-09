@@ -167,6 +167,16 @@ async function main() {
   assert.doesNotMatch(routes, /router\.get\('\/historial'[\s\S]{0,80}requireBranchSpecific/, 'historial no requiere specific');
   assert.match(routes, /cajas\.sesion\.ver/);
   assert.match(routes, /cajas\.sesion\.operar/);
+  assert.match(
+    routes,
+    /router\.get\('\/activa'[\s\S]{0,100}cajas\.sesion\.operar/,
+    'la sesión activa propia debe requerir permiso de operación'
+  );
+  assert.match(
+    routes,
+    /router\.get\('\/historial'[\s\S]{0,100}cajas\.sesion\.ver/,
+    'el historial administrativo debe requerir permiso de consulta'
+  );
 
   // ── 15. Scope de usuario en sesión activa y cierre ─────────────────────
   const modelSrc = fs.readFileSync(
@@ -220,6 +230,9 @@ async function main() {
   // Permisos
   assert.match(mig, /cajas\.sesion\.ver/);
   assert.match(mig, /cajas\.sesion\.operar/);
+  assert.match(mig, /FROM empresas e[\s\S]{0,120}CROSS JOIN roles r/);
+  assert.match(mig, /UPPER\(r\.nombre\) = 'ADMINISTRADOR'/);
+  assert.match(mig, /UPPER\(r\.nombre\) = 'VENTAS'/);
   // No toca tablas heredadas
   assert.doesNotMatch(mig, /ALTER TABLE (caja_chica|cuentas_bancarias|ventas|reparaciones)/i);
 

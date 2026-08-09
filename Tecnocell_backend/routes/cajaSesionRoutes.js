@@ -13,7 +13,7 @@ const controller              = require('../controllers/cajaSesionController');
 router.use(verifyToken, tenantScope, checkEmpresaActiva, requirePlanModule('caja_bancos'), branchScope);
 
 // Lectura: acepta specific y consolidated
-router.get('/activa',    requirePermission('cajas.sesion.ver'), controller.getSesionActiva);
+router.get('/activa',    requirePermission('cajas.sesion.operar'), controller.getSesionActiva);
 router.get('/historial', requirePermission('cajas.sesion.ver'), controller.getHistorial);
 
 // Escritura: solo sucursal específica

@@ -62,16 +62,28 @@ CREATE TABLE IF NOT EXISTS caja_sesiones (
 
 -- ── 3. Permisos ───────────────────────────────────────────────────────────────
 INSERT INTO permisos (codigo, modulo, accion, nombre, descripcion) VALUES
-  ('cajas.sesion.ver',    'Cajas', 'sesion_ver',    'Ver sesiones de caja',    'Consultar sesión activa e historial'),
+  ('cajas.sesion.ver',    'Cajas', 'sesion_ver',    'Ver sesiones de caja',    'Consultar historial de sesiones de caja'),
   ('cajas.sesion.operar', 'Cajas', 'sesion_operar', 'Operar sesiones de caja', 'Abrir y cerrar sesiones de caja')
 ON DUPLICATE KEY UPDATE
   modulo = VALUES(modulo), accion = VALUES(accion),
   nombre = VALUES(nombre), descripcion = VALUES(descripcion);
 
--- Administradores reciben ambos permisos por defecto
+-- ADMINISTRADOR recibe consulta administrativa y operación
+-- para cada empresa del tenant.
 INSERT IGNORE INTO rol_permisos (empresa_id, rol_id, permiso_id)
-SELECT r.empresa_id, r.id, p.id
-FROM roles r
+SELECT e.id, r.id, p.id
+FROM empresas e
+CROSS JOIN roles r
 CROSS JOIN permisos p
 WHERE UPPER(r.nombre) = 'ADMINISTRADOR'
   AND p.codigo IN ('cajas.sesion.ver', 'cajas.sesion.operar');
+
+-- VENTAS puede operar únicamente su propia sesión de caja.
+-- No recibe acceso automático al historial administrativo.
+INSERT IGNORE INTO rol_permisos (empresa_id, rol_id, permiso_id)
+SELECT e.id, r.id, p.id
+FROM empresas e
+CROSS JOIN roles r
+CROSS JOIN permisos p
+WHERE UPPER(r.nombre) = 'VENTAS'
+  AND p.codigo = 'cajas.sesion.operar';
