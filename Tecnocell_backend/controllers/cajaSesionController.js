@@ -281,6 +281,79 @@ exports.cerrarSesion = async (req, res) => {
 };
 
 /**
+ * GET /api/caja-sesiones/:id/detalle
+ * Devuelve el detalle cronológico de movimientos de efectivo
+ * pertenecientes a una sesión autorizada.
+ */
+exports.getDetalle = async (req, res) => {
+  try {
+    const { empresaId } =
+      req.branchScope;
+
+    const sucursalIds =
+      sucursalIdsFromScope(
+        req.branchScope
+      );
+
+    const sesionId =
+      Number(req.params.id);
+
+    if (
+      !Number.isInteger(sesionId) ||
+      sesionId <= 0
+    ) {
+      return sesionHttpError(
+        res,
+        400,
+        'SESION_ID_INVALIDO',
+        'ID de sesión inválido'
+      );
+    }
+
+    if (!sucursalIds.length) {
+      return sesionHttpError(
+        res,
+        409,
+        'SIN_SUCURSALES',
+        'No hay sucursales disponibles en el contexto'
+      );
+    }
+
+    const detalle =
+      await cajaSesionModel.obtenerDetalle({
+        empresaId,
+        sucursalIds,
+        sesionId,
+      });
+
+    if (!detalle) {
+      return sesionHttpError(
+        res,
+        404,
+        'SESION_NO_ENCONTRADA',
+        'La sesión no existe o no pertenece al contexto autorizado'
+      );
+    }
+
+    return res.json({
+      success: true,
+      data: detalle,
+    });
+  } catch (error) {
+    console.error(
+      'cajaSesion.getDetalle:',
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        'Error al obtener el detalle de la sesión de caja',
+    });
+  }
+};
+
+/**
  * GET /api/caja-sesiones/historial
  * Historial paginado de sesiones. Soporta modo specific y consolidated.
  * Query: ?caja_id=N &page=1 &limit=20

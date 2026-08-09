@@ -31,6 +31,12 @@ router.get(
 
 router.get('/historial', requirePermission('cajas.sesion.ver'), controller.getHistorial);
 
+router.get(
+  '/:id/detalle',
+  requirePermission('cajas.sesion.ver'),
+  controller.getDetalle
+);
+
 // Escritura: solo sucursal específica
 router.post('/abrir',       requirePermission('cajas.sesion.operar'), requireBranchSpecific, controller.abrirSesion);
 router.post('/:id/cerrar',  requirePermission('cajas.sesion.operar'), requireBranchSpecific, controller.cerrarSesion);

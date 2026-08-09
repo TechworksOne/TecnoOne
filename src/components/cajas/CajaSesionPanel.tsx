@@ -25,6 +25,8 @@ import {
   cajaSesionError,
   type CajaSesion,
   type CajaSesionResumen,
+  type CajaSesionDetalle,
+  type CajaSesionMovimientoDetalle,
   type CierreCajaSesion,
 } from '../../services/cajaSesionService';
 
@@ -50,6 +52,42 @@ function fechaHora(value?: string | null) {
   });
 }
 
+function horaMovimiento(
+  value?: string | null,
+) {
+  if (!value) return '—';
+
+  return new Date(value).toLocaleTimeString(
+    'es-GT',
+    {
+      hour: '2-digit',
+      minute: '2-digit',
+    },
+  );
+}
+
+function tituloMovimientoCaja(
+  movimiento: CajaSesionMovimientoDetalle,
+) {
+  if (movimiento.fuente === 'VENTA') {
+    const documento =
+      movimiento.documento ||
+      `#${movimiento.entidad_id}`;
+
+    return movimiento.accion === 'REVERSA'
+      ? `Reversa venta ${documento}`
+      : `Venta ${documento}`;
+  }
+
+  if (movimiento.accion === 'REVERSA') {
+    return 'Devolución de reparación';
+  }
+
+  return Number(movimiento.pago_indice) === 0
+    ? 'Anticipo de reparación'
+    : 'Pago de reparación';
+}
+
 export default function CajaSesionPanel() {
   const { hasPermission } = useAuth();
 
@@ -64,6 +102,9 @@ export default function CajaSesionPanel() {
 
   const canOperate =
     hasPermission('cajas.sesion.operar');
+
+  const canViewMovimientos =
+    hasPermission('cajas.sesion.ver');
 
   const [sesion, setSesion] =
     useState<CajaSesion | null>(null);
@@ -122,6 +163,28 @@ export default function CajaSesionPanel() {
   const [ultimoCierre, setUltimoCierre] =
     useState<CierreCajaSesion | null>(null);
 
+  const [
+    showMovimientos,
+    setShowMovimientos,
+  ] = useState(false);
+
+  const [
+    detalleSesion,
+    setDetalleSesion,
+  ] = useState<CajaSesionDetalle | null>(
+    null,
+  );
+
+  const [
+    loadingMovimientos,
+    setLoadingMovimientos,
+  ] = useState(false);
+
+  const [
+    errorMovimientos,
+    setErrorMovimientos,
+  ] = useState<string | null>(null);
+
   const loadActiva = useCallback(async () => {
     if (
       !canOperate ||
@@ -157,6 +220,45 @@ export default function CajaSesionPanel() {
       setLoading(false);
     }
   }, [branchMode, canOperate]);
+
+  const cargarMovimientosActuales =
+    async () => {
+      if (
+        !sesion ||
+        !canViewMovimientos
+      ) {
+        return;
+      }
+
+      setLoadingMovimientos(true);
+      setErrorMovimientos(null);
+
+      try {
+        const data =
+          await cajaSesionApi.getDetalle(
+            sesion.id,
+          );
+
+        setDetalleSesion(data);
+      } catch (e) {
+        setDetalleSesion(null);
+
+        setErrorMovimientos(
+          cajaSesionError(
+            e,
+            'No fue posible consultar los movimientos de la sesión actual.',
+          ),
+        );
+      } finally {
+        setLoadingMovimientos(false);
+      }
+    };
+
+  const abrirMovimientosActuales =
+    () => {
+      setShowMovimientos(true);
+      void cargarMovimientosActuales();
+    };
 
   useEffect(() => {
     void loadActiva();
@@ -561,7 +663,17 @@ export default function CajaSesionPanel() {
             </div>
           </div>
 
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {sesion && canViewMovimientos && (
+              <Button
+                variant="outline"
+                onClick={abrirMovimientosActuales}
+              >
+                <Banknote size={14} />
+                Ver movimientos actuales
+              </Button>
+            )}
+
             <Button
               variant="outline"
               onClick={() => void loadActiva()}
@@ -744,6 +856,143 @@ export default function CajaSesionPanel() {
           </div>
         )}
       </div>
+
+      <Modal
+        isOpen={showMovimientos}
+        onClose={() => {
+          setShowMovimientos(false);
+          setErrorMovimientos(null);
+        }}
+        title="Movimientos de la sesión actual"
+        size="3xl"
+      >
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                {sesion
+                  ? `${sesion.caja_nombre} · ${sesion.sucursal_nombre}`
+                  : 'Caja operativa'}
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500">
+                Movimientos en efectivo vinculados
+                a la sesión que actualmente está abierta.
+              </p>
+            </div>
+
+            <Button
+              variant="outline"
+              disabled={loadingMovimientos}
+              onClick={() =>
+                void cargarMovimientosActuales()
+              }
+            >
+              <RefreshCw
+                size={14}
+                className={
+                  loadingMovimientos
+                    ? 'animate-spin'
+                    : ''
+                }
+              />
+              Actualizar
+            </Button>
+          </div>
+
+          {errorMovimientos && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300">
+              {errorMovimientos}
+            </div>
+          )}
+
+          {loadingMovimientos &&
+          !detalleSesion ? (
+            <div className="py-8 text-center text-sm text-slate-500">
+              Consultando movimientos…
+            </div>
+          ) : !detalleSesion ||
+            detalleSesion.movimientos.length ===
+              0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-slate-700">
+              Esta sesión todavía no tiene
+              movimientos en efectivo.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+              {detalleSesion.movimientos.map(
+                movimiento => {
+                  const reversa =
+                    movimiento.accion ===
+                    'REVERSA';
+
+                  return (
+                    <div
+                      key={`${movimiento.fuente}-${movimiento.movimiento_id}`}
+                      className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="font-semibold text-slate-900 dark:text-slate-100">
+                          {tituloMovimientoCaja(
+                            movimiento,
+                          )}
+                        </p>
+
+                        {movimiento.cliente_nombre && (
+                          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                            {movimiento.cliente_nombre}
+                          </p>
+                        )}
+
+                        {movimiento.detalle_principal && (
+                          <p className="text-xs text-slate-500">
+                            {movimiento.detalle_principal}
+                          </p>
+                        )}
+
+                        <p className="mt-1 text-xs text-slate-500">
+                          {movimiento.fuente ===
+                          'REPARACION'
+                            ? `${movimiento.documento || movimiento.entidad_id} · `
+                            : ''}
+
+                          {horaMovimiento(
+                            movimiento.created_at,
+                          )}
+                          {' · '}
+                          {movimiento.usuario_username ||
+                            (
+                              movimiento.usuario_id
+                                ? `Usuario #${movimiento.usuario_id}`
+                                : 'Sistema'
+                            )}
+
+                          {movimiento.referencia
+                            ? ` · ${movimiento.referencia}`
+                            : ''}
+                        </p>
+                      </div>
+
+                      <p
+                        className={`text-lg font-bold tabular-nums ${
+                          reversa
+                            ? 'text-red-600 dark:text-red-400'
+                            : 'text-emerald-600 dark:text-emerald-400'
+                        }`}
+                      >
+                        {reversa ? '-' : '+'}Q
+                        {qDesdeCentavos(
+                          movimiento.monto_centavos,
+                        )}
+                      </p>
+                    </div>
+                  );
+                },
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <Modal
         isOpen={showAbrir}

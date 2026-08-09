@@ -165,14 +165,338 @@ async function obtenerSugerenciaApertura({ empresaId, sucursalId, cajaId }) {
 async function listar({ empresaId, sucursalIds, cajaId, limit = 20, offset = 0 }) {
   const params = [empresaId];
   let where = ' WHERE cs.empresa_id = ?';
-  where += buildSucursalFilter(sucursalIds, params);
-  if (cajaId) { where += ' AND cs.caja_id = ?'; params.push(Number(cajaId)); }
-  params.push(Math.min(Number(limit) || 20, 100), Math.max(Number(offset) || 0, 0));
-  const [rows] = await db.query(
-    `${SELECT_SESION}${where} ORDER BY cs.fecha_apertura DESC LIMIT ? OFFSET ?`,
+
+  where += buildSucursalFilter(
+    sucursalIds,
     params
   );
-  return rows;
+
+  if (cajaId) {
+    where += ' AND cs.caja_id = ?';
+    params.push(Number(cajaId));
+  }
+
+  params.push(
+    Math.min(Number(limit) || 20, 100),
+    Math.max(Number(offset) || 0, 0)
+  );
+
+  const [rows] = await db.query(
+    `${SELECT_SESION}${where}
+     ORDER BY cs.fecha_apertura DESC
+     LIMIT ? OFFSET ?`,
+    params
+  );
+
+  if (!rows.length) {
+    return rows;
+  }
+
+  const sesionIds = rows
+    .map(row => Number(row.id))
+    .filter(Number.isInteger);
+
+  const placeholders =
+    sesionIds.map(() => '?').join(',');
+
+  const [resumenRows] = await db.query(
+    `SELECT
+       caja_sesion_id,
+
+       COALESCE(SUM(
+         CASE
+           WHEN fuente = 'VENTA'
+            AND accion = 'INGRESO'
+           THEN monto_centavos
+           ELSE 0
+         END
+       ), 0) AS ventas_ingresos_centavos,
+
+       COALESCE(SUM(
+         CASE
+           WHEN fuente = 'VENTA'
+            AND accion = 'REVERSA'
+           THEN monto_centavos
+           ELSE 0
+         END
+       ), 0) AS ventas_reversas_centavos,
+
+       COALESCE(SUM(
+         CASE
+           WHEN fuente = 'REPARACION'
+            AND accion = 'INGRESO'
+           THEN monto_centavos
+           ELSE 0
+         END
+       ), 0) AS reparaciones_ingresos_centavos,
+
+       COALESCE(SUM(
+         CASE
+           WHEN fuente = 'REPARACION'
+            AND accion = 'REVERSA'
+           THEN monto_centavos
+           ELSE 0
+         END
+       ), 0) AS reparaciones_reversas_centavos
+
+     FROM (
+       SELECT
+         caja_sesion_id,
+         'VENTA' AS fuente,
+         accion,
+         monto_centavos
+       FROM venta_movimientos_financieros
+       WHERE metodo = 'EFECTIVO'
+         AND caja_sesion_id IN (${placeholders})
+
+       UNION ALL
+
+       SELECT
+         caja_sesion_id,
+         'REPARACION' AS fuente,
+         accion,
+         monto_centavos
+       FROM reparacion_movimientos_financieros
+       WHERE metodo = 'EFECTIVO'
+         AND caja_sesion_id IN (${placeholders})
+     ) movimientos
+
+     GROUP BY caja_sesion_id`,
+    [
+      ...sesionIds,
+      ...sesionIds,
+    ]
+  );
+
+  const resumenPorSesion =
+    new Map(
+      resumenRows.map(row => [
+        Number(row.caja_sesion_id),
+        row,
+      ])
+    );
+
+  return rows.map(row => {
+    const resumen =
+      resumenPorSesion.get(
+        Number(row.id)
+      ) || {};
+
+    const ventasIngresos =
+      Number(
+        resumen.ventas_ingresos_centavos ||
+        0
+      );
+
+    const ventasReversas =
+      Number(
+        resumen.ventas_reversas_centavos ||
+        0
+      );
+
+    const reparacionesIngresos =
+      Number(
+        resumen.reparaciones_ingresos_centavos ||
+        0
+      );
+
+    const reparacionesReversas =
+      Number(
+        resumen.reparaciones_reversas_centavos ||
+        0
+      );
+
+    return {
+      ...row,
+
+      ventas_ingresos_centavos:
+        ventasIngresos,
+
+      ventas_reversas_centavos:
+        ventasReversas,
+
+      reparaciones_ingresos_centavos:
+        reparacionesIngresos,
+
+      reparaciones_reversas_centavos:
+        reparacionesReversas,
+
+      movimientos_efectivo_centavos:
+        ventasIngresos -
+        ventasReversas +
+        reparacionesIngresos -
+        reparacionesReversas,
+    };
+  });
+}
+
+
+/**
+ * Devuelve una sesión y todos sus movimientos de efectivo,
+ * ordenados cronológicamente.
+ *
+ * La sesión debe pertenecer a empresa + sucursales autorizadas.
+ */
+async function obtenerDetalle({
+  empresaId,
+  sucursalIds,
+  sesionId,
+}) {
+  const params = [empresaId];
+
+  let where =
+    ' WHERE cs.empresa_id = ?';
+
+  where += buildSucursalFilter(
+    sucursalIds,
+    params
+  );
+
+  where += ' AND cs.id = ?';
+  params.push(Number(sesionId));
+
+  const [[sesion]] = await db.query(
+    `${SELECT_SESION}${where}
+     LIMIT 1`,
+    params
+  );
+
+  if (!sesion) {
+    return null;
+  }
+
+  const empresaIdNormalizado =
+    Number(empresaId);
+
+  const sucursalId =
+    Number(sesion.sucursal_id);
+
+  const sesionIdNormalizado =
+    Number(sesionId);
+
+  const [movimientos] = await db.query(
+    `SELECT
+       'VENTA' AS fuente,
+       vmf.id AS movimiento_id,
+       CAST(vmf.venta_id AS CHAR) AS entidad_id,
+
+       COALESCE(
+         v.numero_venta,
+         CONCAT('#', vmf.venta_id)
+       ) AS documento,
+
+       v.cliente_nombre AS cliente_nombre,
+
+       NULL AS detalle_principal,
+
+       vmf.pago_indice,
+       vmf.accion,
+       vmf.metodo,
+       vmf.monto_centavos,
+       vmf.referencia,
+       vmf.usuario_id,
+       u.username AS usuario_username,
+       vmf.created_at
+
+     FROM venta_movimientos_financieros vmf
+
+     LEFT JOIN ventas v
+       ON v.id = vmf.venta_id
+      AND v.empresa_id = vmf.empresa_id
+      AND v.sucursal_id = vmf.sucursal_id
+
+     LEFT JOIN users u
+       ON u.id = vmf.usuario_id
+
+     WHERE vmf.empresa_id = ?
+       AND vmf.sucursal_id = ?
+       AND vmf.caja_sesion_id = ?
+       AND vmf.metodo = 'EFECTIVO'
+
+     UNION ALL
+
+     SELECT
+       'REPARACION' AS fuente,
+       rmf.id AS movimiento_id,
+       rmf.reparacion_id AS entidad_id,
+
+       rmf.reparacion_id AS documento,
+
+       r.cliente_nombre AS cliente_nombre,
+
+       COALESCE(
+         NULLIF(
+           TRIM(
+             CONCAT_WS(
+               ' ',
+               r.marca,
+               r.modelo
+             )
+           ),
+           ''
+         ),
+         r.tipo_equipo
+       ) AS detalle_principal,
+
+       rmf.pago_indice,
+       rmf.accion,
+       rmf.metodo,
+       rmf.monto_centavos,
+       rmf.referencia,
+       rmf.usuario_id,
+       u.username AS usuario_username,
+       rmf.created_at
+
+     FROM reparacion_movimientos_financieros rmf
+
+     LEFT JOIN reparaciones r
+       ON r.id = rmf.reparacion_id
+      AND r.empresa_id = rmf.empresa_id
+      AND r.sucursal_id = rmf.sucursal_id
+
+     LEFT JOIN users u
+       ON u.id = rmf.usuario_id
+
+     WHERE rmf.empresa_id = ?
+       AND rmf.sucursal_id = ?
+       AND rmf.caja_sesion_id = ?
+       AND rmf.metodo = 'EFECTIVO'
+
+     ORDER BY created_at ASC,
+              movimiento_id ASC`,
+    [
+      empresaIdNormalizado,
+      sucursalId,
+      sesionIdNormalizado,
+
+      empresaIdNormalizado,
+      sucursalId,
+      sesionIdNormalizado,
+    ]
+  );
+
+  return {
+    sesion,
+
+    movimientos:
+      movimientos.map(mov => ({
+        ...mov,
+
+        movimiento_id:
+          Number(mov.movimiento_id),
+
+        pago_indice:
+          Number(mov.pago_indice),
+
+        monto_centavos:
+          Number(mov.monto_centavos),
+
+        usuario_id:
+          mov.usuario_id
+            ? Number(mov.usuario_id)
+            : null,
+      })),
+  };
 }
 
 /**
@@ -488,6 +812,7 @@ module.exports = {
   obtenerResumenActiva,
   calcularEfectivoEsperado,
   listar,
+  obtenerDetalle,
   crear,
   cerrar,
 };

@@ -54,6 +54,14 @@ export interface CajaSesion {
 
   usuario_apertura_username?: string | null;
   cerrado_por_username?: string | null;
+
+  ventas_ingresos_centavos?: number;
+  ventas_reversas_centavos?: number;
+
+  reparaciones_ingresos_centavos?: number;
+  reparaciones_reversas_centavos?: number;
+
+  movimientos_efectivo_centavos?: number;
 }
 
 export interface CajaSesionResumen
@@ -69,6 +77,29 @@ export interface CajaSesionSugerenciaApertura {
   sesion_anterior_id: number | null;
   fondo_sugerido_centavos: number | null;
   fecha_cierre_anterior: string | null;
+}
+
+export interface CajaSesionMovimientoDetalle {
+  fuente: 'VENTA' | 'REPARACION';
+  movimiento_id: number;
+  entidad_id: string;
+
+  documento?: string | null;
+  cliente_nombre?: string | null;
+  detalle_principal?: string | null;
+  pago_indice: number;
+  accion: 'INGRESO' | 'REVERSA';
+  metodo: string;
+  monto_centavos: number;
+  referencia?: string | null;
+  usuario_id?: number | null;
+  usuario_username?: string | null;
+  created_at: string;
+}
+
+export interface CajaSesionDetalle {
+  sesion: CajaSesion;
+  movimientos: CajaSesionMovimientoDetalle[];
 }
 
 export interface CierreCajaSesion {
@@ -135,6 +166,16 @@ export const cajaSesionApi = {
     return Array.isArray(data?.data)
       ? data.data
       : [];
+  },
+
+  async getDetalle(
+    sesionId: number,
+  ): Promise<CajaSesionDetalle> {
+    const { data } = await api.get(
+      `/caja-sesiones/${sesionId}/detalle`,
+    );
+
+    return data.data;
   },
 
   async abrir(payload: {
