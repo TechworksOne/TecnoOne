@@ -33,104 +33,526 @@ function resolveFinancialEmpresaId(options = {}) {
 
 // ========== CAJA CHICA ==========
 
+/**
+ * Scope financiero específico para Caja Chica.
+ *
+ * specific:
+ *   empresa + sucursal activa.
+ *
+ * consolidated:
+ *   empresa + sucursales permitidas.
+ *   También incluye sucursal_id NULL exclusivamente para conservar
+ *   visibilidad histórica de movimientos legacy no asignados.
+ *
+ * Los movimientos legacy NULL nunca se muestran dentro de una
+ * sucursal específica.
+ */
+function cajaChicaScope(req, alias = null) {
+  const scope = req.branchScope;
+  const prefix = alias ? `${alias}.` : '';
+
+  const empresaId = Number(scope?.empresaId);
+
+  if (!Number.isInteger(empresaId) || empresaId <= 0) {
+    const error = new Error(
+      'No se pudo determinar la empresa del contexto financiero'
+    );
+    error.statusCode = 400;
+    error.code = 'EMPRESA_SCOPE_REQUERIDA';
+    throw error;
+  }
+
+  if (
+    scope?.mode === 'specific' &&
+    Number.isInteger(Number(scope.sucursalId)) &&
+    Number(scope.sucursalId) > 0
+  ) {
+    return {
+      mode: 'specific',
+      empresaId,
+      sucursalId: Number(scope.sucursalId),
+      sql:
+        ` AND ${prefix}empresa_id = ?` +
+        ` AND ${prefix}sucursal_id = ?`,
+      params: [
+        empresaId,
+        Number(scope.sucursalId),
+      ],
+    };
+  }
+
+  if (scope?.mode === 'consolidated') {
+    const sucursalIds = [
+      ...new Set(
+        (scope.allowedSucursalIds || [])
+          .map(Number)
+          .filter(
+            id =>
+              Number.isInteger(id) &&
+              id > 0,
+          )
+      ),
+    ];
+
+    if (!sucursalIds.length) {
+      return {
+        mode: 'consolidated',
+        empresaId,
+        sucursalIds: [],
+        sql: ' AND 1 = 0',
+        params: [],
+      };
+    }
+
+    const placeholders =
+      sucursalIds.map(() => '?').join(', ');
+
+    return {
+      mode: 'consolidated',
+      empresaId,
+      sucursalIds,
+      sql:
+        ` AND ${prefix}empresa_id = ?` +
+        ` AND (` +
+        `${prefix}sucursal_id IN (${placeholders})` +
+        ` OR ${prefix}sucursal_id IS NULL` +
+        `)`,
+      params: [
+        empresaId,
+        ...sucursalIds,
+      ],
+    };
+  }
+
+  const error = new Error(
+    'Seleccione una sucursal o un contexto consolidado válido'
+  );
+  error.statusCode = 400;
+  error.code = 'BRANCH_SCOPE_REQUERIDO';
+  throw error;
+}
+
+function cajaChicaUsuario(req) {
+  return String(
+    req.user?.name ||
+    req.user?.nombre ||
+    req.user?.username ||
+    req.user?.email ||
+    req.user?.id ||
+    'Usuario'
+  );
+}
+
+
+function cajaChicaHttpError(
+  statusCode,
+  code,
+  message
+) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+}
+
+/**
+ * Serializa las operaciones monetarias de Caja Chica por sucursal.
+ *
+ * La fila de sucursales funciona como mutex estable aunque todavía
+ * no existan movimientos en caja_chica.
+ */
+async function bloquearCajaChicaYObtenerSaldo(
+  connection,
+  scope
+) {
+  if (
+    scope?.mode !== 'specific' ||
+    !Number.isInteger(Number(scope?.sucursalId))
+  ) {
+    throw cajaChicaHttpError(
+      400,
+      'BRANCH_SPECIFIC_REQUIRED',
+      'Seleccione una sucursal específica para realizar esta operación.'
+    );
+  }
+
+  const [[sucursal]] = await connection.query(
+    `SELECT id
+     FROM sucursales
+     WHERE id = ?
+       AND empresa_id = ?
+       AND activa = TRUE
+     LIMIT 1
+     FOR UPDATE`,
+    [
+      scope.sucursalId,
+      scope.empresaId,
+    ]
+  );
+
+  if (!sucursal) {
+    throw cajaChicaHttpError(
+      409,
+      'BRANCH_INACTIVE',
+      'La sucursal seleccionada no está disponible.'
+    );
+  }
+
+  const [[saldoRow]] = await connection.query(
+    `SELECT COALESCE(
+       SUM(
+         CASE
+           WHEN estado = 'CONFIRMADO'
+            AND tipo_movimiento = 'INGRESO'
+           THEN monto
+
+           WHEN estado = 'CONFIRMADO'
+            AND tipo_movimiento = 'EGRESO'
+           THEN -monto
+
+           ELSE 0
+         END
+       ),
+       0
+     ) AS saldo
+     FROM caja_chica
+     WHERE empresa_id = ?
+       AND sucursal_id = ?`,
+    [
+      scope.empresaId,
+      scope.sucursalId,
+    ]
+  );
+
+  return Number(saldoRow?.saldo || 0);
+}
+
 // Obtener saldo actual de caja chica
 exports.getSaldoCajaChica = async (req, res) => {
   try {
-    const tenant = financialTenantClause(req);
-    const [ingresos] = await db.query(
-      `SELECT COALESCE(SUM(monto), 0) as total FROM caja_chica WHERE tipo_movimiento = 'INGRESO' AND estado = 'CONFIRMADO'${tenant.sql}`,
-      tenant.params
+    const scope = cajaChicaScope(req);
+
+    const [[totales]] = await db.query(
+      `SELECT
+         COALESCE(SUM(
+           CASE
+             WHEN tipo_movimiento = 'INGRESO'
+              AND estado = 'CONFIRMADO'
+             THEN monto
+             ELSE 0
+           END
+         ), 0) AS ingresos,
+
+         COALESCE(SUM(
+           CASE
+             WHEN tipo_movimiento = 'EGRESO'
+              AND estado = 'CONFIRMADO'
+             THEN monto
+             ELSE 0
+           END
+         ), 0) AS egresos,
+
+         COALESCE(SUM(
+           CASE
+             WHEN estado = 'PENDIENTE'
+             THEN monto
+             ELSE 0
+           END
+         ), 0) AS pendientes
+
+       FROM caja_chica
+       WHERE 1 = 1${scope.sql}`,
+      scope.params
     );
-    const [egresos] = await db.query(
-      `SELECT COALESCE(SUM(monto), 0) as total FROM caja_chica WHERE tipo_movimiento = 'EGRESO' AND estado = 'CONFIRMADO'${tenant.sql}`,
-      tenant.params
-    );
-    
-    // Obtener pendientes
-    const [pendientes] = await db.query(
-      `SELECT COALESCE(SUM(monto), 0) as total FROM caja_chica WHERE estado = 'PENDIENTE'${tenant.sql}`,
-      tenant.params
-    );
-    
-    const saldo = ingresos[0].total - egresos[0].total;
-    
-    res.json({
+
+    const ingresos =
+      Number(totales?.ingresos || 0);
+
+    const egresos =
+      Number(totales?.egresos || 0);
+
+    const pendientes =
+      Number(totales?.pendientes || 0);
+
+    return res.json({
       success: true,
       data: {
-        saldo,
-        ingresos: ingresos[0].total,
-        egresos: egresos[0].total,
-        pendientes: pendientes[0].total
-      }
+        saldo: ingresos - egresos,
+        ingresos,
+        egresos,
+        pendientes,
+      },
     });
   } catch (error) {
-    console.error('Error getting saldo caja chica:', error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error(
+      'Error getting saldo caja chica:',
+      error
+    );
+
+    return res
+      .status(error.statusCode || 500)
+      .json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
   }
 };
 
 // Obtener movimientos de caja chica
-exports.getMovimientosCajaChica = async (req, res) => {
+exports.getMovimientosCajaChica = async (
+  req,
+  res
+) => {
   try {
-    const { fecha_inicio, fecha_fin, tipo, estado } = req.query;
-    const tenant = financialTenantClause(req, 'cc');
-    
+    const {
+      fecha_inicio,
+      fecha_fin,
+      tipo,
+      estado,
+    } = req.query;
+
+    const scope =
+      cajaChicaScope(req, 'cc');
+
     let query = `
-      SELECT cc.*, u.name AS confirmado_por_nombre
+      SELECT
+        cc.*,
+        u.name AS confirmado_por_nombre,
+        s.nombre AS sucursal_nombre
       FROM caja_chica cc
-      LEFT JOIN users u ON u.id = cc.confirmado_por
-      WHERE 1=1`;
-    const params = [...tenant.params];
-    query += tenant.sql;
-    
+      LEFT JOIN users u
+        ON u.id = cc.confirmado_por
+      LEFT JOIN sucursales s
+        ON s.id = cc.sucursal_id
+       AND s.empresa_id = cc.empresa_id
+      WHERE 1 = 1`;
+
+    const params = [
+      ...scope.params,
+    ];
+
+    query += scope.sql;
+
     if (fecha_inicio) {
-      query += ' AND cc.fecha_movimiento >= ?';
+      query +=
+        ' AND cc.fecha_movimiento >= ?';
       params.push(fecha_inicio);
     }
+
     if (fecha_fin) {
-      query += ' AND cc.fecha_movimiento <= ?';
+      query +=
+        ' AND cc.fecha_movimiento <= ?';
       params.push(fecha_fin);
     }
+
     if (tipo) {
-      query += ' AND cc.tipo_movimiento = ?';
+      query +=
+        ' AND cc.tipo_movimiento = ?';
       params.push(tipo);
     }
+
     if (estado) {
-      query += ' AND cc.estado = ?';
+      query +=
+        ' AND cc.estado = ?';
       params.push(estado);
     }
-    
-    query += ' ORDER BY cc.fecha_movimiento DESC';
-    
-    const [movimientos] = await db.query(query, params);
-    
-    res.json({ success: true, data: movimientos });
+
+    query +=
+      ' ORDER BY cc.fecha_movimiento DESC, cc.id DESC';
+
+    const [movimientos] =
+      await db.query(
+        query,
+        params
+      );
+
+    return res.json({
+      success: true,
+      data: movimientos,
+    });
   } catch (error) {
-    console.error('Error getting movimientos caja chica:', error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error(
+      'Error getting movimientos caja chica:',
+      error
+    );
+
+    return res
+      .status(error.statusCode || 500)
+      .json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
   }
 };
 
-// Registrar movimiento de caja chica (manual)
-exports.registrarMovimientoCajaChica = async (req, res) => {
+// Registrar movimiento manual de Caja Chica.
+// Empresa, sucursal y usuario provienen exclusivamente del backend.
+exports.registrarMovimientoCajaChica = async (
+  req,
+  res
+) => {
+  const conn = await db.getConnection();
+  let transactionStarted = false;
+
   try {
-    const { tipo_movimiento, monto, concepto, categoria, observaciones, realizado_por } = req.body;
-    const empresaId = getTenantEmpresaId(req);
-    
-    const [result] = await db.query(
-      `INSERT INTO caja_chica (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, ?, ?, ?, ?, 'CONFIRMADO', ?, ?)`,
-      [empresaId, tipo_movimiento, monto, concepto, categoria || 'Otro', realizado_por, observaciones]
+    const scope = cajaChicaScope(req);
+
+    if (scope.mode !== 'specific') {
+      throw cajaChicaHttpError(
+        400,
+        'BRANCH_SPECIFIC_REQUIRED',
+        'Seleccione una sucursal específica para realizar esta operación.'
+      );
+    }
+
+    const {
+      tipo_movimiento,
+      monto,
+      concepto,
+      categoria,
+      observaciones,
+    } = req.body;
+
+    const tipo = String(
+      tipo_movimiento || ''
+    )
+      .trim()
+      .toUpperCase();
+
+    const montoNum = Number(monto);
+    const conceptoLimpio = String(
+      concepto || ''
+    ).trim();
+
+    if (
+      !['INGRESO', 'EGRESO'].includes(tipo)
+    ) {
+      throw cajaChicaHttpError(
+        400,
+        'TIPO_MOVIMIENTO_INVALIDO',
+        'tipo_movimiento debe ser INGRESO o EGRESO'
+      );
+    }
+
+    if (
+      !Number.isFinite(montoNum) ||
+      montoNum <= 0
+    ) {
+      throw cajaChicaHttpError(
+        400,
+        'MONTO_INVALIDO',
+        'El monto debe ser mayor a cero'
+      );
+    }
+
+    if (!conceptoLimpio) {
+      throw cajaChicaHttpError(
+        400,
+        'CONCEPTO_REQUERIDO',
+        'El concepto es requerido'
+      );
+    }
+
+    const usuario = cajaChicaUsuario(req);
+
+    await conn.beginTransaction();
+    transactionStarted = true;
+
+    const saldo =
+      await bloquearCajaChicaYObtenerSaldo(
+        conn,
+        scope
+      );
+
+    if (
+      tipo === 'EGRESO' &&
+      montoNum > saldo
+    ) {
+      throw cajaChicaHttpError(
+        409,
+        'CAJA_CHICA_SALDO_INSUFICIENTE',
+        `Saldo insuficiente en Caja Chica. Disponible: Q${saldo.toFixed(2)}`
+      );
+    }
+
+    const [result] = await conn.query(
+      `INSERT INTO caja_chica (
+         empresa_id,
+         sucursal_id,
+         tipo_movimiento,
+         monto,
+         concepto,
+         categoria,
+         estado,
+         realizado_por,
+         observaciones
+       )
+       VALUES (
+         ?,
+         ?,
+         ?,
+         ?,
+         ?,
+         ?,
+         'CONFIRMADO',
+         ?,
+         ?
+       )`,
+      [
+        scope.empresaId,
+        scope.sucursalId,
+        tipo,
+        montoNum,
+        conceptoLimpio,
+        categoria || 'Otro',
+        usuario,
+        observaciones || null,
+      ]
     );
-    
-    res.status(201).json({
+
+    await conn.commit();
+    transactionStarted = false;
+
+    return res.status(201).json({
       success: true,
-      message: 'Movimiento registrado exitosamente',
-      data: { id: result.insertId }
+      message:
+        tipo === 'INGRESO'
+          ? 'Fondo repuesto exitosamente'
+          : 'Movimiento registrado exitosamente',
+      data: {
+        id: result.insertId,
+        empresa_id: scope.empresaId,
+        sucursal_id: scope.sucursalId,
+        saldo_anterior: saldo,
+        saldo_actual:
+          tipo === 'INGRESO'
+            ? saldo + montoNum
+            : saldo - montoNum,
+      },
     });
   } catch (error) {
-    console.error('Error registrando movimiento caja chica:', error);
-    res.status(500).json({ success: false, message: error.message });
+    if (transactionStarted) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+
+    console.error(
+      'Error registrando movimiento Caja Chica:',
+      error
+    );
+
+    return res
+      .status(error.statusCode || 500)
+      .json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+  } finally {
+    conn.release();
   }
 };
 
@@ -363,61 +785,165 @@ exports.registrarMovimientoBancario = async (req, res) => {
 // ========== CONFIRMACIÓN DE MOVIMIENTOS ==========
 
 // Confirmar movimiento de caja chica
-exports.confirmarMovimientoCajaChica = async (req, res) => {
+exports.confirmarMovimientoCajaChica = async (
+  req,
+  res
+) => {
+  const conn = await db.getConnection();
+  let transactionStarted = false;
+
   try {
     const { id } = req.params;
-    const tenant = financialTenantClause(req);
+    const scope = cajaChicaScope(req);
 
-    const [[mov]] = await db.query(
-      `SELECT * FROM caja_chica WHERE id = ?${tenant.sql}`,
-      [id, ...tenant.params]
-    );
-    if (!mov) {
-      return res.status(404).json({ success: false, message: 'Movimiento no encontrado' });
-    }
-
-    // No se puede confirmar un movimiento ya confirmado
-    if (mov.estado === 'CONFIRMADO') {
-      return res.status(409).json({
-        success: false,
-        message: 'Este movimiento ya está confirmado'
-      });
-    }
-
-    // No se puede confirmar un movimiento anulado
-    if (mov.estado === 'ANULADO') {
-      return res.status(409).json({
-        success: false,
-        message: 'Este movimiento ha sido anulado y no puede confirmarse'
-      });
-    }
-
-    // No se puede confirmar un anticipo de una reparación cancelada
-    if (mov.referencia_tipo === 'REPARACION' && mov.referencia_id) {
-      const [[rep]] = await db.query(
-        'SELECT estado FROM reparaciones WHERE id = ? AND empresa_id = ?',
-        [mov.referencia_id, mov.empresa_id]
+    if (scope.mode !== 'specific') {
+      throw cajaChicaHttpError(
+        400,
+        'BRANCH_SPECIFIC_REQUIRED',
+        'Seleccione una sucursal específica para realizar esta operación.'
       );
-      if (rep && rep.estado === 'CANCELADA') {
-        return res.status(409).json({
-          success: false,
-          message: 'No se puede confirmar este movimiento porque la reparación asociada está cancelada'
-        });
+    }
+
+    await conn.beginTransaction();
+    transactionStarted = true;
+
+    const saldo =
+      await bloquearCajaChicaYObtenerSaldo(
+        conn,
+        scope
+      );
+
+    const [[mov]] = await conn.query(
+      `SELECT *
+       FROM caja_chica
+       WHERE id = ?
+         AND empresa_id = ?
+         AND sucursal_id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [
+        id,
+        scope.empresaId,
+        scope.sucursalId,
+      ]
+    );
+
+    if (!mov) {
+      throw cajaChicaHttpError(
+        404,
+        'CAJA_CHICA_MOVIMIENTO_NO_ENCONTRADO',
+        'Movimiento no encontrado en la sucursal activa'
+      );
+    }
+
+    if (mov.estado === 'CONFIRMADO') {
+      throw cajaChicaHttpError(
+        409,
+        'CAJA_CHICA_YA_CONFIRMADO',
+        'Este movimiento ya está confirmado'
+      );
+    }
+
+    if (mov.estado === 'ANULADO') {
+      throw cajaChicaHttpError(
+        409,
+        'CAJA_CHICA_MOVIMIENTO_ANULADO',
+        'Este movimiento ha sido anulado y no puede confirmarse'
+      );
+    }
+
+    if (
+      mov.tipo_movimiento === 'EGRESO' &&
+      Number(mov.monto) > saldo
+    ) {
+      throw cajaChicaHttpError(
+        409,
+        'CAJA_CHICA_SALDO_INSUFICIENTE',
+        `Saldo insuficiente en Caja Chica. Disponible: Q${saldo.toFixed(2)}`
+      );
+    }
+
+    if (
+      String(mov.referencia_tipo || '')
+        .toUpperCase() === 'REPARACION' &&
+      mov.referencia_id
+    ) {
+      const [[rep]] = await conn.query(
+        `SELECT estado
+         FROM reparaciones
+         WHERE id = ?
+           AND empresa_id = ?
+           AND sucursal_id = ?`,
+        [
+          mov.referencia_id,
+          scope.empresaId,
+          scope.sucursalId,
+        ]
+      );
+
+      if (
+        rep &&
+        rep.estado === 'CANCELADA'
+      ) {
+        throw cajaChicaHttpError(
+          409,
+          'REPARACION_CANCELADA',
+          'No se puede confirmar este movimiento porque la reparación asociada está cancelada'
+        );
       }
     }
 
-    await db.query(
-      `UPDATE caja_chica SET estado = 'CONFIRMADO', confirmado_en = NOW(), confirmado_por = ? WHERE id = ?${tenant.sql}`,
+    const confirmadoPor =
+      req.user?.id ??
+      req.user?.userId ??
+      req.user?.usuario_id ??
+      null;
+
+    await conn.query(
+      `UPDATE caja_chica
+       SET estado = 'CONFIRMADO',
+           confirmado_en = NOW(),
+           confirmado_por = ?
+       WHERE id = ?
+         AND empresa_id = ?
+         AND sucursal_id = ?`,
       [
-        req.user?.id ?? req.user?.userId ?? req.user?.usuario_id ?? null,
+        confirmadoPor,
         id,
-        ...tenant.params
+        scope.empresaId,
+        scope.sucursalId,
       ]
     );
-    res.json({ success: true, message: 'Movimiento confirmado exitosamente' });
+
+    await conn.commit();
+    transactionStarted = false;
+
+    return res.json({
+      success: true,
+      message:
+        'Movimiento confirmado exitosamente',
+    });
   } catch (error) {
-    console.error('Error confirmando movimiento caja chica:', error);
-    res.status(500).json({ success: false, message: error.message });
+    if (transactionStarted) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+
+    console.error(
+      'Error confirmando movimiento Caja Chica:',
+      error
+    );
+
+    return res
+      .status(error.statusCode || 500)
+      .json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+  } finally {
+    conn.release();
   }
 };
 
@@ -1157,78 +1683,212 @@ exports.registrarReversaMovimientoVenta = async (
 // Si se marca a_caja_chica = true, el monto ingresa a caja chica también.
 exports.retirarDeBanco = async (req, res) => {
   const conn = await db.getConnection();
-  try {
-    const { cuenta_id, monto, concepto, a_caja_chica, observaciones, realizado_por } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+  let transactionStarted = false;
 
-    if (!cuenta_id || !monto || Number(monto) <= 0) {
-      return res.status(400).json({ success: false, message: 'cuenta_id y monto son requeridos' });
-    }
-    if (!concepto || !String(concepto).trim()) {
-      return res.status(400).json({ success: false, message: 'El concepto es requerido' });
+  try {
+    const {
+      cuenta_id,
+      monto,
+      concepto,
+      a_caja_chica,
+      observaciones,
+    } = req.body;
+
+    const scope = cajaChicaScope(req);
+    const empresaId = scope.empresaId;
+
+    if (scope.mode !== 'specific') {
+      throw cajaChicaHttpError(
+        400,
+        'BRANCH_SPECIFIC_REQUIRED',
+        'Seleccione una sucursal específica para realizar esta operación.'
+      );
     }
 
     const montoNum = Number(monto);
 
-    const [cuentas] = await conn.query(
-      'SELECT * FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
-      [cuenta_id, empresaId]
-    );
-
-    if (cuentas.length === 0) {
-      return res.status(404).json({ success: false, message: 'Cuenta bancaria no encontrada o inactiva' });
+    if (
+      !cuenta_id ||
+      !Number.isFinite(montoNum) ||
+      montoNum <= 0
+    ) {
+      throw cajaChicaHttpError(
+        400,
+        'MONTO_INVALIDO',
+        'cuenta_id y monto son requeridos'
+      );
     }
 
-    const cuenta = cuentas[0];
+    const conceptoLimpio =
+      String(concepto || '').trim();
 
-    if (Number(cuenta.saldo_actual) < montoNum) {
-      return res.status(409).json({
-        success: false,
-        message: `Saldo insuficiente. Disponible: Q${Number(cuenta.saldo_actual).toFixed(2)}`
-      });
+    if (!conceptoLimpio) {
+      throw cajaChicaHttpError(
+        400,
+        'CONCEPTO_REQUERIDO',
+        'El concepto es requerido'
+      );
     }
 
     await conn.beginTransaction();
+    transactionStarted = true;
 
-    const usuario = realizado_por || 'Usuario';
+    // Orden de locks: sucursal primero, cuenta bancaria después.
+    // Esto evita deadlocks con Caja Chica -> Banco.
+    if (a_caja_chica) {
+      await bloquearCajaChicaYObtenerSaldo(
+        conn,
+        scope
+      );
+    }
 
-    // Egreso del banco
+    const [[cuenta]] = await conn.query(
+      `SELECT *
+       FROM cuentas_bancarias
+       WHERE id = ?
+         AND empresa_id = ?
+         AND activa = TRUE
+       LIMIT 1
+       FOR UPDATE`,
+      [
+        cuenta_id,
+        empresaId,
+      ]
+    );
+
+    if (!cuenta) {
+      throw cajaChicaHttpError(
+        404,
+        'CUENTA_BANCARIA_NO_ENCONTRADA',
+        'Cuenta bancaria no encontrada o inactiva'
+      );
+    }
+
+    if (
+      Number(cuenta.saldo_actual) <
+      montoNum
+    ) {
+      throw cajaChicaHttpError(
+        409,
+        'BANCO_SALDO_INSUFICIENTE',
+        `Saldo insuficiente. Disponible: Q${Number(cuenta.saldo_actual).toFixed(2)}`
+      );
+    }
+
+    const usuario =
+      cajaChicaUsuario(req);
+
     await conn.query(
-      `INSERT INTO movimientos_bancarios
-        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, ?, 'EGRESO', ?, ?, 'Retiro', 'CONFIRMADO', ?, ?)`,
-      [empresaId, cuenta_id, montoNum, concepto, usuario, observaciones || null]
+      `INSERT INTO movimientos_bancarios (
+         empresa_id,
+         cuenta_id,
+         tipo_movimiento,
+         monto,
+         concepto,
+         categoria,
+         estado,
+         realizado_por,
+         observaciones
+       )
+       VALUES (
+         ?,
+         ?,
+         'EGRESO',
+         ?,
+         ?,
+         'Retiro',
+         'CONFIRMADO',
+         ?,
+         ?
+       )`,
+      [
+        empresaId,
+        cuenta_id,
+        montoNum,
+        conceptoLimpio,
+        usuario,
+        observaciones || null,
+      ]
     );
 
     await conn.query(
-      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ? AND empresa_id = ?',
-      [montoNum, cuenta_id, empresaId]
+      `UPDATE cuentas_bancarias
+       SET saldo_actual =
+         saldo_actual - ?
+       WHERE id = ?
+         AND empresa_id = ?`,
+      [
+        montoNum,
+        cuenta_id,
+        empresaId,
+      ]
     );
 
-    // Ingreso a caja chica (opcional)
     if (a_caja_chica) {
       await conn.query(
-        `INSERT INTO caja_chica
-          (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-         VALUES (?, 'INGRESO', ?, ?, 'Retiro Banco', 'CONFIRMADO', ?, ?)`,
-        [empresaId, montoNum, `Retiro de ${cuenta.nombre} - ${concepto}`, usuario, observaciones || null]
+        `INSERT INTO caja_chica (
+           empresa_id,
+           sucursal_id,
+           tipo_movimiento,
+           monto,
+           concepto,
+           categoria,
+           estado,
+           realizado_por,
+           observaciones
+         )
+         VALUES (
+           ?,
+           ?,
+           'INGRESO',
+           ?,
+           ?,
+           'Retiro Banco',
+           'CONFIRMADO',
+           ?,
+           ?
+         )`,
+        [
+          empresaId,
+          scope.sucursalId,
+          montoNum,
+          `Retiro de ${cuenta.nombre} - ${conceptoLimpio}`,
+          usuario,
+          observaciones || null,
+        ]
       );
     }
 
     await conn.commit();
-    conn.release();
+    transactionStarted = false;
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: a_caja_chica
-        ? `Retiro de Q${montoNum.toFixed(2)} registrado e ingresado a caja chica`
-        : `Retiro de Q${montoNum.toFixed(2)} registrado`
+        ? `Retiro de Q${montoNum.toFixed(2)} registrado e ingresado a Caja Chica`
+        : `Retiro de Q${montoNum.toFixed(2)} registrado`,
     });
   } catch (error) {
-    await conn.rollback();
+    if (transactionStarted) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+
+    console.error(
+      'Error en retirarDeBanco:',
+      error
+    );
+
+    return res
+      .status(error.statusCode || 500)
+      .json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+  } finally {
     conn.release();
-    console.error('Error en retirarDeBanco:', error);
-    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -1236,83 +1896,201 @@ exports.retirarDeBanco = async (req, res) => {
 // Saca dinero de caja chica y lo deposita en una cuenta bancaria.
 exports.depositarAlBanco = async (req, res) => {
   const conn = await db.getConnection();
-  try {
-    const { cuenta_id, monto, concepto, observaciones, realizado_por } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+  let transactionStarted = false;
 
-    if (!cuenta_id || !monto || Number(monto) <= 0) {
-      return res.status(400).json({ success: false, message: 'cuenta_id y monto son requeridos' });
-    }
-    if (!concepto || !String(concepto).trim()) {
-      return res.status(400).json({ success: false, message: 'El concepto es requerido' });
+  try {
+    const {
+      cuenta_id,
+      monto,
+      concepto,
+      observaciones,
+    } = req.body;
+
+    const scope = cajaChicaScope(req);
+    const empresaId = scope.empresaId;
+
+    if (scope.mode !== 'specific') {
+      throw cajaChicaHttpError(
+        400,
+        'BRANCH_SPECIFIC_REQUIRED',
+        'Seleccione una sucursal específica para realizar esta operación.'
+      );
     }
 
     const montoNum = Number(monto);
+    const conceptoLimpio =
+      String(concepto || '').trim();
 
-    // Validar saldo de caja chica (solo CONFIRMADOS)
-    const [[saldoRow]] = await conn.query(
-      `SELECT COALESCE(SUM(CASE WHEN tipo_movimiento = 'INGRESO' THEN monto ELSE -monto END), 0) AS saldo
-       FROM caja_chica WHERE estado = 'CONFIRMADO' AND empresa_id = ?`,
-      [empresaId]
-    );
-    const saldoCaja = Number(saldoRow.saldo);
-
-    if (saldoCaja < montoNum) {
-      return res.status(409).json({
-        success: false,
-        message: `Saldo insuficiente en caja chica. Disponible: Q${saldoCaja.toFixed(2)}`
-      });
+    if (
+      !cuenta_id ||
+      !Number.isFinite(montoNum) ||
+      montoNum <= 0
+    ) {
+      throw cajaChicaHttpError(
+        400,
+        'MONTO_INVALIDO',
+        'cuenta_id y monto son requeridos'
+      );
     }
 
-    const [cuentas] = await conn.query(
-      'SELECT * FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
-      [cuenta_id, empresaId]
-    );
-
-    if (cuentas.length === 0) {
-      return res.status(404).json({ success: false, message: 'Cuenta bancaria no encontrada o inactiva' });
+    if (!conceptoLimpio) {
+      throw cajaChicaHttpError(
+        400,
+        'CONCEPTO_REQUERIDO',
+        'El concepto es requerido'
+      );
     }
-
-    const cuenta = cuentas[0];
 
     await conn.beginTransaction();
+    transactionStarted = true;
 
-    const usuario = realizado_por || 'Usuario';
+    const saldoCaja =
+      await bloquearCajaChicaYObtenerSaldo(
+        conn,
+        scope
+      );
 
-    // Egreso de caja chica
-    await conn.query(
-      `INSERT INTO caja_chica
-        (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, 'EGRESO', ?, ?, 'Deposito Banco', 'CONFIRMADO', ?, ?)`,
-      [empresaId, montoNum, `Depósito a ${cuenta.nombre} - ${concepto}`, usuario, observaciones || null]
+    if (saldoCaja < montoNum) {
+      throw cajaChicaHttpError(
+        409,
+        'CAJA_CHICA_SALDO_INSUFICIENTE',
+        `Saldo insuficiente en Caja Chica. Disponible: Q${saldoCaja.toFixed(2)}`
+      );
+    }
+
+    const [[cuenta]] = await conn.query(
+      `SELECT *
+       FROM cuentas_bancarias
+       WHERE id = ?
+         AND empresa_id = ?
+         AND activa = TRUE
+       LIMIT 1
+       FOR UPDATE`,
+      [
+        cuenta_id,
+        empresaId,
+      ]
     );
 
-    // Ingreso al banco
+    if (!cuenta) {
+      throw cajaChicaHttpError(
+        404,
+        'CUENTA_BANCARIA_NO_ENCONTRADA',
+        'Cuenta bancaria no encontrada o inactiva'
+      );
+    }
+
+    const usuario =
+      cajaChicaUsuario(req);
+
     await conn.query(
-      `INSERT INTO movimientos_bancarios
-        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-       VALUES (?, ?, 'INGRESO', ?, ?, 'Deposito', 'CONFIRMADO', ?, ?)`,
-      [empresaId, cuenta_id, montoNum, `Depósito desde Caja Chica - ${concepto}`, usuario, observaciones || null]
+      `INSERT INTO caja_chica (
+         empresa_id,
+         sucursal_id,
+         tipo_movimiento,
+         monto,
+         concepto,
+         categoria,
+         estado,
+         realizado_por,
+         observaciones
+       )
+       VALUES (
+         ?,
+         ?,
+         'EGRESO',
+         ?,
+         ?,
+         'Deposito Banco',
+         'CONFIRMADO',
+         ?,
+         ?
+       )`,
+      [
+        empresaId,
+        scope.sucursalId,
+        montoNum,
+        `Depósito a ${cuenta.nombre} - ${conceptoLimpio}`,
+        usuario,
+        observaciones || null,
+      ]
     );
 
-    // Actualizar saldo banco
     await conn.query(
-      'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ? AND empresa_id = ?',
-      [montoNum, cuenta_id, empresaId]
+      `INSERT INTO movimientos_bancarios (
+         empresa_id,
+         cuenta_id,
+         tipo_movimiento,
+         monto,
+         concepto,
+         categoria,
+         estado,
+         realizado_por,
+         observaciones
+       )
+       VALUES (
+         ?,
+         ?,
+         'INGRESO',
+         ?,
+         ?,
+         'Deposito',
+         'CONFIRMADO',
+         ?,
+         ?
+       )`,
+      [
+        empresaId,
+        cuenta_id,
+        montoNum,
+        `Depósito desde Caja Chica - ${conceptoLimpio}`,
+        usuario,
+        observaciones || null,
+      ]
+    );
+
+    await conn.query(
+      `UPDATE cuentas_bancarias
+       SET saldo_actual =
+         saldo_actual + ?
+       WHERE id = ?
+         AND empresa_id = ?`,
+      [
+        montoNum,
+        cuenta_id,
+        empresaId,
+      ]
     );
 
     await conn.commit();
-    conn.release();
+    transactionStarted = false;
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      message: `Depósito de Q${montoNum.toFixed(2)} a ${cuenta.nombre} registrado`
+      message:
+        `Depósito de Q${montoNum.toFixed(2)} a ${cuenta.nombre} registrado`,
     });
   } catch (error) {
-    await conn.rollback();
+    if (transactionStarted) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+
+    console.error(
+      'Error en depositarAlBanco:',
+      error
+    );
+
+    return res
+      .status(error.statusCode || 500)
+      .json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+  } finally {
     conn.release();
-    console.error('Error en depositarAlBanco:', error);
-    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -1525,75 +2303,176 @@ exports.desactivarCuentaBancaria = async (req, res) => {
 // El ingreso bancario queda PENDIENTE; el admin lo confirma después.
 exports.transferirCajaABanco = async (req, res) => {
   const conn = await db.getConnection();
+  let transactionStarted = false;
+
   try {
-    const { banco_id, monto, fecha, referencia, observacion } = req.body;
-    const empresaId = getTenantEmpresaId(req);
+    const {
+      banco_id,
+      monto,
+      fecha,
+      referencia,
+      observacion,
+    } = req.body;
 
-    if (!banco_id) {
-      return res.status(400).json({ success: false, message: 'banco_id es obligatorio' });
-    }
-    const montoNum = parseFloat(monto);
-    if (!montoNum || montoNum <= 0) {
-      return res.status(400).json({ success: false, message: 'El monto debe ser mayor a 0' });
-    }
+    const scope = cajaChicaScope(req);
+    const empresaId = scope.empresaId;
 
-    // Verificar banco activo
-    const [[banco]] = await conn.query(
-      'SELECT id, nombre FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
-      [banco_id, empresaId]
-    );
-    if (!banco) {
-      return res.status(404).json({ success: false, message: 'Banco no encontrado o inactivo' });
-    }
-
-    // Validar saldo disponible en caja chica (solo movimientos CONFIRMADOS)
-    const [[saldoRow]] = await conn.query(
-      `SELECT COALESCE(SUM(CASE WHEN tipo_movimiento = 'INGRESO' THEN monto ELSE -monto END), 0) AS saldo
-       FROM caja_chica WHERE estado = 'CONFIRMADO' AND empresa_id = ?`,
-      [empresaId]
-    );
-    const saldoCaja = parseFloat(saldoRow.saldo);
-    if (montoNum > saldoCaja) {
-      return res.status(409).json({
-        success: false,
-        message: `Saldo insuficiente en caja chica. Disponible: Q${saldoCaja.toFixed(2)}`
-      });
+    if (scope.mode !== 'specific') {
+      throw cajaChicaHttpError(
+        400,
+        'BRANCH_SPECIFIC_REQUIRED',
+        'Seleccione una sucursal específica para realizar esta operación.'
+      );
     }
 
-    const userId = req.user?.id ?? req.user?.userId ?? req.user?.usuario_id ?? null;
-    const userName = req.user?.name ?? req.user?.nombre ?? req.user?.username ?? 'Usuario';
+    const montoNum = Number(monto);
+
+    if (
+      !banco_id ||
+      !Number.isFinite(montoNum) ||
+      montoNum <= 0
+    ) {
+      throw cajaChicaHttpError(
+        400,
+        'MONTO_INVALIDO',
+        'banco_id y monto son obligatorios'
+      );
+    }
+
+    const userId =
+      req.user?.id ??
+      req.user?.userId ??
+      req.user?.usuario_id ??
+      null;
+
+    const userName =
+      cajaChicaUsuario(req);
+
     const fechaMov = fecha
-      ? fecha.length === 10 ? `${fecha} 00:00:00` : fecha
-      : new Date().toISOString().slice(0, 19).replace('T', ' ');
+      ? (
+          String(fecha).length === 10
+            ? `${fecha} 00:00:00`
+            : fecha
+        )
+      : new Date()
+          .toISOString()
+          .slice(0, 19)
+          .replace('T', ' ');
 
     await conn.beginTransaction();
+    transactionStarted = true;
 
-    // 1. Egreso en caja_chica → CONFIRMADO (el dinero sale físicamente de caja)
+    const saldoCaja =
+      await bloquearCajaChicaYObtenerSaldo(
+        conn,
+        scope
+      );
+
+    if (montoNum > saldoCaja) {
+      throw cajaChicaHttpError(
+        409,
+        'CAJA_CHICA_SALDO_INSUFICIENTE',
+        `Saldo insuficiente en Caja Chica. Disponible: Q${saldoCaja.toFixed(2)}`
+      );
+    }
+
+    const [[banco]] = await conn.query(
+      `SELECT id, nombre
+       FROM cuentas_bancarias
+       WHERE id = ?
+         AND empresa_id = ?
+         AND activa = TRUE
+       LIMIT 1
+       FOR UPDATE`,
+      [
+        banco_id,
+        empresaId,
+      ]
+    );
+
+    if (!banco) {
+      throw cajaChicaHttpError(
+        404,
+        'CUENTA_BANCARIA_NO_ENCONTRADA',
+        'Banco no encontrado o inactivo'
+      );
+    }
+
     await conn.query(
-      `INSERT INTO caja_chica
-         (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones,
-          fecha_movimiento, confirmado_en, confirmado_por, referencia_tipo, referencia_id)
-       VALUES (?, 'EGRESO', ?, ?, 'Traslado a Banco', 'CONFIRMADO', ?, ?,
-               ?, NOW(), ?, 'TRASLADO_BANCO', ?)`,
+      `INSERT INTO caja_chica (
+         empresa_id,
+         sucursal_id,
+         tipo_movimiento,
+         monto,
+         concepto,
+         categoria,
+         estado,
+         realizado_por,
+         observaciones,
+         fecha_movimiento,
+         confirmado_en,
+         confirmado_por,
+         referencia_tipo,
+         referencia_id
+       )
+       VALUES (
+         ?,
+         ?,
+         'EGRESO',
+         ?,
+         ?,
+         'Traslado a Banco',
+         'CONFIRMADO',
+         ?,
+         ?,
+         ?,
+         NOW(),
+         ?,
+         'TRASLADO_BANCO',
+         ?
+       )`,
       [
         empresaId,
+        scope.sucursalId,
         montoNum,
         `Depósito a banco - ${banco.nombre}`,
         userName,
         observacion || null,
         fechaMov,
         userId,
-        String(banco_id)
+        String(banco_id),
       ]
     );
 
-    // 2. Ingreso en movimientos_bancarios → PENDIENTE (el admin lo confirma después)
     await conn.query(
-      `INSERT INTO movimientos_bancarios
-         (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado,
-          numero_referencia, realizado_por, observaciones, fecha_movimiento, referencia_tipo)
-       VALUES (?, ?, 'INGRESO', ?, 'Depósito desde caja chica', 'Traslado Caja', 'PENDIENTE',
-               ?, ?, ?, ?, 'TRASLADO_CAJA')`,
+      `INSERT INTO movimientos_bancarios (
+         empresa_id,
+         cuenta_id,
+         tipo_movimiento,
+         monto,
+         concepto,
+         categoria,
+         estado,
+         numero_referencia,
+         realizado_por,
+         observaciones,
+         fecha_movimiento,
+         referencia_tipo
+       )
+       VALUES (
+         ?,
+         ?,
+         'INGRESO',
+         ?,
+         'Depósito desde caja chica',
+         'Traslado Caja',
+         'PENDIENTE',
+         ?,
+         ?,
+         ?,
+         ?,
+         'TRASLADO_CAJA'
+       )`,
       [
         empresaId,
         banco_id,
@@ -1601,22 +2480,39 @@ exports.transferirCajaABanco = async (req, res) => {
         referencia || null,
         userName,
         observacion || null,
-        fechaMov
+        fechaMov,
       ]
     );
 
     await conn.commit();
-    conn.release();
+    transactionStarted = false;
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      message: `Depósito de Q${montoNum.toFixed(2)} registrado. El ingreso bancario queda pendiente de confirmación por el administrador.`
+      message:
+        `Depósito de Q${montoNum.toFixed(2)} registrado. El ingreso bancario queda pendiente de confirmación por el administrador.`,
     });
   } catch (error) {
-    await conn.rollback();
+    if (transactionStarted) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+
+    console.error(
+      'Error en transferirCajaABanco:',
+      error
+    );
+
+    return res
+      .status(error.statusCode || 500)
+      .json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+  } finally {
     conn.release();
-    console.error('Error en transferirCajaABanco:', error);
-    res.status(500).json({ success: false, message: error.message });
   }
 };
 

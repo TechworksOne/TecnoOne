@@ -6,6 +6,8 @@ const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
 const requirePlanModule = require('../middleware/requirePlanModule');
+const branchScope = require('../middleware/branchScope');
+const requireBranchSpecific = require('../middleware/requireBranchSpecific');
 
 // Todas las rutas requieren autenticación y permisos efectivos
 router.use(verifyToken);
@@ -18,7 +20,13 @@ router.post('/', requirePermission('tarjetas.administrar'), ctrl.createTarjeta);
 router.put('/:id', requirePermission('tarjetas.administrar'), ctrl.updateTarjeta);
 router.patch('/:id/desactivar', requirePermission('tarjetas.administrar'), ctrl.desactivarTarjeta);
 router.get('/:id/movimientos', requirePermission('tarjetas.ver'), ctrl.getMovimientos);
-router.post('/:id/pagos', requirePermission('tarjetas.administrar'), ctrl.registrarPago);
+router.post(
+  '/:id/pagos',
+  requirePermission('tarjetas.administrar'),
+  branchScope,
+  requireBranchSpecific,
+  ctrl.registrarPago
+);
 router.post('/:id/ajustes', requirePermission('tarjetas.administrar'), ctrl.registrarAjuste);
 
 module.exports = router;

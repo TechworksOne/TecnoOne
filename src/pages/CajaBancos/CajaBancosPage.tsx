@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import API_URL from '../../services/config';
 import { useAuth } from '../../store/useAuth';
+import { useSucursalContext } from '../../store/useSucursalContext';
 import Button from '../../components/ui/Button';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -119,6 +120,36 @@ export default function CajaBancosPage() {
 
   // Auth – definir antes de loadData para que el closure lo capture
   const { user, hasModule } = useAuth();
+
+  const {
+    mode: branchMode,
+    sucursalActiva,
+    contextVersion,
+  } = useSucursalContext();
+
+  const isSpecificBranch =
+    branchMode === 'specific';
+
+  const branchHeaderValue =
+    branchMode === 'consolidated'
+      ? 'ALL'
+      : sucursalActiva?.id
+        ? String(sucursalActiva.id)
+        : null;
+
+  const getFinancialRequestConfig = (
+    token: string | null,
+  ) => ({
+    headers: {
+      ...(token
+        ? { Authorization: `Bearer ${token}` }
+        : {}),
+      ...(branchHeaderValue
+        ? { 'X-Sucursal-Id': branchHeaderValue }
+        : {}),
+    },
+  });
+
   const hasTarjetasModule = hasModule('tarjetas');
   const isAdmin = user?.role === 'admin' || user?.rol === 'admin' ||
     user?.role === 'ADMIN' || user?.rol === 'ADMIN' ||
@@ -126,7 +157,11 @@ export default function CajaBancosPage() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [
+    contextVersion,
+    branchMode,
+    sucursalActiva?.id,
+  ]);
 
   useEffect(() => {
     if (!hasTarjetasModule && vistaActual === 'tarjetas') {
@@ -150,7 +185,7 @@ export default function CajaBancosPage() {
         return;
       }
 
-      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const config = getFinancialRequestConfig(token);
 
       const cajaSaldo = await axios.get(`${API_URL}/caja/caja-chica/saldo`, config);
       setSaldoCajaChica(cajaSaldo.data.data);
@@ -212,6 +247,14 @@ export default function CajaBancosPage() {
 
   const handlePagarTarjeta = async () => {
     if (!tarjetaAPagar) return;
+
+    if (!isSpecificBranch) {
+      toast.error(
+        'Selecciona una sucursal específica para registrar el pago.',
+      );
+      return;
+    }
+
     setSavingPago(true);
     try {
       const payload: PagoTarjetaForm = {
@@ -251,7 +294,7 @@ export default function CajaBancosPage() {
     try {
       setSavingBanco(true);
       const token = sessionStorage.getItem('token');
-      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const config = getFinancialRequestConfig(token);
       if (bancoEditando) {
         await axios.put(`${API_URL}/caja/bancos/${bancoEditando.id}`, bancoForm, config);
       } else {
@@ -270,7 +313,7 @@ export default function CajaBancosPage() {
     if (!bancoADesactivar) return;
     try {
       const token = sessionStorage.getItem('token');
-      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const config = getFinancialRequestConfig(token);
       await axios.delete(`${API_URL}/caja/bancos/${bancoADesactivar.id}`, config);
       setShowDesactivarModal(false);
       setBancoADesactivar(null);
@@ -283,7 +326,7 @@ export default function CajaBancosPage() {
   const confirmarMovimientoCaja = async (id: number) => {
     try {
       const token = sessionStorage.getItem('token');
-      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const config = getFinancialRequestConfig(token);
       await axios.put(`${API_URL}/caja/caja-chica/confirmar/${id}`, {}, config);
       setShowConfirmModal(false);
       setMovimientoAConfirmar(null);
@@ -301,7 +344,7 @@ export default function CajaBancosPage() {
   const confirmarMovimientoBanco = async (id: number) => {
     try {
       const token = sessionStorage.getItem('token');
-      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const config = getFinancialRequestConfig(token);
       await axios.put(`${API_URL}/caja/bancos/confirmar/${id}`, {}, config);
       setShowConfirmModal(false);
       setMovimientoAConfirmar(null);
@@ -332,8 +375,15 @@ export default function CajaBancosPage() {
 
   const handleRegistrarMovimiento = async () => {
     try {
+      if (!isSpecificBranch) {
+        toast.error(
+          'Selecciona una sucursal específica para registrar movimientos.',
+        );
+        return;
+      }
+
       const token = sessionStorage.getItem('token');
-      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const config = getFinancialRequestConfig(token);
       const montoNum = parseFloat(monto);
 
       if (!montoNum || montoNum <= 0) {
@@ -373,7 +423,7 @@ export default function CajaBancosPage() {
             tipo_movimiento: 'INGRESO',
             monto: montoNum,
             concepto,
-            categoria: 'Ingreso Manual',
+            categoria: 'Reposición de fondo',
             realizado_por: usuario,
             observaciones: observaciones || null
           }, config);
@@ -476,7 +526,7 @@ export default function CajaBancosPage() {
     setPeriodoHistorial('todo');
     setMovsHistorial([]);
     const token = sessionStorage.getItem('token');
-    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const config = getFinancialRequestConfig(token);
     // Fetch stats y movimientos en paralelo
     setLoadingCuentaStats(true);
     setLoadingHistorial(true);
@@ -507,6 +557,13 @@ export default function CajaBancosPage() {
   };
 
   const abrirModal = (tipo: typeof tipoMovimiento) => {
+    if (!isSpecificBranch) {
+      toast.error(
+        'Selecciona una sucursal específica para registrar movimientos.',
+      );
+      return;
+    }
+
     setTipoMovimiento(tipo);
     setMonto(''); setConcepto(''); setObservaciones('');
     setCuentaDestino(''); setCuentaOrigen(''); setACajaChica(false);
@@ -554,7 +611,8 @@ export default function CajaBancosPage() {
             </Button>
             <Button
               onClick={() => abrirModal('GASTO')}
-              className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-sm"
+              disabled={!isSpecificBranch}
+              className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Plus size={16} className="mr-1.5" />Registrar movimiento
             </Button>
@@ -575,7 +633,11 @@ export default function CajaBancosPage() {
                 <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1">
                   Q{Number(saldoCajaChica.saldo || 0).toFixed(2)}
                 </p>
-                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Fondo para gastos menores</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                  {branchMode === 'consolidated'
+                    ? 'Consolidado · solo lectura'
+                    : 'Fondo para gastos menores'}
+                </p>
               </div>
               <div className="bg-emerald-50 p-2 rounded-xl">
                 <Wallet size={20} className="text-emerald-600" />
@@ -637,12 +699,13 @@ export default function CajaBancosPage() {
               { label: 'Retiro de banco', icon: <Building2 size={18} />, color: 'hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700 dark:hover:bg-rose-950/40 dark:hover:border-rose-800 dark:hover:text-rose-300', tipo: 'RETIRO_BANCO' as const },
               { label: 'Depósito a banco', icon: <ArrowUpCircle size={18} />, color: 'hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 dark:hover:bg-blue-950/40 dark:hover:border-blue-800 dark:hover:text-blue-300', tipo: 'DEPOSITO' as const },
               { label: 'Transferencia', icon: <ArrowRightLeft size={18} />, color: 'hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 dark:hover:bg-violet-950/40 dark:hover:border-violet-800 dark:hover:text-violet-300', tipo: 'TRANSFERENCIA' as const },
-              { label: 'Ingreso manual', icon: <Banknote size={18} />, color: 'hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 dark:hover:bg-emerald-950/40 dark:hover:border-emerald-800 dark:hover:text-emerald-300', tipo: 'INGRESO_MANUAL' as const },
+              { label: 'Reponer fondo', icon: <Banknote size={18} />, color: 'hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 dark:hover:bg-emerald-950/40 dark:hover:border-emerald-800 dark:hover:text-emerald-300', tipo: 'INGRESO_MANUAL' as const },
             ].filter(item => !['RETIRO_BANCO', 'TRANSFERENCIA'].includes(item.tipo) || isAdmin).map(({ label, icon, color, tipo }) => (
               <button
                 key={tipo}
                 onClick={() => abrirModal(tipo)}
-                className={`flex flex-col items-center gap-1.5 p-3 h-20 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 text-xs font-medium transition-all ${color} active:scale-95`}
+                disabled={!isSpecificBranch}
+                className={`flex flex-col items-center gap-1.5 p-3 h-20 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 text-xs font-medium transition-all ${color} active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100`}
               >
                 {icon}
                 <span className="text-center leading-tight">{label}</span>
@@ -794,8 +857,18 @@ export default function CajaBancosPage() {
                 setShowTarjetaModal(true);
               }}
               onPagar={(t) => {
+                if (!isSpecificBranch) {
+                  toast.error(
+                    'Selecciona una sucursal específica para registrar el pago.',
+                  );
+                  return;
+                }
+
                 setTarjetaAPagar(t);
-                setPagoForm({ tipo_cuenta_origen: 'caja', monto: 0 });
+                setPagoForm({
+                  tipo_cuenta_origen: 'caja',
+                  monto: 0,
+                });
                 setShowPagoModal(true);
               }}
               onDesactivar={async (t) => {
@@ -1239,7 +1312,10 @@ export default function CajaBancosPage() {
                   {tipoMovimiento === 'RETIRO_BANCO' && 'Retiro de Banco'}
                   {tipoMovimiento === 'DEPOSITO' && 'Depósito a Banco'}
                   {tipoMovimiento === 'TRANSFERENCIA' && 'Transferencia Bancaria'}
-                  {tipoMovimiento === 'INGRESO_MANUAL' && 'Ingreso Manual'}
+                  {tipoMovimiento === 'INGRESO_MANUAL' &&
+                    (ingresoDestino === 'caja'
+                      ? 'Reposición de Caja Chica'
+                      : 'Ingreso Manual a Banco')}
                 </span>
               </div>
               <div className="flex justify-between items-center border-t border-slate-200 dark:border-slate-700 pt-1 mt-1">

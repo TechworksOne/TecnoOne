@@ -1,12 +1,27 @@
 import axios from 'axios';
 import API_URL from './config';
+import { ACTIVE_BRANCH_STORAGE_KEY } from '../lib/branchContext';
 
 const api = axios.create({ baseURL: API_URL });
 
 api.interceptors.request.use(
   (config) => {
     const token = sessionStorage.getItem('token');
-    if (token && config.headers) config.headers.Authorization = `Bearer ${token}`;
+
+    if (token && config.headers) {
+      config.headers.Authorization =
+        `Bearer ${token}`;
+    }
+
+    const branch = localStorage.getItem(
+      ACTIVE_BRANCH_STORAGE_KEY,
+    );
+
+    if (branch && config.headers) {
+      config.headers['X-Sucursal-Id'] =
+        branch;
+    }
+
     return config;
   },
   (error) => Promise.reject(error)

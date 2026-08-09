@@ -187,74 +187,430 @@ exports.getMovimientos = async (req, res) => {
 // Paga la tarjeta desde una cuenta bancaria o caja chica
 exports.registrarPago = async (req, res) => {
   if (!soloAdmin(req, res)) return;
+
   const connection = await db.getConnection();
+  let transactionStarted = false;
+
   try {
-    await connection.beginTransaction();
     const { id } = req.params;
-    const { cuenta_origen_id, tipo_cuenta_origen, monto, fecha, observaciones } = req.body;
-    const empresaId = requireTenantEmpresaId(req);
 
-    if (!monto || Number(monto) <= 0) {
-      await connection.rollback();
-      return res.status(400).json({ success: false, message: 'El monto debe ser mayor a 0' });
-    }
+    const {
+      cuenta_origen_id,
+      tipo_cuenta_origen,
+      monto,
+      fecha,
+      observaciones,
+    } = req.body;
 
-    // Verificar tarjeta activa
-    const [tarjetas] = await connection.query(
-      'SELECT * FROM tarjetas_credito WHERE id = ? AND empresa_id = ? AND activo = 1',
-      [id, empresaId]
-    );
-    if (!tarjetas.length) {
-      await connection.rollback();
-      return res.status(404).json({ success: false, message: 'Tarjeta no encontrada o inactiva' });
-    }
-    const tarjeta = tarjetas[0];
-    const montoCentavos = qToCents(monto);
-    const descripcion = observaciones?.trim() || `Pago tarjeta ${tarjeta.banco} ****${tarjeta.ultimos4}`;
+    const empresaId =
+      Number(requireTenantEmpresaId(req));
 
-    // Registrar egreso en la cuenta de origen
-    if (tipo_cuenta_origen === 'banco' && cuenta_origen_id) {
-      const [cuentas] = await connection.query(
-        'SELECT id FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
-        [cuenta_origen_id, empresaId]
+    const sucursalId =
+      Number(req.branchScope?.sucursalId);
+
+    if (
+      req.branchScope?.mode !== 'specific' ||
+      !Number.isInteger(sucursalId) ||
+      sucursalId <= 0
+    ) {
+      const error = new Error(
+        'Seleccione una sucursal específica para realizar esta operación.'
       );
-      if (!cuentas.length) {
-        await connection.rollback();
-        return res.status(404).json({ success: false, message: 'Cuenta bancaria no encontrada o inactiva' });
+      error.statusCode = 400;
+      error.code = 'BRANCH_SPECIFIC_REQUIRED';
+      throw error;
+    }
+
+    /*
+     * Contrato monetario:
+     *
+     * - El frontend envía CENTAVOS.
+     * - tarjeta_credito_movimientos usa CENTAVOS.
+     * - Caja Chica y bancos usan QUETZALES.
+     */
+    const montoCentavos = Number(monto);
+
+    if (
+      !Number.isInteger(montoCentavos) ||
+      montoCentavos <= 0
+    ) {
+      const error = new Error(
+        'El monto debe ser mayor a 0'
+      );
+      error.statusCode = 400;
+      error.code = 'MONTO_INVALIDO';
+      throw error;
+    }
+
+    const montoQuetzales =
+      centsToQ(montoCentavos);
+
+    if (
+      !['banco', 'caja'].includes(
+        tipo_cuenta_origen
+      )
+    ) {
+      const error = new Error(
+        'El origen del pago debe ser banco o Caja Chica'
+      );
+      error.statusCode = 400;
+      error.code = 'ORIGEN_PAGO_INVALIDO';
+      throw error;
+    }
+
+    if (
+      tipo_cuenta_origen === 'banco' &&
+      !cuenta_origen_id
+    ) {
+      const error = new Error(
+        'Debe seleccionar una cuenta bancaria'
+      );
+      error.statusCode = 400;
+      error.code = 'CUENTA_BANCARIA_REQUERIDA';
+      throw error;
+    }
+
+    const userId =
+      req.user?.id ??
+      req.user?.userId ??
+      req.user?.usuario_id ??
+      null;
+
+    const userName = String(
+      req.user?.name ||
+      req.user?.nombre ||
+      req.user?.username ||
+      req.user?.email ||
+      userId ||
+      'Usuario'
+    );
+
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    /*
+     * Mutex financiero de sucursal.
+     * Todas estas operaciones bloquean primero sucursal
+     * para mantener un orden de locks consistente.
+     */
+    const [[sucursal]] =
+      await connection.query(
+        `SELECT id
+         FROM sucursales
+         WHERE id = ?
+           AND empresa_id = ?
+           AND activa = TRUE
+         LIMIT 1
+         FOR UPDATE`,
+        [
+          sucursalId,
+          empresaId,
+        ]
+      );
+
+    if (!sucursal) {
+      const error = new Error(
+        'La sucursal seleccionada no está disponible'
+      );
+      error.statusCode = 409;
+      error.code = 'BRANCH_INACTIVE';
+      throw error;
+    }
+
+    const [[tarjeta]] =
+      await connection.query(
+        `SELECT *
+         FROM tarjetas_credito
+         WHERE id = ?
+           AND empresa_id = ?
+           AND activo = 1
+         LIMIT 1
+         FOR UPDATE`,
+        [
+          id,
+          empresaId,
+        ]
+      );
+
+    if (!tarjeta) {
+      const error = new Error(
+        'Tarjeta no encontrada o inactiva'
+      );
+      error.statusCode = 404;
+      error.code = 'TARJETA_NO_ENCONTRADA';
+      throw error;
+    }
+
+    const descripcion =
+      String(observaciones || '').trim() ||
+      `Pago tarjeta ${tarjeta.banco} ****${tarjeta.ultimos4}`;
+
+    let cuentaOrigenMovimiento = null;
+
+    if (tipo_cuenta_origen === 'banco') {
+      const [[cuenta]] =
+        await connection.query(
+          `SELECT
+             id,
+             nombre,
+             saldo_actual
+           FROM cuentas_bancarias
+           WHERE id = ?
+             AND empresa_id = ?
+             AND activa = TRUE
+           LIMIT 1
+           FOR UPDATE`,
+          [
+            cuenta_origen_id,
+            empresaId,
+          ]
+        );
+
+      if (!cuenta) {
+        const error = new Error(
+          'Cuenta bancaria no encontrada o inactiva'
+        );
+        error.statusCode = 404;
+        error.code =
+          'CUENTA_BANCARIA_NO_ENCONTRADA';
+        throw error;
+      }
+
+      const saldoBanco =
+        Number(cuenta.saldo_actual || 0);
+
+      if (
+        montoQuetzales >
+        saldoBanco
+      ) {
+        const error = new Error(
+          `Saldo insuficiente en ${cuenta.nombre}. Disponible: Q${saldoBanco.toFixed(2)}`
+        );
+        error.statusCode = 409;
+        error.code =
+          'BANCO_SALDO_INSUFICIENTE';
+        throw error;
       }
 
       await connection.query(
-        `INSERT INTO movimientos_bancarios
-         (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, fecha_movimiento, referencia_tipo, referencia_id)
-         VALUES (?, ?, 'EGRESO', ?, ?, 'PAGO_TARJETA', 'CONFIRMADO', ?, ?, 'tarjeta_credito', ?)`,
-        [empresaId, cuenta_origen_id, montoCentavos, descripcion, req.user.id, fecha || new Date(), id]
+        `INSERT INTO movimientos_bancarios (
+           empresa_id,
+           cuenta_id,
+           tipo_movimiento,
+           monto,
+           concepto,
+           categoria,
+           estado,
+           realizado_por,
+           fecha_movimiento,
+           referencia_tipo,
+           referencia_id,
+           confirmado_por,
+           confirmado_en
+         )
+         VALUES (
+           ?,
+           ?,
+           'EGRESO',
+           ?,
+           ?,
+           'PAGO_TARJETA',
+           'CONFIRMADO',
+           ?,
+           ?,
+           'tarjeta_credito',
+           ?,
+           ?,
+           NOW()
+         )`,
+        [
+          empresaId,
+          cuenta.id,
+          montoQuetzales,
+          descripcion,
+          userName,
+          fecha || new Date(),
+          String(id),
+          userId,
+        ]
       );
-      // Actualizar saldo banco
+
       await connection.query(
-        'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ? AND empresa_id = ?',
-        [montoCentavos, cuenta_origen_id, empresaId]
+        `UPDATE cuentas_bancarias
+         SET saldo_actual =
+           saldo_actual - ?
+         WHERE id = ?
+           AND empresa_id = ?`,
+        [
+          montoQuetzales,
+          cuenta.id,
+          empresaId,
+        ]
       );
-    } else if (tipo_cuenta_origen === 'caja') {
+
+      cuentaOrigenMovimiento =
+        Number(cuenta.id);
+    } else {
+      const [[saldoRow]] =
+        await connection.query(
+          `SELECT COALESCE(
+             SUM(
+               CASE
+                 WHEN estado = 'CONFIRMADO'
+                  AND tipo_movimiento = 'INGRESO'
+                 THEN monto
+
+                 WHEN estado = 'CONFIRMADO'
+                  AND tipo_movimiento = 'EGRESO'
+                 THEN -monto
+
+                 ELSE 0
+               END
+             ),
+             0
+           ) AS saldo
+           FROM caja_chica
+           WHERE empresa_id = ?
+             AND sucursal_id = ?`,
+          [
+            empresaId,
+            sucursalId,
+          ]
+        );
+
+      const saldoCaja =
+        Number(saldoRow?.saldo || 0);
+
+      if (
+        montoQuetzales >
+        saldoCaja
+      ) {
+        const error = new Error(
+          `Saldo insuficiente en Caja Chica. Disponible: Q${saldoCaja.toFixed(2)}`
+        );
+        error.statusCode = 409;
+        error.code =
+          'CAJA_CHICA_SALDO_INSUFICIENTE';
+        throw error;
+      }
+
       await connection.query(
-        `INSERT INTO caja_chica (empresa_id, tipo_movimiento, monto, concepto, categoria, realizado_por, estado, fecha_movimiento)
-         VALUES (?, 'EGRESO', ?, ?, 'PAGO_TARJETA', ?, 'CONFIRMADO', ?)`,
-        [empresaId, montoCentavos, descripcion, req.user.id, fecha || new Date()]
+        `INSERT INTO caja_chica (
+           empresa_id,
+           sucursal_id,
+           tipo_movimiento,
+           monto,
+           concepto,
+           categoria,
+           realizado_por,
+           estado,
+           fecha_movimiento,
+           referencia_tipo,
+           referencia_id,
+           confirmado_por,
+           confirmado_en
+         )
+         VALUES (
+           ?,
+           ?,
+           'EGRESO',
+           ?,
+           ?,
+           'PAGO_TARJETA',
+           ?,
+           'CONFIRMADO',
+           ?,
+           'TARJETA_CREDITO',
+           ?,
+           ?,
+           NOW()
+         )`,
+        [
+          empresaId,
+          sucursalId,
+          montoQuetzales,
+          descripcion,
+          userName,
+          fecha || new Date(),
+          String(id),
+          userId,
+        ]
       );
     }
 
-    // Registrar movimiento en tarjeta
-    const [movResult] = await connection.query(
-      `INSERT INTO tarjeta_credito_movimientos (empresa_id, tarjeta_id, tipo, monto, descripcion, referencia_tipo, referencia_id, cuenta_origen_id, fecha_movimiento, created_by)
-       VALUES (?, ?, 'pago', ?, ?, 'pago_manual', NULL, ?, ?, ?)`,
-      [empresaId, id, montoCentavos, descripcion, cuenta_origen_id || null, fecha || new Date(), req.user.id]
-    );
+    /*
+     * Tarjetas almacenan el monto en CENTAVOS.
+     */
+    const [movResult] =
+      await connection.query(
+        `INSERT INTO tarjeta_credito_movimientos (
+           empresa_id,
+           tarjeta_id,
+           tipo,
+           monto,
+           descripcion,
+           referencia_tipo,
+           referencia_id,
+           cuenta_origen_id,
+           fecha_movimiento,
+           created_by
+         )
+         VALUES (
+           ?,
+           ?,
+           'pago',
+           ?,
+           ?,
+           'pago_manual',
+           NULL,
+           ?,
+           ?,
+           ?
+         )`,
+        [
+          empresaId,
+          id,
+          montoCentavos,
+          descripcion,
+          cuentaOrigenMovimiento,
+          fecha || new Date(),
+          userId,
+        ]
+      );
 
     await connection.commit();
-    res.status(201).json({ success: true, message: 'Pago registrado exitosamente', data: { id: movResult.insertId } });
+    transactionStarted = false;
+
+    return res.status(201).json({
+      success: true,
+      message:
+        'Pago registrado exitosamente',
+      data: {
+        id: movResult.insertId,
+        monto_centavos: montoCentavos,
+        monto_quetzales: montoQuetzales,
+        sucursal_id: sucursalId,
+      },
+    });
   } catch (error) {
-    await connection.rollback();
-    console.error('Error registrarPago:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    if (transactionStarted) {
+      try {
+        await connection.rollback();
+      } catch {}
+    }
+
+    console.error(
+      'Error registrarPago:',
+      error
+    );
+
+    return res
+      .status(error.statusCode || 500)
+      .json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
   } finally {
     connection.release();
   }

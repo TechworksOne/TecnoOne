@@ -6,18 +6,31 @@ const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePermission = require('../middleware/requirePermission');
 const requirePlanModule = require('../middleware/requirePlanModule');
+const branchScope = require('../middleware/branchScope');
+const requireBranchSpecific = require('../middleware/requireBranchSpecific');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 router.use(requirePlanModule('caja_bancos'));
+router.use(branchScope);
 
 // ========== CAJA CHICA (todos los roles autenticados) ==========
 router.get('/caja-chica/saldo',         requirePermission('caja.ver'), cajaController.getSaldoCajaChica);
 router.get('/caja-chica/movimientos',   requirePermission('caja.ver'), cajaController.getMovimientosCajaChica);
-router.post('/caja-chica/movimiento',   requirePermission('caja.operar'), cajaController.registrarMovimientoCajaChica);
-router.put('/caja-chica/confirmar/:id', requirePermission('caja.operar'), cajaController.confirmarMovimientoCajaChica);
+router.post(
+  '/caja-chica/movimiento',
+  requirePermission('caja.operar'),
+  requireBranchSpecific,
+  cajaController.registrarMovimientoCajaChica
+);
+router.put(
+  '/caja-chica/confirmar/:id',
+  requirePermission('caja.operar'),
+  requireBranchSpecific,
+  cajaController.confirmarMovimientoCajaChica
+);
 
 // ========== BANCOS ==========
 // GET /bancos devuelve datos filtrados según rol (no admin no recibe saldo_actual)
@@ -34,12 +47,27 @@ router.put('/bancos/:id', requirePermission('bancos.administrar'), cajaControlle
 router.delete('/bancos/:id', requirePermission('bancos.administrar'), cajaController.desactivarCuentaBancaria);
 
 // ========== OPERACIONES ENTRE CAJA Y BANCOS (solo admin) ==========
-router.post('/retiro-banco', requirePermission('bancos.administrar'), cajaController.retirarDeBanco);
-router.post('/depositar-banco', requirePermission('bancos.administrar'), cajaController.depositarAlBanco);
+router.post(
+  '/retiro-banco',
+  requirePermission('bancos.administrar'),
+  requireBranchSpecific,
+  cajaController.retirarDeBanco
+);
+router.post(
+  '/depositar-banco',
+  requirePermission('bancos.administrar'),
+  requireBranchSpecific,
+  cajaController.depositarAlBanco
+);
 router.post('/ingreso-banco', requirePermission('caja.operar'), cajaController.ingresoBanco);
 router.post('/transferencia-bancos', requirePermission('bancos.administrar'), cajaController.transferenciaBancos);
 
 // ========== TRANSFERENCIA CAJA CHICA → BANCO (todos los roles autenticados) ==========
-router.post('/transferir-caja-a-banco', requirePermission('caja.operar'), cajaController.transferirCajaABanco);
+router.post(
+  '/transferir-caja-a-banco',
+  requirePermission('caja.operar'),
+  requireBranchSpecific,
+  cajaController.transferirCajaABanco
+);
 
 module.exports = router;
