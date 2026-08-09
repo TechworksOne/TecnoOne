@@ -1,3 +1,4 @@
+const cajaSesionModel = require('../models/cajaSesionModel');
 /**
  * reparacionInventoryService.js
  * Sprint 1.24 – Reparaciones multisucursal.
@@ -509,12 +510,14 @@ async function validateCajaScope(connection, { branchScope, cajaId }) {
 
 /**
  * Registra un movimiento financiero en el ledger de reparaciones.
- * Para efectivo, exige cajaId de la misma sucursal.
+ * Para efectivo la caja se deriva exclusivamente de la sesión abierta
+ * del usuario autenticado.
  */
 async function registerFinancialMovement(connection, {
-  branchScope, reparacionId, pagoIndice, metodo, montoCentavos, cajaId, usuarioId,
+  branchScope, reparacionId, pagoIndice, metodo, montoCentavos, usuarioId,
 }) {
   requireSpecific(branchScope);
+
   const normalizedMethod = String(metodo || '').toUpperCase();
   const amount = Number(montoCentavos);
 
@@ -526,25 +529,30 @@ async function registerFinancialMovement(connection, {
     );
   }
 
-  if (normalizedMethod === 'EFECTIVO' && (cajaId === undefined || cajaId === null || cajaId === '')) {
-    throw repairError(
-      'Debe seleccionar una caja física para pagos en efectivo',
-      400,
-      'REPAIR_CASH_REGISTER_REQUIRED'
-    );
-  }
+  let sesionCaja = null;
 
-  await validateCajaScope(connection, {
-    branchScope,
-    cajaId: normalizedMethod === 'EFECTIVO' ? cajaId : null,
-  });
+  if (normalizedMethod === 'EFECTIVO') {
+    sesionCaja = await cajaSesionModel.resolverActivaParaOperacion(
+      connection,
+      {
+        empresaId: Number(branchScope.empresaId),
+        sucursalId: Number(branchScope.sucursalId),
+        usuarioId,
+      }
+    );
+
+    await validateCajaScope(connection, {
+      branchScope,
+      cajaId: sesionCaja.caja_id,
+    });
+  }
 
   try {
     await connection.query(
       `INSERT INTO reparacion_movimientos_financieros
        (empresa_id, sucursal_id, reparacion_id, pago_indice, accion, metodo,
-        monto_centavos, caja_id, usuario_id)
-       VALUES (?, ?, ?, ?, 'INGRESO', ?, ?, ?, ?)`,
+        monto_centavos, caja_id, caja_sesion_id, usuario_id)
+       VALUES (?, ?, ?, ?, 'INGRESO', ?, ?, ?, ?, ?)`,
       [
         Number(branchScope.empresaId),
         Number(branchScope.sucursalId),
@@ -552,7 +560,8 @@ async function registerFinancialMovement(connection, {
         Number(pagoIndice),
         normalizedMethod,
         amount,
-        normalizedMethod === 'EFECTIVO' ? Number(cajaId) : null,
+        sesionCaja ? Number(sesionCaja.caja_id) : null,
+        sesionCaja ? Number(sesionCaja.id) : null,
         usuarioId || null,
       ]
     );
@@ -566,39 +575,83 @@ async function registerFinancialMovement(connection, {
     }
     throw error;
   }
+
+  return {
+    cajaId: sesionCaja ? Number(sesionCaja.caja_id) : null,
+    cajaSesionId: sesionCaja ? Number(sesionCaja.id) : null,
+  };
 }
 
 /**
- * Revierte todos los movimientos financieros de una reparación (anulación).
+ * Revierte todos los movimientos financieros de una reparación.
+ * Una reversa en efectivo pertenece a la sesión abierta ACTUAL.
  */
-async function reverseFinancialMovements(connection, { branchScope, reparacionId, usuarioId }) {
+async function reverseFinancialMovements(connection, {
+  branchScope, reparacionId, usuarioId,
+}) {
   requireSpecific(branchScope);
-  const empresaId  = Number(branchScope.empresaId);
+
+  const empresaId = Number(branchScope.empresaId);
   const sucursalId = Number(branchScope.sucursalId);
 
   const [movements] = await connection.query(
-    `SELECT pago_indice, metodo, monto_centavos, caja_id
+    `SELECT
+       pago_indice,
+       metodo,
+       monto_centavos,
+       caja_id,
+       caja_sesion_id
      FROM reparacion_movimientos_financieros
-     WHERE empresa_id = ? AND sucursal_id = ? AND reparacion_id = ? AND accion = 'INGRESO'
-     ORDER BY pago_indice FOR UPDATE`,
+     WHERE empresa_id = ?
+       AND sucursal_id = ?
+       AND reparacion_id = ?
+       AND accion = 'INGRESO'
+     ORDER BY pago_indice
+     FOR UPDATE`,
     [empresaId, sucursalId, reparacionId]
   );
 
+  const hasCash = movements.some(
+    movement => String(movement.metodo || '').toUpperCase() === 'EFECTIVO'
+  );
+
+  let sesionReversa = null;
+
+  if (hasCash) {
+    sesionReversa = await cajaSesionModel.resolverActivaParaOperacion(
+      connection,
+      {
+        empresaId,
+        sucursalId,
+        usuarioId,
+      }
+    );
+
+    await validateCajaScope(connection, {
+      branchScope,
+      cajaId: sesionReversa.caja_id,
+    });
+  }
+
   for (const movement of movements) {
+    const metodo = String(movement.metodo || '').toUpperCase();
+    const esEfectivo = metodo === 'EFECTIVO';
+
     try {
       await connection.query(
         `INSERT INTO reparacion_movimientos_financieros
          (empresa_id, sucursal_id, reparacion_id, pago_indice, accion, metodo,
-          monto_centavos, caja_id, usuario_id)
-         VALUES (?, ?, ?, ?, 'REVERSA', ?, ?, ?, ?)`,
+          monto_centavos, caja_id, caja_sesion_id, usuario_id)
+         VALUES (?, ?, ?, ?, 'REVERSA', ?, ?, ?, ?, ?)`,
         [
           empresaId,
           sucursalId,
           reparacionId,
           Number(movement.pago_indice),
-          movement.metodo,
+          metodo,
           Number(movement.monto_centavos),
-          movement.caja_id,
+          esEfectivo ? Number(sesionReversa.caja_id) : null,
+          esEfectivo ? Number(sesionReversa.id) : null,
           usuarioId || null,
         ]
       );

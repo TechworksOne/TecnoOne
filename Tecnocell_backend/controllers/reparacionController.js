@@ -1718,7 +1718,7 @@ exports.registrarPagoSaldo = async (req, res) => {
   try {
     await connection.beginTransaction();
     const { id } = req.params;
-    const { monto, metodoPago, cajaId } = req.body;
+    const { monto, metodoPago } = req.body;
     const usuario = req.user?.username || req.user?.name || req.user?.nombre || 'Usuario';
     const usuarioId = req.user?.id || req.user?.userId || null;
 
@@ -1785,7 +1785,6 @@ exports.registrarPagoSaldo = async (req, res) => {
       pagoIndice,
       metodo: metodoLedger,
       montoCentavos,
-      cajaId: metodoLedger === 'EFECTIVO' ? cajaId : null,
       usuarioId,
     });
 
@@ -2492,14 +2491,12 @@ exports.completarReparacion = async (req, res) => {
     // ── 9. Registrar movimiento financiero en ledger (dentro de la transacción) ──
     // Pago + inventario + reparación son atómicos. Si el ledger falla → rollback total.
     if (metodoPagoFinal && montoPagoFinalCentavos > 0) {
-      const pagoFinalCajaId = pagoFinalRaw?.caja_id ? parseInt(pagoFinalRaw.caja_id, 10) : null;
       await reparacionInventoryService.registerFinancialMovement(connection, {
         branchScope: req.branchScope,
         reparacionId: id,
         pagoIndice: 0,
         metodo: metodoPagoFinal,
         montoCentavos: montoPagoFinalCentavos,
-        cajaId: metodoPagoFinal === 'EFECTIVO' ? pagoFinalCajaId : null,
         usuarioId: authUserId,
       });
     }

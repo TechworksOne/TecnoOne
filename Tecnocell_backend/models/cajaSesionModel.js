@@ -31,6 +31,76 @@ function buildSucursalFilter(sucursalIds, params) {
   return ` AND cs.sucursal_id IN (${sucursalIds.map(() => '?').join(',')})`;
 }
 
+
+/**
+ * Resuelve y bloquea la sesión operativa ABIERTA del usuario.
+ *
+ * Debe recibir la misma connection de la operación financiera.
+ * El FOR UPDATE serializa cobros/reversas contra el cierre de caja.
+ */
+async function resolverActivaParaOperacion(
+  connection,
+  { empresaId, sucursalId, usuarioId }
+) {
+  if (!connection || typeof connection.query !== 'function') {
+    throw sesionError(
+      'Conexión transaccional requerida para operar caja',
+      500,
+      'CAJA_SESION_CONNECTION_REQUIRED'
+    );
+  }
+
+  const companyId = Number(empresaId);
+  const branchId = Number(sucursalId);
+  const userId = Number(usuarioId);
+
+  if (
+    !Number.isInteger(companyId) || companyId <= 0 ||
+    !Number.isInteger(branchId) || branchId <= 0 ||
+    !Number.isInteger(userId) || userId <= 0
+  ) {
+    throw sesionError(
+      'Debe existir un usuario autenticado y una sucursal específica para operar efectivo',
+      409,
+      'CAJA_SESION_REQUERIDA'
+    );
+  }
+
+  const [[sesion]] = await connection.query(
+    `SELECT
+       cs.id,
+       cs.empresa_id,
+       cs.sucursal_id,
+       cs.caja_id,
+       cs.usuario_apertura_id,
+       cs.fondo_inicial_centavos,
+       cs.fecha_apertura
+     FROM caja_sesiones cs
+     INNER JOIN cajas c
+       ON c.id = cs.caja_id
+      AND c.empresa_id = cs.empresa_id
+      AND c.sucursal_id = cs.sucursal_id
+      AND c.activa = 1
+     WHERE cs.empresa_id = ?
+       AND cs.sucursal_id = ?
+       AND cs.usuario_apertura_id = ?
+       AND cs.estado = 'ABIERTA'
+     LIMIT 1
+     FOR UPDATE`,
+    [companyId, branchId, userId]
+  );
+
+  if (!sesion) {
+    throw sesionError(
+      'Debe abrir una caja en la sucursal activa antes de operar efectivo',
+      409,
+      'CAJA_SESION_REQUERIDA'
+    );
+  }
+
+  return sesion;
+}
+
 async function listarActivas({ empresaId, sucursalIds, usuarioId, cajaId }) {
   const params = [empresaId];
   let where = ' WHERE cs.empresa_id = ? AND cs.estado = \'ABIERTA\'';
@@ -133,9 +203,42 @@ async function cerrar({ sesionId, empresaId, sucursalId, usuarioId, efectivoCont
     );
     if (!sesion) { await connection.rollback(); return null; }
 
-    // Fase 2A: esperado = fondo_inicial. Fase 3: + sum(ingresos efectivo) - sum(egresos)
-    const esperado  = Number(sesion.fondo_inicial_centavos);
-    const contado   = Number(efectivoContado);
+    // Efectivo esperado de esta sesión:
+    // fondo inicial + ingresos - reversas de ventas y reparaciones.
+    const [[ventaCash]] = await connection.query(
+      `SELECT COALESCE(SUM(
+         CASE
+           WHEN accion = 'INGRESO' THEN monto_centavos
+           WHEN accion = 'REVERSA' THEN -monto_centavos
+           ELSE 0
+         END
+       ), 0) AS neto
+       FROM venta_movimientos_financieros
+       WHERE caja_sesion_id = ?
+         AND metodo = 'EFECTIVO'`,
+      [sesionId]
+    );
+
+    const [[reparacionCash]] = await connection.query(
+      `SELECT COALESCE(SUM(
+         CASE
+           WHEN accion = 'INGRESO' THEN monto_centavos
+           WHEN accion = 'REVERSA' THEN -monto_centavos
+           ELSE 0
+         END
+       ), 0) AS neto
+       FROM reparacion_movimientos_financieros
+       WHERE caja_sesion_id = ?
+         AND metodo = 'EFECTIVO'`,
+      [sesionId]
+    );
+
+    const esperado =
+      Number(sesion.fondo_inicial_centavos) +
+      Number(ventaCash?.neto || 0) +
+      Number(reparacionCash?.neto || 0);
+
+    const contado = Number(efectivoContado);
     const diferencia = contado - esperado;
 
     await connection.query(
@@ -161,4 +264,4 @@ async function cerrar({ sesionId, empresaId, sucursalId, usuarioId, efectivoCont
   }
 }
 
-module.exports = { listarActivas, listar, crear, cerrar };
+module.exports = { resolverActivaParaOperacion, listarActivas, listar, crear, cerrar };

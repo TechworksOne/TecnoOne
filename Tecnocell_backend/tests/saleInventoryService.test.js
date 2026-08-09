@@ -6,7 +6,16 @@ const service = require('../services/saleInventoryService');
 const specific = { mode: 'specific', empresaId: 10, sucursalId: 7, allowedSucursalIds: [7, 8] };
 const consolidated = { mode: 'consolidated', empresaId: 10, sucursalId: null, allowedSucursalIds: [7, 8] };
 
-function connection({ stock = 5, applications = [], financial = [], duplicate = false, caja = true } = {}) {
+function connection({
+  stock = 5,
+  applications = [],
+  financial = [],
+  duplicate = false,
+  caja = true,
+  sesion = true,
+  sessionId = 44,
+  sessionCajaId = 3,
+} = {}) {
   return {
     calls: [],
     async query(sql, params) {
@@ -15,6 +24,15 @@ function connection({ stock = 5, applications = [], financial = [], duplicate = 
       if (/SELECT id, nombre FROM repuestos/.test(sql)) return [[{ id: params[0], nombre: 'Repuesto' }]];
       if (/SELECT existencia FROM (producto|repuesto)_existencias/.test(sql)) return [[{ existencia: stock }]];
       if (/FROM venta_inventario_aplicaciones/.test(sql)) return [applications];
+      if (/FROM caja_sesiones/.test(sql)) {
+        return [sesion ? [{
+          id: sessionId,
+          empresa_id: 10,
+          sucursal_id: 7,
+          caja_id: sessionCajaId,
+          usuario_apertura_id: 9,
+        }] : []];
+      }
       if (/FROM venta_movimientos_financieros/.test(sql)) return [financial];
       if (/SELECT id FROM cajas/.test(sql)) return [[caja ? { id: params[0] } : undefined].filter(Boolean)];
       if (/INSERT INTO venta_inventario_aplicaciones/.test(sql) && duplicate) {
@@ -92,24 +110,43 @@ async function main() {
   );
 
   await assert.rejects(
-    service.registerFinancialMovement(connection(), {
-      branchScope: specific, ventaId: 20, pagoIndice: 0, metodo: 'EFECTIVO', monto: 100,
+    service.registerFinancialMovement(connection({ sesion: false }), {
+      branchScope: specific,
+      ventaId: 20,
+      pagoIndice: 0,
+      metodo: 'EFECTIVO',
+      monto: 100,
+      usuarioId: 9,
     }),
-    error => error.code === 'SALE_CASH_REGISTER_REQUIRED'
+    error => error.code === 'CAJA_SESION_REQUERIDA'
   );
-  await assert.rejects(
-    service.registerFinancialMovement(connection({ caja: false }), {
-      branchScope: specific, ventaId: 20, pagoIndice: 0, metodo: 'EFECTIVO', monto: 100, cajaId: 99,
-    }),
-    error => error.code === 'SALE_CASH_REGISTER_SCOPE_MISMATCH'
-  );
-  const cash = connection();
-  const cashResult = await service.registerFinancialMovement(cash, {
-    branchScope: specific, ventaId: 20, pagoIndice: 0, metodo: 'EFECTIVO', monto: 100, cajaId: 3,
+
+  const cash = connection({
+    sesion: true,
+    sessionId: 44,
+    sessionCajaId: 3,
   });
+
+  const cashResult = await service.registerFinancialMovement(cash, {
+    branchScope: specific,
+    ventaId: 20,
+    pagoIndice: 0,
+    metodo: 'EFECTIVO',
+    monto: 100,
+    usuarioId: 9,
+  });
+
   assert.strictEqual(cashResult.requiresLegacyBankMovement, false);
-  const cashInsert = cash.calls.find(c => /INSERT INTO venta_movimientos_financieros/.test(c.sql));
+  assert.strictEqual(cashResult.cajaId, 3);
+  assert.strictEqual(cashResult.cajaSesionId, 44);
+
+  const cashInsert = cash.calls.find(
+    c => /INSERT INTO venta_movimientos_financieros/.test(c.sql)
+  );
+
   assert.deepStrictEqual(cashInsert.params.slice(0, 3), [10, 7, 20]);
+  assert.strictEqual(cashInsert.params[6], 3);
+  assert.strictEqual(cashInsert.params[7], 44);
 
   const transfer = connection();
   const transferResult = await service.registerFinancialMovement(transfer, {
@@ -117,15 +154,31 @@ async function main() {
   });
   assert.strictEqual(transferResult.requiresLegacyBankMovement, true);
   assert.strictEqual(transfer.calls.some(c => /SELECT id FROM cajas/.test(c.sql)), false);
+  assert.strictEqual(transfer.calls.some(c => /FROM caja_sesiones/.test(c.sql)), false);
 
   const financialReversal = connection({
-    financial: [{ pago_indice: 0, metodo: 'EFECTIVO', monto_centavos: 100, caja_id: 3, referencia: null }],
+    financial: [{
+      pago_indice: 0,
+      metodo: 'EFECTIVO',
+      monto_centavos: 100,
+      caja_id: 99,
+      caja_sesion_id: 12,
+      referencia: null,
+    }],
+    sessionId: 44,
+    sessionCajaId: 3,
   });
   const reversalResult = await service.reverseFinancialMovements(financialReversal, {
     branchScope: specific, ventaId: 20, usuarioId: 9,
   });
   assert.deepStrictEqual(reversalResult, { hasNonCash: false, count: 1 });
-  assert.ok(financialReversal.calls.some(c => /ORDER BY pago_indice FOR UPDATE/.test(c.sql)));
+
+  const reversalInsert = financialReversal.calls.find(
+    c => /INSERT INTO venta_movimientos_financieros/.test(c.sql)
+  );
+  assert.strictEqual(reversalInsert.params[6], 3);
+  assert.strictEqual(reversalInsert.params[7], 44);
+  assert.ok(financialReversal.calls.some(c => /ORDER BY pago_indice\s+FOR UPDATE/.test(c.sql)));
 
   console.log('OK saleInventoryService: inventario y finanzas scoped, locks, caja e idempotencia');
 }

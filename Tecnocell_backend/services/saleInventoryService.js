@@ -1,3 +1,4 @@
+const cajaSesionModel = require('../models/cajaSesionModel');
 const productInventoryService = require('./productInventoryService');
 
 function saleError(message, statusCode = 409, code = 'SALE_INVENTORY_ERROR') {
@@ -156,72 +157,164 @@ async function validateCajaScope(connection, { branchScope, cajaId }) {
 }
 
 async function registerFinancialMovement(connection, {
-  branchScope, ventaId, pagoIndice, metodo, monto, cajaId, usuarioId, referencia,
+  branchScope, ventaId, pagoIndice, metodo, monto, usuarioId, referencia,
 }) {
   requireSpecific(branchScope);
+
   const normalizedMethod = String(metodo || '').toUpperCase();
   const amount = Number(monto);
+
   if (!Number.isInteger(amount) || amount <= 0) {
-    throw saleError('El monto financiero debe ser un entero positivo en centavos', 400, 'INVALID_SALE_FINANCIAL_AMOUNT');
+    throw saleError(
+      'El monto financiero debe ser un entero positivo en centavos',
+      400,
+      'INVALID_SALE_FINANCIAL_AMOUNT'
+    );
   }
-  if (normalizedMethod === 'EFECTIVO' && (cajaId === undefined || cajaId === null || cajaId === '')) {
-    throw saleError('Debe seleccionar una caja física para pagos en efectivo', 400, 'SALE_CASH_REGISTER_REQUIRED');
+
+  let sesionCaja = null;
+
+  if (normalizedMethod === 'EFECTIVO') {
+    sesionCaja = await cajaSesionModel.resolverActivaParaOperacion(
+      connection,
+      {
+        empresaId: Number(branchScope.empresaId),
+        sucursalId: Number(branchScope.sucursalId),
+        usuarioId,
+      }
+    );
+
+    // Defensa adicional de scope.
+    await validateCajaScope(connection, {
+      branchScope,
+      cajaId: sesionCaja.caja_id,
+    });
   }
-  await validateCajaScope(connection, {
-    branchScope,
-    cajaId: normalizedMethod === 'EFECTIVO' ? cajaId : null,
-  });
+
   try {
     await connection.query(
       `INSERT INTO venta_movimientos_financieros
        (empresa_id, sucursal_id, venta_id, pago_indice, accion, metodo,
-        monto_centavos, caja_id, referencia, usuario_id)
-       VALUES (?, ?, ?, ?, 'INGRESO', ?, ?, ?, ?, ?)`,
-      [Number(branchScope.empresaId), Number(branchScope.sucursalId), Number(ventaId),
-        Number(pagoIndice), normalizedMethod, amount,
-        normalizedMethod === 'EFECTIVO' ? Number(cajaId) : null,
-        referencia || null, usuarioId || null]
+        monto_centavos, caja_id, caja_sesion_id, referencia, usuario_id)
+       VALUES (?, ?, ?, ?, 'INGRESO', ?, ?, ?, ?, ?, ?)`,
+      [
+        Number(branchScope.empresaId),
+        Number(branchScope.sucursalId),
+        Number(ventaId),
+        Number(pagoIndice),
+        normalizedMethod,
+        amount,
+        sesionCaja ? Number(sesionCaja.caja_id) : null,
+        sesionCaja ? Number(sesionCaja.id) : null,
+        referencia || null,
+        usuarioId || null,
+      ]
     );
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
-      throw saleError('El movimiento financiero de la venta ya fue aplicado', 409, 'SALE_FINANCIAL_ALREADY_APPLIED');
+      throw saleError(
+        'El movimiento financiero de la venta ya fue aplicado',
+        409,
+        'SALE_FINANCIAL_ALREADY_APPLIED'
+      );
     }
     throw error;
   }
-  return { requiresLegacyBankMovement: normalizedMethod !== 'EFECTIVO' };
+
+  return {
+    requiresLegacyBankMovement: normalizedMethod !== 'EFECTIVO',
+    cajaId: sesionCaja ? Number(sesionCaja.caja_id) : null,
+    cajaSesionId: sesionCaja ? Number(sesionCaja.id) : null,
+  };
 }
 
-async function reverseFinancialMovements(connection, { branchScope, ventaId, usuarioId }) {
+async function reverseFinancialMovements(connection, {
+  branchScope, ventaId, usuarioId,
+}) {
   requireSpecific(branchScope);
+
   const empresaId = Number(branchScope.empresaId);
   const sucursalId = Number(branchScope.sucursalId);
+
   const [movements] = await connection.query(
-    `SELECT pago_indice, metodo, monto_centavos, caja_id, referencia
+    `SELECT
+       pago_indice,
+       metodo,
+       monto_centavos,
+       caja_id,
+       caja_sesion_id,
+       referencia
      FROM venta_movimientos_financieros
-     WHERE empresa_id = ? AND sucursal_id = ? AND venta_id = ? AND accion = 'INGRESO'
-     ORDER BY pago_indice FOR UPDATE`,
+     WHERE empresa_id = ?
+       AND sucursal_id = ?
+       AND venta_id = ?
+       AND accion = 'INGRESO'
+     ORDER BY pago_indice
+     FOR UPDATE`,
     [empresaId, sucursalId, Number(ventaId)]
   );
+
+  const hasCash = movements.some(
+    movement => String(movement.metodo || '').toUpperCase() === 'EFECTIVO'
+  );
+
+  let sesionReversa = null;
+
+  if (hasCash) {
+    sesionReversa = await cajaSesionModel.resolverActivaParaOperacion(
+      connection,
+      {
+        empresaId,
+        sucursalId,
+        usuarioId,
+      }
+    );
+
+    await validateCajaScope(connection, {
+      branchScope,
+      cajaId: sesionReversa.caja_id,
+    });
+  }
+
   let hasNonCash = false;
+
   for (const movement of movements) {
-    hasNonCash = hasNonCash || movement.metodo !== 'EFECTIVO';
+    const metodo = String(movement.metodo || '').toUpperCase();
+    const esEfectivo = metodo === 'EFECTIVO';
+
+    hasNonCash = hasNonCash || !esEfectivo;
+
     try {
       await connection.query(
         `INSERT INTO venta_movimientos_financieros
          (empresa_id, sucursal_id, venta_id, pago_indice, accion, metodo,
-          monto_centavos, caja_id, referencia, usuario_id)
-         VALUES (?, ?, ?, ?, 'REVERSA', ?, ?, ?, ?, ?)`,
-        [empresaId, sucursalId, Number(ventaId), Number(movement.pago_indice),
-          movement.metodo, Number(movement.monto_centavos), movement.caja_id,
-          movement.referencia, usuarioId || null]
+          monto_centavos, caja_id, caja_sesion_id, referencia, usuario_id)
+         VALUES (?, ?, ?, ?, 'REVERSA', ?, ?, ?, ?, ?, ?)`,
+        [
+          empresaId,
+          sucursalId,
+          Number(ventaId),
+          Number(movement.pago_indice),
+          metodo,
+          Number(movement.monto_centavos),
+          esEfectivo ? Number(sesionReversa.caja_id) : null,
+          esEfectivo ? Number(sesionReversa.id) : null,
+          movement.referencia || null,
+          usuarioId || null,
+        ]
       );
     } catch (error) {
       if (error.code === 'ER_DUP_ENTRY') {
-        throw saleError('Los movimientos financieros de esta venta ya fueron revertidos', 409, 'SALE_FINANCIAL_ALREADY_REVERSED');
+        throw saleError(
+          'Los movimientos financieros de esta venta ya fueron revertidos',
+          409,
+          'SALE_FINANCIAL_ALREADY_REVERSED'
+        );
       }
       throw error;
     }
   }
+
   return { hasNonCash, count: movements.length };
 }
 

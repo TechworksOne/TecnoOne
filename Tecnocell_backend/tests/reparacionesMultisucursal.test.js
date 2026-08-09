@@ -55,12 +55,28 @@ const specific    = { mode: 'specific',    empresaId: 10, sucursalId: 7, allowed
 const consolidated = { mode: 'consolidated', empresaId: 10, sucursalId: null, allowedSucursalIds: [7, 8] };
 
 // ── Helper: fake connection ───────────────────────────────────────────────────
-function fakeConnection({ cajaExists = true, ledgerRows = [], duplicate = false } = {}) {
+function fakeConnection({
+  cajaExists = true,
+  ledgerRows = [],
+  duplicate = false,
+  sesion = true,
+  sessionId = 44,
+  sessionCajaId = 3,
+} = {}) {
   const calls = [];
   return {
     calls,
     async query(sql, params) {
       calls.push({ sql, params });
+      if (/FROM caja_sesiones/.test(sql)) {
+        return [sesion ? [{
+          id: sessionId,
+          empresa_id: 10,
+          sucursal_id: 7,
+          caja_id: sessionCajaId,
+          usuario_apertura_id: 5,
+        }] : []];
+      }
       if (/SELECT id FROM cajas/.test(sql)) {
         return [[cajaExists ? { id: params[0] } : undefined].filter(Boolean)];
       }
@@ -168,12 +184,17 @@ async function main() {
   // cajaId vacío → no-op
   await service.validateCajaScope(fakeConnection(), { branchScope: specific, cajaId: null });
 
-  // ── 10. registerFinancialMovement: efectivo sin caja → rechaza ────────────
+  // ── 10. Efectivo sin sesión operativa → rechaza ──────────────────────────
   await assert.rejects(
-    service.registerFinancialMovement(fakeConnection(), {
-      branchScope: specific, reparacionId: 'REP001', pagoIndice: 0, metodo: 'EFECTIVO', montoCentavos: 1000,
+    service.registerFinancialMovement(fakeConnection({ sesion: false }), {
+      branchScope: specific,
+      reparacionId: 'REP001',
+      pagoIndice: 0,
+      metodo: 'EFECTIVO',
+      montoCentavos: 1000,
+      usuarioId: 5,
     }),
-    err => err.code === 'REPAIR_CASH_REGISTER_REQUIRED'
+    err => err.code === 'CAJA_SESION_REQUERIDA'
   );
 
   // ── 11. registerFinancialMovement: idempotencia ───────────────────────────
@@ -187,7 +208,12 @@ async function main() {
   // ── 12. registerFinancialMovement: efectivo con caja válida → ok ──────────
   const conn12 = fakeConnection({ cajaExists: true });
   await service.registerFinancialMovement(conn12, {
-    branchScope: specific, reparacionId: 'REP001', pagoIndice: 0, metodo: 'EFECTIVO', montoCentavos: 5000, cajaId: 3,
+    branchScope: specific,
+    reparacionId: 'REP001',
+    pagoIndice: 0,
+    metodo: 'EFECTIVO',
+    montoCentavos: 5000,
+    usuarioId: 5,
   });
   const finInsert = conn12.calls.find(c => /INSERT INTO reparacion_movimientos_financieros/.test(c.sql));
   assert.ok(finInsert, 'debe insertar en ledger financiero');
@@ -195,14 +221,22 @@ async function main() {
   assert.strictEqual(finInsert.params[1], 7);    // sucursal_id
   assert.strictEqual(finInsert.params[2], 'REP001'); // reparacion_id
   assert.strictEqual(finInsert.params[4], 'EFECTIVO'); // metodo (accion='INGRESO' es literal SQL)
+  assert.strictEqual(finInsert.params[6], 3);          // caja derivada de sesión
+  assert.strictEqual(finInsert.params[7], 44);         // caja_sesion_id
 
   // ── 13. reverseFinancialMovements: revierte idempotente ───────────────────
   const conn13 = fakeConnection({ cajaExists: true });
-  await service.reverseFinancialMovements(conn13, { branchScope: specific, reparacionId: 'REP001' });
+  await service.reverseFinancialMovements(conn13, {
+    branchScope: specific,
+    reparacionId: 'REP001',
+    usuarioId: 5,
+  });
   const reversa = conn13.calls.find(c => /INSERT INTO reparacion_movimientos_financieros/.test(c.sql));
   assert.ok(reversa, 'debe insertar REVERSA');
   // accion='REVERSA' es literal SQL, params[4] = metodo = 'EFECTIVO'
   assert.strictEqual(reversa.params[4], 'EFECTIVO');
+  assert.strictEqual(reversa.params[6], 3);
+  assert.strictEqual(reversa.params[7], 44);
 
   // ── 14. Rutas: branchScope presente en reparacionRoutes ───────────────────
   const routes = fs.readFileSync(path.join(__dirname, '..', 'routes', 'reparacionRoutes.js'), 'utf8');

@@ -160,7 +160,6 @@ exports.createVenta = async (req, res) => {
       notas_internas,
       created_by,
       interes_tarjeta,
-      caja_id,
     } = req.body;
 
     const telefonoValidado = validatePhone(cliente_telefono, {
@@ -370,7 +369,6 @@ exports.createVenta = async (req, res) => {
             pagoIndice,
             metodo: pago.metodo,
             monto: Number(pago.monto),
-            cajaId: pago.caja_id ?? caja_id,
             usuarioId: req.user?.id ?? req.user?.userId ?? null,
             referencia: pago.referencia,
           });
@@ -393,7 +391,6 @@ exports.createVenta = async (req, res) => {
           pagoIndice: 0,
           metodo: metodoPagoNorm,
           monto: Number(total),
-          cajaId: caja_id,
           usuarioId: req.user?.id ?? req.user?.userId ?? null,
         });
         if (financial.requiresLegacyBankMovement) await cajaController.registrarMovimientoVenta(
@@ -488,7 +485,7 @@ exports.createVentaFromQuote = async (req, res) => {
   try {
     saleInventoryService.requireSpecific(req.branchScope);
     const cotizacionId = req.params.cotizacionId || req.params.id;
-    const { pagos, metodo_pago, observaciones, created_by, caja_id } = req.body || {};
+    const { pagos, metodo_pago, observaciones, created_by } = req.body || {};
     const empresaId = requireTenantEmpresaId(req);
     const sucursalId = Number(req.branchScope.sucursalId);
 
@@ -662,7 +659,6 @@ exports.createVentaFromQuote = async (req, res) => {
             pagoIndice,
             metodo: pago.metodo,
             monto: Number(pago.monto),
-            cajaId: pago.caja_id ?? caja_id,
             usuarioId: req.user?.id ?? req.user?.userId ?? null,
             referencia: pago.referencia,
           });
@@ -685,7 +681,6 @@ exports.createVentaFromQuote = async (req, res) => {
           pagoIndice: 0,
           metodo: metodo_pago,
           monto: totalCentavos,
-          cajaId: caja_id,
           usuarioId: req.user?.id ?? req.user?.userId ?? null,
         });
         if (financial.requiresLegacyBankMovement) await cajaController.registrarMovimientoVenta(
@@ -877,7 +872,6 @@ exports.registrarPago = async (req, res) => {
       referencia,
       comprobanteUrl,
       usuario_id,
-      caja_id,
     } = req.body;
     const scope = saleInventoryService.saleScopeClause(req.branchScope, 'v');
     const empresaId = requireTenantEmpresaId(req);
@@ -1024,7 +1018,6 @@ exports.registrarPago = async (req, res) => {
       pagoIndice,
       metodo: metodoNormalizado,
       monto: montoAplicadoCentavos,
-      cajaId: caja_id,
       usuarioId,
       referencia,
     });
