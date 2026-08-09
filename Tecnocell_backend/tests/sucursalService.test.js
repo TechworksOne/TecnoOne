@@ -8,7 +8,14 @@ const pool = {
 require.cache[require.resolve('../config/database')] = { exports: pool };
 const service = require('../services/sucursalService');
 
-function makeConnection({ limit = 2, total = 0, active = 0, principal = null, branch = null } = {}) {
+function makeConnection({
+  limit = 2,
+  total = 0,
+  active = 0,
+  principal = null,
+  branch = null,
+  failCaja = false,
+} = {}) {
   const calls = [];
   const parameters = [];
   return {
@@ -40,7 +47,17 @@ function makeConnection({ limit = 2, total = 0, active = 0, principal = null, br
         return [[{ id: 10, nombre: 'Empresa QA', direccion: null, telefono: null, email: null }]];
       }
       if (/SELECT id FROM sucursales WHERE empresa_id/.test(sql)) return [[]];
-      if (/INSERT INTO sucursales/.test(sql)) return [{ insertId: 77, affectedRows: 1 }];
+      if (/INSERT INTO sucursales/.test(sql)) {
+        return [{ insertId: 77, affectedRows: 1 }];
+      }
+      if (/INSERT INTO cajas/.test(sql)) {
+        if (failCaja) {
+          const error = new Error('Fallo simulado creando caja principal');
+          error.code = 'TEST_CAJA_CREATE_FAILED';
+          throw error;
+        }
+        return [{ insertId: 88, affectedRows: 1 }];
+      }
       if (/SELECT \* FROM sucursales WHERE id = \? AND empresa_id = \? FOR UPDATE/.test(sql)) {
         return [branch ? [branch] : []];
       }
@@ -73,11 +90,42 @@ async function main() {
   const insertIndex = connection.calls.findIndex(sql => /INSERT INTO sucursales/.test(sql));
   assert.strictEqual(connection.parameters[insertIndex].at(-1), 1);
 
+  const cajaIndex = connection.calls.findIndex(
+    sql => /INSERT INTO cajas/.test(sql)
+  );
+  assert(
+    cajaIndex > insertIndex,
+    'La caja principal debe crearse despues de insertar la sucursal'
+  );
+  assert.strictEqual(connection.committed, true);
+  assert.strictEqual(connection.rolledBack, false);
+
+  // Si falla la caja, tampoco debe persistir la sucursal.
+  connection = makeConnection({
+    limit: 2,
+    total: 0,
+    principal: null,
+    failCaja: true,
+  });
+
+  await assert.rejects(
+    service.crearSucursal(10, {
+      codigo: 'rollback',
+      nombre: 'Sucursal Rollback',
+    }),
+    error => error.code === 'TEST_CAJA_CREATE_FAILED'
+  );
+
+  assert.strictEqual(connection.committed, false);
+  assert.strictEqual(connection.rolledBack, true);
+  assert.strictEqual(connection.released, true);
+
   connection = makeConnection({ limit: 2, total: 0 });
   const ensured = await service.asegurarSucursalPrincipal(10);
   assert.strictEqual(ensured.creada, true);
   assert.strictEqual(ensured.sucursal.id, 77);
   assert(connection.calls.some(sql => /INSERT INTO sucursales/.test(sql)));
+  assert(connection.calls.some(sql => /INSERT INTO cajas/.test(sql)));
   assert(connection.calls.some(sql => /INSERT IGNORE INTO usuario_sucursales/.test(sql)));
   assert.strictEqual(connection.committed, true);
   assert.strictEqual(connection.released, true);

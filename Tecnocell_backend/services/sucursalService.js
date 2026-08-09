@@ -25,6 +25,28 @@ function normalizeCode(value) {
     .slice(0, 50);
 }
 
+/**
+ * Garantiza que una sucursal tenga su caja operativa principal.
+ * Usa la misma conexión del flujo llamante para conservar atomicidad.
+ */
+async function asegurarCajaPrincipalSucursal(
+  empresaId,
+  sucursalId,
+  connection = db
+) {
+  const companyId = positiveId(empresaId, 'Empresa');
+  const branchId = positiveId(sucursalId, 'Sucursal');
+
+  await connection.query(
+    `INSERT INTO cajas
+     (empresa_id, sucursal_id, nombre, codigo, descripcion, activa)
+     VALUES (?, ?, 'Caja principal', 'PRINCIPAL',
+             'Caja principal creada automaticamente para la sucursal', 1)
+     ON DUPLICATE KEY UPDATE codigo = VALUES(codigo)`,
+    [companyId, branchId]
+  );
+}
+
 async function inTransaction(work) {
   const connection = await db.getConnection();
   try {
@@ -132,7 +154,10 @@ async function asegurarSucursalPrincipal(empresaId, connection = null) {
   const execute = async conn => {
     const id = positiveId(empresaId, 'Empresa');
     const principal = await obtenerSucursalPrincipal(id, conn, { lock: true });
-    if (principal) return { sucursal: principal, creada: false };
+    if (principal) {
+      await asegurarCajaPrincipalSucursal(id, principal.id, conn);
+      return { sucursal: principal, creada: false };
+    }
 
     const [[empresa]] = await conn.query(
       'SELECT id, nombre, direccion, telefono, email FROM empresas WHERE id = ? FOR UPDATE',
@@ -161,6 +186,9 @@ async function asegurarSucursalPrincipal(empresaId, connection = null) {
       );
       sucursalId = result.insertId;
     }
+
+    await asegurarCajaPrincipalSucursal(id, sucursalId, conn);
+
     await conn.query(
       `INSERT IGNORE INTO usuario_sucursales
        (usuario_id, sucursal_id, empresa_id, es_predeterminada)
@@ -211,6 +239,12 @@ async function crearSucursal(empresaId, data, options = {}) {
         esPrincipal,
       ]
     );
+    await asegurarCajaPrincipalSucursal(
+      id,
+      result.insertId,
+      connection
+    );
+
     const [[sucursal]] = await connection.query(
       'SELECT * FROM sucursales WHERE id = ? AND empresa_id = ?',
       [result.insertId, id]
