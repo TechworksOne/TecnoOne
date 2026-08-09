@@ -127,25 +127,25 @@ async function main() {
 
   // ── 9. cerrarSesion — sesión de otra sucursal (model devuelve null) ───────
   mockMode = 'sesion_not_found';
-  const cierre404 = await invoke('cerrarSesion', specific({ params: { id: '99' }, body: { efectivo_contado_centavos: 1200 } }));
+  const cierre404 = await invoke('cerrarSesion', specific({ params: { id: '99' }, body: { efectivo_contado_centavos: 1200, fondo_siguiente_centavos: 0 } }));
   assert.strictEqual(cierre404.statusCode, 404);
   assert.strictEqual(cierre404.body.code, 'SESION_NO_ENCONTRADA');
 
   // ── 10. cerrarSesion — diferencia calculada correctamente ─────────────────
   mockMode = 'ok';
   // mock: esperado = 1000, contado = 1200 → diferencia = +200
-  const cierre = await invoke('cerrarSesion', specific({ params: { id: '5' }, body: { efectivo_contado_centavos: 1200, notas_cierre: 'turno noche' } }));
+  const cierre = await invoke('cerrarSesion', specific({ params: { id: '5' }, body: { efectivo_contado_centavos: 1200, fondo_siguiente_centavos: 0, notas_cierre: 'turno noche' } }));
   assert.strictEqual(cierre.statusCode, 200);
   assert.strictEqual(cierre.body.data.diferencia, 200,    'diferencia = contado - esperado');
   assert.strictEqual(cierre.body.data.efectivoEsperado, 1000);
   assert.strictEqual(cierre.body.data.efectivoContado,  1200);
 
   // contado menor → diferencia negativa (faltante)
-  const cierreNeg = await invoke('cerrarSesion', specific({ params: { id: '6' }, body: { efectivo_contado_centavos: 800 } }));
+  const cierreNeg = await invoke('cerrarSesion', specific({ params: { id: '6' }, body: { efectivo_contado_centavos: 800, fondo_siguiente_centavos: 0 } }));
   assert.strictEqual(cierreNeg.body.data.diferencia, -200, 'diferencia negativa = faltante');
 
   // ── 11. cerrarSesion — conteo inválido rechazado ──────────────────────────
-  const conteoBad = await invoke('cerrarSesion', specific({ params: { id: '7' }, body: { efectivo_contado_centavos: -5 } }));
+  const conteoBad = await invoke('cerrarSesion', specific({ params: { id: '7' }, body: { efectivo_contado_centavos: -5, fondo_siguiente_centavos: 0 } }));
   assert.strictEqual(conteoBad.statusCode, 400);
   assert.strictEqual(conteoBad.body.code, 'CONTEO_INVALIDO');
 

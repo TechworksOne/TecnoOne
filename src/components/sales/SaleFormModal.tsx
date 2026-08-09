@@ -22,7 +22,12 @@ import * as customerService from '../../services/customerService';
 import * as ventaService from '../../services/ventaService';
 import API_URL from '../../services/config';
 import { getImageUrl } from '../../utils/getImageUrl';
-import { empresaCajaApi, type CajaCatalogo } from '../../services/cajaCatalogoService';
+import {
+  cajaSesionApi,
+  cajaSesionError,
+  type CajaSesion,
+} from '../../services/cajaSesionService';
+import { useSucursalContext } from '../../store/useSucursalContext';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -68,6 +73,11 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
   const { getQuoteById, updateQuoteStatus } = useQuotesStore();
   const { upsertSale } = useSales();
 
+  const branchMode =
+    useSucursalContext(state => state.mode);
+  const contextVersion =
+    useSucursalContext(state => state.contextVersion);
+
   // ── origin ──
   const [showQuotePicker, setShowQuotePicker] = useState(false);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
@@ -109,8 +119,10 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
   const [montoBanco, setMontoBanco] = useState(0);
   const [confirmarPago, setConfirmarPago] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [cajas, setCajas] = useState<CajaCatalogo[]>([]);
-  const [cajaId, setCajaId] = useState('');
+  const [sesionCaja, setSesionCaja] =
+    useState<CajaSesion | null>(null);
+  const [sesionCajaLoading, setSesionCajaLoading] =
+    useState(false);
 
   // ── Reset state when modal opens ──────────────────────────────────────────
   useEffect(() => {
@@ -134,7 +146,7 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
     setInteresTarjeta(0); setBancoSeleccionado('');
     setMontoEfectivo(0); setMontoBanco(0);
     setConfirmarPago(false);
-    setCajaId('');
+    setSesionCaja(null);
 
     // pre-load quote if provided
     if (origenVenta === 'COTIZACION' && preloadedQuote) {
@@ -152,13 +164,30 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
   }, [isOpen, origenVenta, preloadedQuote]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || branchMode !== 'specific') {
+      setSesionCaja(null);
+      setSesionCajaLoading(false);
+      return;
+    }
+
     let cancelled = false;
-    empresaCajaApi.listar()
-      .then(rows => { if (!cancelled) setCajas(rows.filter(row => Boolean(row.activa))); })
-      .catch(() => { if (!cancelled) setCajas([]); });
-    return () => { cancelled = true; };
-  }, [isOpen]);
+    setSesionCajaLoading(true);
+
+    cajaSesionApi.getActiva()
+      .then(row => {
+        if (!cancelled) setSesionCaja(row);
+      })
+      .catch(() => {
+        if (!cancelled) setSesionCaja(null);
+      })
+      .finally(() => {
+        if (!cancelled) setSesionCajaLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, branchMode, contextVersion]);
 
   // ── Load banks ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -416,7 +445,14 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
     if (!confirmarPago) { toast.add('Debes confirmar que has recibido el pago', 'error'); return false; }
     const tieneEfectivo = metodo === 'EFECTIVO' ||
       (metodo === 'MIXTO' && pagosMixtos.some(p => p.metodo === 'EFECTIVO' && Number(p.monto) > 0));
-    if (tieneEfectivo && !cajaId) { toast.add('Debes seleccionar una caja activa de la sucursal', 'error'); return false; }
+    if (tieneEfectivo && sesionCajaLoading) {
+      toast.add('Espera mientras se verifica la sesión de caja', 'error');
+      return false;
+    }
+    if (tieneEfectivo && !sesionCaja) {
+      toast.add('Debes abrir una caja en la sucursal activa antes de cobrar en efectivo', 'error');
+      return false;
+    }
     if (metodo === 'EFECTIVO' && montoRecibido < total) { toast.add('El monto recibido debe ser mayor o igual al total', 'error'); return false; }
     if (metodo === 'TRANSFERENCIA') {
       if (!referencia) { toast.add('Debes ingresar la referencia de la transferencia', 'error'); return false; }
@@ -452,7 +488,6 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
           fecha: now,
           pos_seleccionado: getPosFromMethod(p.metodo),
           banco_id: p.metodo === 'TRANSFERENCIA' ? bancoSeleccionado : null,
-          caja_id: p.metodo === 'EFECTIVO' ? Number(cajaId) : null,
         }));
       } else {
         // El pago aplicado es el total de la venta.
@@ -480,7 +515,6 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
           banco_id: metodo === 'TRANSFERENCIA' ? bancoSeleccionado : null,
           interes_porcentaje: isCardMethod(metodo) ? interesTarjeta : null,
           interes_monto: isCardMethod(metodo) ? interesMontoTarjeta : null,
-          caja_id: metodo === 'EFECTIVO' ? Number(cajaId) : null,
         }];
       }
 
@@ -541,8 +575,13 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
       onClose();
       onSuccess();
     } catch (error: any) {
-      const msg = error.response?.data?.message || error.message || 'Error al registrar la venta';
-      toast.add(msg, 'error');
+      toast.add(
+        cajaSesionError(
+          error,
+          error.message || 'Error al registrar la venta',
+        ),
+        'error',
+      );
     } finally {
       setIsLoading(false);
     }
@@ -753,16 +792,18 @@ export default function SaleFormModal({ isOpen, onClose, onSuccess, origenVenta,
             </div>
 
             {(metodo === 'EFECTIVO' || metodo === 'MIXTO') && (
-              <div className="mb-4">
-                <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">
-                  Caja de la sucursal <span className="text-red-500">*</span>
-                </label>
-                <select value={cajaId} onChange={e => setCajaId(e.target.value)} className={inputCls} style={inputStyle}>
-                  <option value="">Selecciona una caja</option>
-                  {cajas.map(caja => (
-                    <option key={caja.id} value={caja.id}>{caja.nombre} ({caja.codigo})</option>
-                  ))}
-                </select>
+              <div
+                className={`mb-4 rounded-xl border p-3 text-sm ${
+                  sesionCaja
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-300'
+                    : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300'
+                }`}
+              >
+                {sesionCajaLoading
+                  ? 'Verificando sesión de caja…'
+                  : sesionCaja
+                    ? `Caja abierta: ${sesionCaja.caja_nombre} (${sesionCaja.caja_codigo})`
+                    : 'No tienes una caja abierta. Ábrela desde Caja y Bancos antes de cobrar en efectivo.'}
               </div>
             )}
 

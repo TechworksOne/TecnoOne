@@ -21,6 +21,11 @@ import * as repuestoService from '../../services/repuestoService';
 import * as customerService from '../../services/customerService';
 import * as ventaService from '../../services/ventaService';
 import API_URL from '../../services/config';
+import {
+  cajaSesionApi,
+  type CajaSesion,
+} from '../../services/cajaSesionService';
+import { useSucursalContext } from '../../store/useSucursalContext';
 
 interface PaymentRowData {
   id: string;
@@ -36,6 +41,11 @@ export default function SaleNewPage() {
   const toast = useToast();
   const { getQuoteById, updateQuoteStatus } = useQuotesStore();
   const { upsertSale } = useSales();
+
+  const branchMode =
+    useSucursalContext(state => state.mode);
+  const contextVersion =
+    useSucursalContext(state => state.contextVersion);
 
   // Tipo de origen: cotización o directa
   const [origenVenta, setOrigenVenta] = useState<'COTIZACION' | 'DIRECTA' | null>(null);
@@ -81,6 +91,10 @@ export default function SaleNewPage() {
 
   const [confirmarPago, setConfirmarPago] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [sesionCaja, setSesionCaja] =
+    useState<CajaSesion | null>(null);
+  const [sesionCajaLoading, setSesionCajaLoading] =
+    useState(false);
 
   // Cargar desde URL si viene from=quoteId
   useEffect(() => {
@@ -129,6 +143,33 @@ export default function SaleNewPage() {
     };
     loadCuentasBancarias();
   }, []);
+
+  // Sesión operativa de caja para cobros en efectivo.
+  useEffect(() => {
+    if (branchMode !== 'specific') {
+      setSesionCaja(null);
+      setSesionCajaLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSesionCajaLoading(true);
+
+    cajaSesionApi.getActiva()
+      .then(row => {
+        if (!cancelled) setSesionCaja(row);
+      })
+      .catch(() => {
+        if (!cancelled) setSesionCaja(null);
+      })
+      .finally(() => {
+        if (!cancelled) setSesionCajaLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [branchMode, contextVersion]);
 
   // Cargar productos/repuestos cuando se abre el selector o cambia la búsqueda
   useEffect(() => {
@@ -384,6 +425,33 @@ export default function SaleNewPage() {
 
     if (!confirmarPago) {
       toast.add('Debes confirmar que has recibido el pago', 'error');
+      return false;
+    }
+
+    const tieneEfectivo =
+      metodo === 'EFECTIVO' ||
+      (
+        metodo === 'MIXTO' &&
+        pagosMixtos.some(
+          pago =>
+            pago.metodo === 'EFECTIVO' &&
+            Number(pago.monto) > 0,
+        )
+      );
+
+    if (tieneEfectivo && sesionCajaLoading) {
+      toast.add(
+        'Espera mientras se verifica la sesión de caja',
+        'error',
+      );
+      return false;
+    }
+
+    if (tieneEfectivo && !sesionCaja) {
+      toast.add(
+        'Debes abrir una caja en la sucursal activa antes de cobrar en efectivo',
+        'error',
+      );
       return false;
     }
 
@@ -911,6 +979,22 @@ export default function SaleNewPage() {
               <p className="font-bold text-sm">Mixto</p>
             </button>
           </div>
+
+          {(metodo === 'EFECTIVO' || metodo === 'MIXTO') && (
+            <div
+              className={`mb-5 rounded-xl border p-3 text-sm ${
+                sesionCaja
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-amber-200 bg-amber-50 text-amber-700'
+              }`}
+            >
+              {sesionCajaLoading
+                ? 'Verificando sesión de caja…'
+                : sesionCaja
+                  ? `Caja abierta: ${sesionCaja.caja_nombre} (${sesionCaja.caja_codigo})`
+                  : 'No tienes una caja abierta. Ábrela desde Caja y Bancos antes de cobrar en efectivo.'}
+            </div>
+          )}
 
           {/* Campos según método */}
           {metodo === 'EFECTIVO' && (

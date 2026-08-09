@@ -22,7 +22,11 @@ import { formatDate } from '../../lib/format';
 import { printSaleReceipt } from '../../lib/printSaleReceipt';
 import { getImageUrl } from '../../utils/getImageUrl';
 import { useSucursalContext } from '../../store/useSucursalContext';
-import { empresaCajaApi, type CajaCatalogo } from '../../services/cajaCatalogoService';
+import {
+  cajaSesionApi,
+  cajaSesionError,
+  type CajaSesion,
+} from '../../services/cajaSesionService';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -116,8 +120,10 @@ export default function SalesPage() {
   const [pagoComprobanteUrl, setPagoComprobanteUrl] = useState('');
   const [pagoComprobanteUploading, setPagoComprobanteUploading] = useState(false);
   const [pagoLoading, setPagoLoading] = useState(false);
-  const [cajas, setCajas] = useState<CajaCatalogo[]>([]);
-  const [pagoCajaId, setPagoCajaId] = useState('');
+  const [sesionCaja, setSesionCaja] =
+    useState<CajaSesion | null>(null);
+  const [sesionCajaLoading, setSesionCajaLoading] =
+    useState(false);
 
   // ── Load ────────────────────────────────────────────────────────────────
 
@@ -177,11 +183,20 @@ export default function SalesPage() {
     loadVentas();
     loadStats();
     if (branchMode === 'specific') {
-      empresaCajaApi.listar()
-        .then(rows => { if (!cancelled) setCajas(rows.filter(row => Boolean(row.activa))); })
-        .catch(() => { if (!cancelled) setCajas([]); });
+      setSesionCajaLoading(true);
+      cajaSesionApi.getActiva()
+        .then(row => {
+          if (!cancelled) setSesionCaja(row);
+        })
+        .catch(() => {
+          if (!cancelled) setSesionCaja(null);
+        })
+        .finally(() => {
+          if (!cancelled) setSesionCajaLoading(false);
+        });
     } else {
-      setCajas([]);
+      setSesionCaja(null);
+      setSesionCajaLoading(false);
     }
     return () => { cancelled = true; };
   }, [loadVentas, loadStats, contextVersion, branchMode]);
@@ -199,7 +214,15 @@ export default function SalesPage() {
     setPagoRef('');
     setPagoComprobanteUrl('');
     setPagoComprobanteUploading(false);
-    setPagoCajaId('');
+
+    if (branchMode === 'specific') {
+      setSesionCajaLoading(true);
+      cajaSesionApi.getActiva()
+        .then(setSesionCaja)
+        .catch(() => setSesionCaja(null))
+        .finally(() => setSesionCajaLoading(false));
+    }
+
     setShowPagoModal(true);
   };
 
@@ -314,8 +337,25 @@ export default function SalesPage() {
       return;
     }
 
-    if (pagoMetodo === 'EFECTIVO' && !pagoCajaId) {
-      toast.add('Selecciona una caja activa de la sucursal', 'error');
+    if (
+      pagoMetodo === 'EFECTIVO' &&
+      sesionCajaLoading
+    ) {
+      toast.add(
+        'Espera mientras se verifica la sesión de caja',
+        'error',
+      );
+      return;
+    }
+
+    if (
+      pagoMetodo === 'EFECTIVO' &&
+      !sesionCaja
+    ) {
+      toast.add(
+        'Debes abrir una caja en la sucursal activa antes de cobrar en efectivo',
+        'error',
+      );
       return;
     }
 
@@ -341,14 +381,19 @@ export default function SalesPage() {
         referencia: pagoRef || undefined,
         comprobanteUrl: pagoComprobanteUrl || undefined,
         usuario_id: user?.id,
-        caja_id: pagoMetodo === 'EFECTIVO' ? Number(pagoCajaId) : undefined,
       });
       toast.add('Pago registrado correctamente', 'success');
       setShowPagoModal(false);
       setShowDetail(false);
       await Promise.all([loadVentas(), loadStats()]);
     } catch (err: any) {
-      toast.add(err?.response?.data?.error ?? 'Error al registrar pago', 'error');
+      toast.add(
+        cajaSesionError(
+          err,
+          'Error al registrar pago',
+        ),
+        'error',
+      );
     } finally {
       setPagoLoading(false);
     }
@@ -901,21 +946,18 @@ export default function SalesPage() {
             </div>
 
             {pagoMetodo === 'EFECTIVO' && (
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-sec)] mb-1">
-                  Caja de la sucursal <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={pagoCajaId}
-                  onChange={e => setPagoCajaId(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#48B9E6]/40 transition-colors"
-                  style={{ background: 'var(--color-input-bg)', color: 'var(--color-text)', borderColor: 'var(--color-border)' }}
-                >
-                  <option value="">Selecciona una caja</option>
-                  {cajas.map(caja => (
-                    <option key={caja.id} value={caja.id}>{caja.nombre} ({caja.codigo})</option>
-                  ))}
-                </select>
+              <div
+                className={`rounded-xl border p-3 text-sm ${
+                  sesionCaja
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-300'
+                    : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300'
+                }`}
+              >
+                {sesionCajaLoading
+                  ? 'Verificando sesión de caja…'
+                  : sesionCaja
+                    ? `Caja abierta: ${sesionCaja.caja_nombre} (${sesionCaja.caja_codigo})`
+                    : 'No tienes una caja abierta. Ábrela desde Caja y Bancos antes de cobrar en efectivo.'}
               </div>
             )}
 

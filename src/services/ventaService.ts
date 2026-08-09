@@ -36,7 +36,6 @@ export interface VentaPago {
   comprobanteUrl?: string;
   fecha?: string;
   usuario_id?: number;
-  caja_id?: number;
 }
 
 export interface VentaData {
@@ -201,7 +200,6 @@ export const registrarPago = async (
     referencia?: string;
     comprobanteUrl?: string;
     usuario_id?: number;
-    caja_id?: number;
   }
 ): Promise<VentaData> => {
   const response = await api.post(`/ventas/${ventaId}/pagos`, pago);

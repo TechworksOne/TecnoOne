@@ -119,6 +119,49 @@ async function listarActivas({ empresaId, sucursalIds, usuarioId, cajaId }) {
   return rows;
 }
 
+async function obtenerSugerenciaApertura({ empresaId, sucursalId, cajaId }) {
+  const [[caja]] = await db.query(
+    `SELECT id
+     FROM cajas
+     WHERE id = ?
+       AND empresa_id = ?
+       AND sucursal_id = ?
+       AND activa = 1
+     LIMIT 1`,
+    [cajaId, empresaId, sucursalId]
+  );
+
+  if (!caja) return null;
+
+  const [[anterior]] = await db.query(
+    `SELECT
+       id AS sesion_anterior_id,
+       fondo_siguiente_centavos,
+       fecha_cierre
+     FROM caja_sesiones
+     WHERE empresa_id = ?
+       AND sucursal_id = ?
+       AND caja_id = ?
+       AND estado = 'CERRADA'
+     ORDER BY fecha_cierre DESC, id DESC
+     LIMIT 1`,
+    [empresaId, sucursalId, cajaId]
+  );
+
+  return {
+    caja_id: Number(cajaId),
+    sesion_anterior_id: anterior?.sesion_anterior_id
+      ? Number(anterior.sesion_anterior_id)
+      : null,
+    fondo_sugerido_centavos:
+      anterior?.fondo_siguiente_centavos !== null &&
+      anterior?.fondo_siguiente_centavos !== undefined
+        ? Number(anterior.fondo_siguiente_centavos)
+        : null,
+    fecha_cierre_anterior: anterior?.fecha_cierre ?? null,
+  };
+}
+
 async function listar({ empresaId, sucursalIds, cajaId, limit = 20, offset = 0 }) {
   const params = [empresaId];
   let where = ' WHERE cs.empresa_id = ?';
@@ -151,11 +194,52 @@ async function crear({ empresaId, sucursalId, cajaId, usuarioId, fondoInicial })
     );
     if (!caja) { await connection.rollback(); return null; }
 
+    const [[anterior]] = await connection.query(
+      `SELECT
+         id,
+         fondo_siguiente_centavos
+       FROM caja_sesiones
+       WHERE empresa_id = ?
+         AND sucursal_id = ?
+         AND caja_id = ?
+         AND estado = 'CERRADA'
+       ORDER BY fecha_cierre DESC, id DESC
+       LIMIT 1`,
+      [empresaId, sucursalId, cajaId]
+    );
+
+    const fondoSugerido =
+      anterior?.fondo_siguiente_centavos !== null &&
+      anterior?.fondo_siguiente_centavos !== undefined
+        ? Number(anterior.fondo_siguiente_centavos)
+        : null;
+
+    const diferenciaApertura =
+      fondoSugerido === null
+        ? null
+        : Number(fondoInicial) - fondoSugerido;
+
     const [ins] = await connection.query(
       `INSERT INTO caja_sesiones
-       (empresa_id, sucursal_id, caja_id, usuario_apertura_id, fondo_inicial_centavos)
-       VALUES (?, ?, ?, ?, ?)`,
-      [empresaId, sucursalId, cajaId, usuarioId, fondoInicial]
+       (
+         empresa_id,
+         sucursal_id,
+         caja_id,
+         usuario_apertura_id,
+         fondo_inicial_centavos,
+         fondo_sugerido_centavos,
+         diferencia_apertura_centavos
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        empresaId,
+        sucursalId,
+        cajaId,
+        usuarioId,
+        fondoInicial,
+        fondoSugerido,
+        diferenciaApertura,
+      ]
     );
 
     const [[sesion]] = await connection.query(
@@ -182,11 +266,127 @@ async function crear({ empresaId, sucursalId, cajaId, usuarioId, fondoInicial })
 }
 
 /**
+ * Calcula el efectivo operativo de una sesión usando exactamente
+ * los mismos ledgers de ventas y reparaciones que utiliza el cierre.
+ */
+async function calcularEfectivoEsperado(
+  executor,
+  { sesionId, fondoInicial }
+) {
+  const [[ventaCash]] = await executor.query(
+    `SELECT COALESCE(SUM(
+       CASE
+         WHEN accion = 'INGRESO' THEN monto_centavos
+         WHEN accion = 'REVERSA' THEN -monto_centavos
+         ELSE 0
+       END
+     ), 0) AS neto
+     FROM venta_movimientos_financieros
+     WHERE caja_sesion_id = ?
+       AND metodo = 'EFECTIVO'`,
+    [sesionId]
+  );
+
+  const [[reparacionCash]] = await executor.query(
+    `SELECT COALESCE(SUM(
+       CASE
+         WHEN accion = 'INGRESO' THEN monto_centavos
+         WHEN accion = 'REVERSA' THEN -monto_centavos
+         ELSE 0
+       END
+     ), 0) AS neto
+     FROM reparacion_movimientos_financieros
+     WHERE caja_sesion_id = ?
+       AND metodo = 'EFECTIVO'`,
+    [sesionId]
+  );
+
+  const ventasEfectivo =
+    Number(ventaCash?.neto || 0);
+
+  const reparacionesEfectivo =
+    Number(reparacionCash?.neto || 0);
+
+  const movimientosEfectivo =
+    ventasEfectivo + reparacionesEfectivo;
+
+  const esperado =
+    Number(fondoInicial) +
+    movimientosEfectivo;
+
+  return {
+    esperado,
+    movimientosEfectivo,
+    ventasEfectivo,
+    reparacionesEfectivo,
+  };
+}
+
+/**
+ * Resumen operativo de la sesión ABIERTA del usuario.
+ * Es solo lectura; el cierre vuelve a calcular dentro de su
+ * propia transacción y continúa siendo la autoridad final.
+ */
+async function obtenerResumenActiva({
+  empresaId,
+  sucursalId,
+  usuarioId,
+}) {
+  const [[sesion]] = await db.query(
+    `${SELECT_SESION}
+     WHERE cs.empresa_id = ?
+       AND cs.sucursal_id = ?
+       AND cs.usuario_apertura_id = ?
+       AND cs.estado = 'ABIERTA'
+     ORDER BY cs.fecha_apertura DESC
+     LIMIT 1`,
+    [
+      Number(empresaId),
+      Number(sucursalId),
+      Number(usuarioId),
+    ]
+  );
+
+  if (!sesion) return null;
+
+  const calculo =
+    await calcularEfectivoEsperado(
+      db,
+      {
+        sesionId: sesion.id,
+        fondoInicial:
+          sesion.fondo_inicial_centavos,
+      }
+    );
+
+  return {
+    ...sesion,
+    movimientos_efectivo_centavos:
+      calculo.movimientosEfectivo,
+    ventas_efectivo_centavos:
+      calculo.ventasEfectivo,
+    reparaciones_efectivo_centavos:
+      calculo.reparacionesEfectivo,
+    efectivo_esperado_actual_centavos:
+      calculo.esperado,
+  };
+}
+
+/**
  * Cierra una sesión ABIERTA dentro de una transacción.
- * Calcula efectivo_esperado = fondo_inicial (Fase 2A; extender en Fase 3).
+ * El efectivo esperado usa el mismo cálculo del resumen operativo.
  * Devuelve null si la sesión no existe/ya está cerrada o pertenece a otra sucursal.
  */
-async function cerrar({ sesionId, empresaId, sucursalId, usuarioId, efectivoContado, cerradoPor, notas }) {
+async function cerrar({
+  sesionId,
+  empresaId,
+  sucursalId,
+  usuarioId,
+  efectivoContado,
+  fondoSiguiente = 0,
+  cerradoPor,
+  notas,
+}) {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -203,43 +403,41 @@ async function cerrar({ sesionId, empresaId, sucursalId, usuarioId, efectivoCont
     );
     if (!sesion) { await connection.rollback(); return null; }
 
-    // Efectivo esperado de esta sesión:
-    // fondo inicial + ingresos - reversas de ventas y reparaciones.
-    const [[ventaCash]] = await connection.query(
-      `SELECT COALESCE(SUM(
-         CASE
-           WHEN accion = 'INGRESO' THEN monto_centavos
-           WHEN accion = 'REVERSA' THEN -monto_centavos
-           ELSE 0
-         END
-       ), 0) AS neto
-       FROM venta_movimientos_financieros
-       WHERE caja_sesion_id = ?
-         AND metodo = 'EFECTIVO'`,
-      [sesionId]
+    const {
+      esperado,
+    } = await calcularEfectivoEsperado(
+      connection,
+      {
+        sesionId,
+        fondoInicial:
+          sesion.fondo_inicial_centavos,
+      }
     );
-
-    const [[reparacionCash]] = await connection.query(
-      `SELECT COALESCE(SUM(
-         CASE
-           WHEN accion = 'INGRESO' THEN monto_centavos
-           WHEN accion = 'REVERSA' THEN -monto_centavos
-           ELSE 0
-         END
-       ), 0) AS neto
-       FROM reparacion_movimientos_financieros
-       WHERE caja_sesion_id = ?
-         AND metodo = 'EFECTIVO'`,
-      [sesionId]
-    );
-
-    const esperado =
-      Number(sesion.fondo_inicial_centavos) +
-      Number(ventaCash?.neto || 0) +
-      Number(reparacionCash?.neto || 0);
 
     const contado = Number(efectivoContado);
+    const fondoSiguienteNormalizado = Number(fondoSiguiente);
+
+    if (
+      !Number.isInteger(fondoSiguienteNormalizado) ||
+      fondoSiguienteNormalizado < 0
+    ) {
+      throw sesionError(
+        'El fondo para el siguiente turno debe ser un entero no negativo',
+        400,
+        'FONDO_SIGUIENTE_INVALIDO'
+      );
+    }
+
+    if (fondoSiguienteNormalizado > contado) {
+      throw sesionError(
+        'El fondo para el siguiente turno no puede superar el efectivo contado',
+        400,
+        'FONDO_SIGUIENTE_SUPERA_CONTADO'
+      );
+    }
+
     const diferencia = contado - esperado;
+    const retiroCierre = contado - fondoSiguienteNormalizado;
 
     await connection.query(
       `UPDATE caja_sesiones
@@ -248,14 +446,33 @@ async function cerrar({ sesionId, empresaId, sucursalId, usuarioId, efectivoCont
            efectivo_esperado_centavos = ?,
            efectivo_contado_centavos  = ?,
            diferencia_centavos        = ?,
+           fondo_siguiente_centavos   = ?,
+           retiro_cierre_centavos     = ?,
            cerrado_por                = ?,
            notas_cierre               = ?
        WHERE id = ?`,
-      [esperado, contado, diferencia, cerradoPor, notas || null, sesionId]
+      [
+        esperado,
+        contado,
+        diferencia,
+        fondoSiguienteNormalizado,
+        retiroCierre,
+        cerradoPor,
+        notas || null,
+        sesionId,
+      ]
     );
 
     await connection.commit();
-    return { sesionId: Number(sesionId), diferencia, efectivoEsperado: esperado, efectivoContado: contado };
+
+    return {
+      sesionId: Number(sesionId),
+      diferencia,
+      efectivoEsperado: esperado,
+      efectivoContado: contado,
+      fondoSiguiente: fondoSiguienteNormalizado,
+      retiroCierre,
+    };
   } catch (err) {
     try { await connection.rollback(); } catch (_) {}
     throw err;
@@ -264,4 +481,13 @@ async function cerrar({ sesionId, empresaId, sucursalId, usuarioId, efectivoCont
   }
 }
 
-module.exports = { resolverActivaParaOperacion, listarActivas, listar, crear, cerrar };
+module.exports = {
+  resolverActivaParaOperacion,
+  listarActivas,
+  obtenerSugerenciaApertura,
+  obtenerResumenActiva,
+  calcularEfectivoEsperado,
+  listar,
+  crear,
+  cerrar,
+};

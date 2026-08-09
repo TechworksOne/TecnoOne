@@ -18,6 +18,8 @@ import axios from 'axios';
 import { useToast } from '../../components/ui/Toast';
 import * as TarjetaService from '../../services/tarjetaCreditoService';
 import type { TarjetaCredito, TarjetaMovimiento, TarjetaForm, PagoTarjetaForm } from '../../services/tarjetaCreditoService';
+import CajaSesionPanel from '../../components/cajas/CajaSesionPanel';
+import CajaSesionHistorial from '../../components/cajas/CajaSesionHistorial';
 
 interface CuentaBancaria {
   id: number;
@@ -559,6 +561,11 @@ export default function CajaBancosPage() {
           </div>
         </div>
 
+        {/* ── SESIÓN OPERATIVA DE CAJA ──────────────────────────────────── */}
+        <CajaSesionPanel />
+
+        <CajaSesionHistorial />
+
         {/* ── TARJETAS RESUMEN ───────────────────────────────────────────── */}
         <div className={`grid gap-3 md:gap-4 ${isAdmin ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2'}`}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 md:p-5 border border-slate-200 dark:border-slate-800 shadow-sm">
@@ -568,7 +575,7 @@ export default function CajaBancosPage() {
                 <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1">
                   Q{Number(saldoCajaChica.saldo || 0).toFixed(2)}
                 </p>
-                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Saldo confirmado</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Fondo para gastos menores</p>
               </div>
               <div className="bg-emerald-50 p-2 rounded-xl">
                 <Wallet size={20} className="text-emerald-600" />
