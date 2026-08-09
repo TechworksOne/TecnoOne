@@ -52,6 +52,7 @@ const auditoriaRoutes = require('./routes/auditoriaRoutes');
 const permisoRoutes = require('./routes/permisoRoutes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
 const cajaCatalogoRoutes = require('./routes/cajaCatalogoRoutes');
+const cajaSesionRoutes   = require('./routes/cajaSesionRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -82,6 +83,7 @@ app.use('/api/auditoria', auditoriaRoutes);
 app.use('/api/permisos', permisoRoutes);
 app.use('/api/superadmin', superAdminRoutes);
 app.use('/api/cajas', cajaCatalogoRoutes);
+app.use('/api/caja-sesiones', cajaSesionRoutes);
 // app.use('/api/dashboard', dashboardRoutes);
 app.use('/api', marcaLineaRoutes);
 
