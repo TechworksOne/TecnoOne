@@ -561,8 +561,13 @@ exports.createReparacion = async (req, res) => {
     }
     
     // 4. Crear entrada inicial en historial
+    const anticipoEstadoTexto =
+      metodoAnticipoNormalizado === 'efectivo'
+        ? 'registrado en caja operativa'
+        : 'pendiente de confirmación bancaria';
+
     const notaInicial = anticipoCentavos > 0
-      ? `Reparación creada. Anticipo registrado: Q${centavosAQuetzales(anticipoCentavos).toFixed(2)} (${metodoAnticipoNormalizado}) pendiente de confirmación en Caja/Bancos`
+      ? `Reparación creada. Anticipo registrado: Q${centavosAQuetzales(anticipoCentavos).toFixed(2)} (${metodoAnticipoNormalizado}) ${anticipoEstadoTexto}`
       : 'Reparación creada';
     
     const [historialResult] = await connection.query(
@@ -587,13 +592,31 @@ exports.createReparacion = async (req, res) => {
 
       let cuentaUsadaId = null;
 
+      // El anticipo siempre se registra en el ledger financiero
+      // de la reparación. Para EFECTIVO, este método exige y deriva
+      // automáticamente la sesión operativa abierta del usuario.
+      await reparacionInventoryService.registerFinancialMovement(
+        connection,
+        {
+          branchScope: req.branchScope,
+          reparacionId: repairId,
+          pagoIndice: 0,
+          metodo:
+            String(
+              metodoAnticipoNormalizado
+            ).toUpperCase(),
+          montoCentavos:
+            anticipoCentavos,
+          usuarioId:
+            req.user?.id ??
+            req.user?.userId ??
+            null,
+        }
+      );
+
       if (metodoAnticipoNormalizado === 'efectivo') {
-        await connection.query(
-          `INSERT INTO caja_chica
-           (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones, referencia_tipo, referencia_id)
-           VALUES (?, 'INGRESO', ?, ?, 'ANTICIPO_REPARACION', 'PENDIENTE', ?, 'Anticipo registrado desde recepción de reparación', 'REPARACION', ?)`,
-          [empresaId, montoDecimal, conceptoAnticipo, authUserName || 'Sistema', repairId]
-        );
+        // No existe movimiento en Caja Chica.
+        // El efectivo pertenece exclusivamente a Caja Operativa.
       } else if (metodoAnticipoNormalizado === 'transferencia') {
         if (!cuentaAnticipoId) {
           await connection.rollback();
@@ -697,9 +720,13 @@ exports.createReparacion = async (req, res) => {
          VALUES (?, 'ANTICIPO_REGISTRADO', ?, ?, 'ANTICIPO_REGISTRADO', NULL, ?)`,
         [
           repairId,
-          `Anticipo Q${montoDecimal.toFixed(2)} (${metodoLabel}) – pendiente de confirmación en Caja/Bancos`,
+          metodoAnticipoNormalizado === 'efectivo'
+            ? `Anticipo Q${montoDecimal.toFixed(2)} (${metodoLabel}) registrado en Caja Operativa`
+            : `Anticipo Q${montoDecimal.toFixed(2)} (${metodoLabel}) – pendiente de confirmación bancaria`,
           authUserName || 'Sistema',
-          `Anticipo de Q${montoDecimal.toFixed(2)} registrado por ${metodoLabel}. Pendiente de confirmación.`
+          metodoAnticipoNormalizado === 'efectivo'
+            ? `Anticipo de Q${montoDecimal.toFixed(2)} registrado por ${metodoLabel} en la sesión operativa de caja.`
+            : `Anticipo de Q${montoDecimal.toFixed(2)} registrado por ${metodoLabel}. Pendiente de confirmación bancaria.`
         ]
       );
     }
@@ -1537,7 +1564,78 @@ exports.getHistorialCompleto = async (req, res) => {
       }
     }
 
-    // 3. Movimientos de caja relacionados
+    // 3. Movimientos efectivos de Caja Operativa
+    const [movCajaOperativa] =
+      await db.query(
+        `SELECT
+           rmf.*,
+           u.name AS usuario_nombre
+         FROM reparacion_movimientos_financieros rmf
+         LEFT JOIN users u
+           ON u.id = rmf.usuario_id
+         WHERE rmf.reparacion_id = ?
+           AND UPPER(rmf.metodo) = 'EFECTIVO'
+         ORDER BY
+           rmf.created_at ASC,
+           rmf.id ASC`,
+        [id]
+      );
+
+    for (const mov of movCajaOperativa) {
+      const esReversa =
+        mov.accion === 'REVERSA';
+
+      const esAnticipo =
+        Number(mov.pago_indice) === 0;
+
+      eventos.push({
+        id:
+          `caja-operativa-${mov.id}`,
+        tipo_evento:
+          esReversa
+            ? 'DEVOLUCION_EFECTIVO'
+            : (
+                esAnticipo
+                  ? 'ANTICIPO_CONFIRMADO'
+                  : 'PAGO_SALDO'
+              ),
+        titulo:
+          esReversa
+            ? 'Devolución registrada en Caja Operativa'
+            : (
+                esAnticipo
+                  ? 'Anticipo registrado en Caja Operativa'
+                  : 'Pago en efectivo registrado en Caja Operativa'
+              ),
+        descripcion:
+          esReversa
+            ? 'Salida de efectivo registrada en la sesión operativa de caja'
+            : 'Ingreso de efectivo registrado en la sesión operativa de caja',
+        estado_anterior: null,
+        estado_nuevo: null,
+        nota: null,
+        usuario:
+          mov.usuario_nombre ||
+          (
+            mov.usuario_id
+              ? `Usuario #${mov.usuario_id}`
+              : 'Sistema'
+          ),
+        fecha: mov.created_at,
+        monto:
+          centavosAQuetzales(
+            Number(
+              mov.monto_centavos ||
+              0
+            )
+          ),
+        metodo_pago: 'EFECTIVO',
+        banco: null,
+        imagenes: [],
+      });
+    }
+
+    // 3.1. Movimientos históricos de Caja Chica
     const [movCaja] = await db.query(
       `SELECT cc.*, 'caja_chica' as origen
        FROM caja_chica cc
@@ -1923,8 +2021,15 @@ exports.cancelarReparacion = async (req, res) => {
     // ── Cargar reparación ────────────────────────────────────────────────
     const tenant = repairScopeClause(req, 'r');
     const [[rep]] = await connection.query(
-      `SELECT r.id, r.estado, r.cliente_nombre, r.monto_anticipo, r.metodo_anticipo,
-              r.cuenta_bancaria_anticipo_id
+      `SELECT
+         r.id,
+         r.estado,
+         r.cliente_nombre,
+         r.monto_anticipo,
+         r.monto_pagado_adicional,
+         r.monto_pago_final,
+         r.metodo_anticipo,
+         r.cuenta_bancaria_anticipo_id
        FROM reparaciones r
        WHERE r.id = ?${tenant.sql}
        FOR UPDATE`,
@@ -1941,6 +2046,30 @@ exports.cancelarReparacion = async (req, res) => {
     if (rep.estado === 'ENTREGADA') {
       await connection.rollback();
       return res.status(409).json({ success: false, message: 'No se puede cancelar una reparación ya entregada' });
+    }
+
+    /*
+     * Mientras el flujo de cancelación administre únicamente
+     * devoluciones del anticipo, no es seguro cancelar una
+     * reparación que ya recibió pagos posteriores.
+     *
+     * No se modifica dinero ni estado: la operación completa
+     * se rechaza antes de cualquier reversa.
+     */
+    const pagosPosterioresCentavos =
+      Number(rep.monto_pagado_adicional || 0) +
+      Number(rep.monto_pago_final || 0);
+
+    if (pagosPosterioresCentavos > 0) {
+      await connection.rollback();
+
+      return res.status(409).json({
+        success: false,
+        code:
+          'REPAIR_CANCEL_ADDITIONAL_PAYMENTS_REQUIRE_REFUND_FLOW',
+        message:
+          'La reparación tiene pagos posteriores al anticipo. Debe procesarse mediante un flujo de devolución antes de cancelarla.',
+      });
     }
 
     const montoAnticipo = centavosAQuetzales(Number(rep.monto_anticipo) || 0);
@@ -1970,14 +2099,25 @@ exports.cancelarReparacion = async (req, res) => {
     let devolucionMovId = null;
     const notasAnticipo = [];
 
-    // Caja chica: anticipo en efectivo
-    const [movsCaja] = await connection.query(
-      `SELECT * FROM caja_chica
-       WHERE referencia_tipo = 'REPARACION' AND referencia_id = ?
-         AND categoria = 'ANTICIPO_REPARACION' AND tipo_movimiento = 'INGRESO'
-       ORDER BY id DESC LIMIT 1`,
-      [id]
-    );
+    /*
+     * Compatibilidad histórica:
+     * Las reparaciones antiguas podían tener el anticipo efectivo
+     * almacenado en caja_chica.
+     *
+     * Ya no se crean movimientos comerciales nuevos allí.
+     */
+    const [movsCajaLegacy] =
+      await connection.query(
+        `SELECT *
+         FROM caja_chica
+         WHERE referencia_tipo = 'REPARACION'
+           AND referencia_id = ?
+           AND categoria = 'ANTICIPO_REPARACION'
+           AND tipo_movimiento = 'INGRESO'
+         ORDER BY id DESC
+         LIMIT 1`,
+        [id]
+      );
 
     // Banco: anticipo por transferencia / tarjeta
     const [movsBanco] = await connection.query(
@@ -1988,35 +2128,40 @@ exports.cancelarReparacion = async (req, res) => {
       [id]
     );
 
-    // ── Procesar anticipo en Caja Chica ──────────────────────────────────
-    for (const mov of movsCaja) {
-      anticipoMovId = mov.id;
-      if (mov.estado === 'PENDIENTE') {
-        // El anticipo nunca llegó a confirmarse → anular
-        await connection.query(
-          `UPDATE caja_chica SET estado = 'ANULADO' WHERE id = ?`,
-          [mov.id]
-        );
-        notasAnticipo.push(`Anticipo en caja anulado (Q${Number(mov.monto).toFixed(2)})`);
-      } else if (mov.estado === 'CONFIRMADO' && devolver && montoDev > 0) {
-        // Anticipo confirmado + hay devolución → registrar EGRESO de devolución
-        const concepto = `Devolución de anticipo reparación ${id} - ${rep.cliente_nombre}`;
-        const observ   = [
-          `Cancelación: ${motivoLimpio}`,
-          montoRetenido > 0 ? `Monto retenido: Q${montoRetenido.toFixed(2)} — ${motivoRetLimpio}` : null,
-        ].filter(Boolean).join(' | ');
+    // ── Compatibilidad con anticipos legacy de Caja Chica ───────────────
+    if (movsCajaLegacy.length > 0) {
+      const legacy = movsCajaLegacy[0];
 
-        const [result] = await connection.query(
-          `INSERT INTO caja_chica
-             (tipo_movimiento, monto, concepto, categoria, estado, realizado_por,
-              observaciones, referencia_tipo, referencia_id)
-           VALUES ('EGRESO', ?, ?, 'DEVOLUCION_ANTICIPO_REPARACION', 'PENDIENTE', ?, ?, 'REPARACION', ?)`,
-          [montoDev, concepto, usuario, observ, id]
+      anticipoMovId = legacy.id;
+
+      /*
+       * Una devolución de un anticipo histórico no puede volver a
+       * contaminar Caja Chica. Se bloquea para que sea migrada o
+       * resuelta explícitamente antes de devolver físicamente dinero.
+       */
+      if (
+        devolver &&
+        montoDev > 0
+      ) {
+        const error = new Error(
+          'Este anticipo pertenece al flujo histórico de Caja Chica. Debe migrarse antes de registrar una devolución.'
         );
-        devolucionMovId = result.insertId;
-        notasAnticipo.push(`Egreso por devolución de anticipo (caja) Q${montoDev.toFixed(2)} — PENDIENTE de confirmar`);
-      } else if (mov.estado === 'CONFIRMADO' && (!devolver || montoDev === 0)) {
-        notasAnticipo.push(`Anticipo en caja confirmado; sin devolución al cliente (Q${montoAnticipo.toFixed(2)} retenido)`);
+        error.statusCode = 409;
+        error.code =
+          'LEGACY_REPAIR_CASH_REFUND_REQUIRES_MIGRATION';
+        throw error;
+      }
+
+      if (legacy.estado === 'PENDIENTE') {
+        notasAnticipo.push(
+          `Anticipo histórico de Caja Chica pendiente: Q${Number(legacy.monto).toFixed(2)}`
+        );
+      } else if (
+        legacy.estado === 'CONFIRMADO'
+      ) {
+        notasAnticipo.push(
+          `Anticipo histórico de Caja Chica retenido: Q${Number(legacy.monto).toFixed(2)}`
+        );
       }
     }
 
@@ -2089,13 +2234,55 @@ exports.cancelarReparacion = async (req, res) => {
       );
     }
 
-    const financieroResult = await reparacionInventoryService.reverseFinancialMovements(connection, {
-      branchScope: req.branchScope,
-      reparacionId: id,
-      usuarioId: req.user?.id || null,
-    });
-    if (financieroResult.count > 0) {
-      notasAnticipo.push(`Pagos en ledger revertidos: ${financieroResult.count}`);
+    /*
+     * Una cancelación solo provoca salida física de dinero
+     * cuando realmente se devuelve dinero al cliente.
+     *
+     * El anticipo inicial siempre utiliza pago_indice = 0.
+     */
+    let financieroResult = {
+      count: 0,
+      montoCentavos: 0,
+    };
+
+    if (
+      devolver &&
+      montoDev > 0 &&
+      !movsCajaLegacy.length
+    ) {
+      financieroResult =
+        await reparacionInventoryService
+          .reverseFinancialPaymentAmount(
+            connection,
+            {
+              branchScope:
+                req.branchScope,
+              reparacionId: id,
+              pagoIndice: 0,
+              montoCentavos:
+                quetzalesACentavos(
+                  montoDev
+                ),
+              usuarioId:
+                req.user?.id ??
+                req.user?.userId ??
+                null,
+            }
+          );
+
+      if (financieroResult.count > 0) {
+        anticipoMovId =
+          financieroResult.ingresoId ||
+          anticipoMovId;
+
+        devolucionMovId =
+          financieroResult.reversaId ||
+          devolucionMovId;
+
+        notasAnticipo.push(
+          `Devolución registrada en ledger financiero: Q${montoDev.toFixed(2)}`
+        );
+      }
     }
 
     await connection.query(

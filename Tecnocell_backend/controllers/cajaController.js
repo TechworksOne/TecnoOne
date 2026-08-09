@@ -1193,28 +1193,18 @@ exports.registrarMovimientoVenta = async (
     };
 
     if (metodo === 'EFECTIVO') {
-      // Anti-duplicado: verificar si ya existe movimiento de ingreso por venta en caja_chica
-      if (ventaIdNumerico !== null) {
-        const [dup] = await dbConn.query(
-          `SELECT id FROM caja_chica WHERE empresa_id = ? AND venta_id = ? AND tipo_movimiento = 'INGRESO' AND categoria = 'Venta' AND estado IN ('PENDIENTE', 'CONFIRMADO') LIMIT 1`,
-          [empresaIdFinanciera, ventaIdNumerico]
-        );
-        if (dup.length > 0) {
-          console.warn(`⚠️ Movimiento duplicado detectado en caja_chica para venta_id=${ventaIdNumerico}. Se omite inserción.`);
-          return { success: true, skipped: true };
-        }
-      }
-
-      await dbConn.query(
-        `INSERT INTO caja_chica 
-         (empresa_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, realizado_por)
-         VALUES (?, 'INGRESO', ?, ?, ?, 'Venta', 'PENDIENTE', ?)`,
-        [empresaIdFinanciera, montoQuetzales, concepto, ventaIdNumerico, usuarioNombre]
-      );
-
-      console.log(
-        `✅ Movimiento PENDIENTE registrado en CAJA CHICA: Q${montoQuetzales} - Venta ${referenciaVenta || ventaId} (id=${ventaIdNumerico})`
-      );
+      /*
+       * El efectivo de ventas pertenece exclusivamente al ledger
+       * de Caja Operativa (saleInventoryService).
+       *
+       * Este helper legacy conserva únicamente integraciones bancarias.
+       */
+      return {
+        success: true,
+        skipped: true,
+        reason:
+          'EFECTIVO_GESTIONADO_POR_CAJA_OPERATIVA',
+      };
     } else if (metodo === 'TARJETA') {
       /*
         Compatibilidad con ventas antiguas que todavía usan metodo_pago = TARJETA
@@ -1410,25 +1400,17 @@ exports.registrarMovimientoReparacion = async (
     };
 
     if (metodo === 'EFECTIVO') {
-      // Anti-duplicado
-      const [dup] = await dbConn.query(
-        `SELECT id FROM caja_chica
-         WHERE empresa_id = ? AND referencia_tipo = 'reparacion' AND referencia_id = ?
-           AND tipo_movimiento = 'INGRESO' AND estado IN ('PENDIENTE','CONFIRMADO') LIMIT 1`,
-        [empresaIdFinanciera, reparacionId]
-      );
-      if (dup.length > 0) {
-        console.warn(`⚠️ Movimiento duplicado caja_chica para reparacion_id=${reparacionId}. Se omite.`);
-        return { success: true, skipped: true };
-      }
-      await dbConn.query(
-        `INSERT INTO caja_chica
-         (empresa_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, realizado_por, referencia_tipo, referencia_id)
-         VALUES (?, 'INGRESO', ?, ?, NULL, 'Reparación', 'PENDIENTE', ?, 'reparacion', ?)`,
-        [empresaIdFinanciera, montoQuetzales, concepto, usuarioNombre, reparacionId]
-      );
-      console.log(`✅ Movimiento caja_chica registrado: Q${montoQuetzales} — ${concepto}`);
-
+      /*
+       * Compatibilidad defensiva:
+       * el efectivo de reparaciones se registra mediante
+       * reparacionInventoryService y Caja Operativa.
+       */
+      return {
+        success: true,
+        skipped: true,
+        reason:
+          'EFECTIVO_GESTIONADO_POR_CAJA_OPERATIVA',
+      };
     } else if (metodo === 'TRANSFERENCIA') {
       let cuenta = null;
       if (bancoId) {
@@ -1527,62 +1509,12 @@ exports.registrarReversaMovimientoVenta = async (
 
     const conceptoReversa = `Anulación venta ${referenciaVenta}`;
 
-    // ── CAJA CHICA ───────────────────────────────────────────────────────────────
-
-    // Anti-duplicado: no crear reversa si ya existe
-    const [reversaCajaExistente] = await dbConn.query(
-      `SELECT id FROM caja_chica
-       WHERE empresa_id = ?
-         AND venta_id = ?
-         AND tipo_movimiento = 'EGRESO'
-         AND categoria = 'Anulacion Venta'
-         AND estado IN ('PENDIENTE', 'CONFIRMADO')
-       LIMIT 1`,
-      [empresaIdFinanciera, ventaIdNumerico]
-    );
-
-    let reversasCajaCreadas = 0;
-
-    if (reversaCajaExistente.length > 0) {
-      console.warn(`⚠️ Ya existe reversa de caja para venta_id=${ventaIdNumerico}. Se omite.`);
-    } else {
-      // A. Anular ingresos PENDIENTES directamente
-      await dbConn.query(
-        `UPDATE caja_chica
-         SET estado = 'ANULADO',
-             observaciones = CONCAT(COALESCE(observaciones, ''), ' | ANULADO AUTOMATICAMENTE POR CANCELACION DE VENTA')
-         WHERE empresa_id = ?
-           AND venta_id = ?
-           AND tipo_movimiento = 'INGRESO'
-           AND categoria = 'Venta'
-           AND estado = 'PENDIENTE'`,
-        [empresaIdFinanciera, ventaIdNumerico]
-      );
-
-      // B. Buscar ingresos CONFIRMADOS para reversar
-      const [ingresosConfirmadosCaja] = await dbConn.query(
-        `SELECT * FROM caja_chica
-         WHERE empresa_id = ?
-           AND venta_id = ?
-           AND tipo_movimiento = 'INGRESO'
-           AND categoria = 'Venta'
-           AND estado = 'CONFIRMADO'
-         ORDER BY id ASC`,
-        [empresaIdFinanciera, ventaIdNumerico]
-      );
-
-      // C. Crear una reversa CONFIRMADA por cada ingreso confirmado
-      for (const movimiento of ingresosConfirmadosCaja) {
-        await dbConn.query(
-          `INSERT INTO caja_chica
-           (empresa_id, tipo_movimiento, monto, concepto, venta_id, categoria, estado, realizado_por)
-           VALUES (?, 'EGRESO', ?, ?, ?, 'Anulacion Venta', 'CONFIRMADO', ?)`,
-          [empresaIdFinanciera, movimiento.monto, conceptoReversa, ventaIdNumerico, usuarioNombre]
-        );
-        reversasCajaCreadas++;
-        console.log(`✅ Reversa de caja registrada: Q${movimiento.monto} - ${conceptoReversa}`);
-      }
-    }
+    /*
+     * No existe reversa legacy de Caja Chica para ventas.
+     *
+     * El efectivo se revierte mediante saleInventoryService
+     * y la sesión operativa de caja.
+     */
 
     // ── BANCO ─────────────────────────────────────────────────────────────────────
 
@@ -1656,7 +1588,7 @@ exports.registrarReversaMovimientoVenta = async (
       }
     }
 
-    const reversasCreadas = reversasCajaCreadas + reversasBancoCreadas;
+    const reversasCreadas = reversasBancoCreadas;
 
     if (reversasCreadas === 0) {
       console.warn(`⚠️ No había movimientos confirmados para reversar de venta id=${ventaIdNumerico} (${referenciaVenta}). Los pendientes fueron anulados directamente.`);

@@ -582,6 +582,216 @@ async function registerFinancialMovement(connection, {
   };
 }
 
+
+/**
+ * Revierte total o parcialmente un pago financiero específico.
+ *
+ * Se utiliza cuando existe una devolución física real al cliente.
+ * Para efectivo, la salida pertenece a la sesión operativa ABIERTA
+ * del usuario que realiza la devolución.
+ *
+ * Una reparación cancelada es terminal, por lo que cada pago_indice
+ * admite como máximo una REVERSA.
+ */
+async function reverseFinancialPaymentAmount(connection, {
+  branchScope,
+  reparacionId,
+  pagoIndice,
+  montoCentavos,
+  usuarioId,
+}) {
+  requireSpecific(branchScope);
+
+  const empresaId =
+    Number(branchScope.empresaId);
+
+  const sucursalId =
+    Number(branchScope.sucursalId);
+
+  const indice =
+    Number(pagoIndice);
+
+  const amount =
+    Number(montoCentavos);
+
+  if (
+    !Number.isInteger(indice) ||
+    indice < 0
+  ) {
+    throw repairError(
+      'Índice de pago financiero inválido',
+      400,
+      'INVALID_REPAIR_PAYMENT_INDEX'
+    );
+  }
+
+  if (
+    !Number.isInteger(amount) ||
+    amount <= 0
+  ) {
+    return {
+      count: 0,
+      montoCentavos: 0,
+    };
+  }
+
+  const [[movement]] =
+    await connection.query(
+      `SELECT
+         id,
+         metodo,
+         monto_centavos
+       FROM reparacion_movimientos_financieros
+       WHERE empresa_id = ?
+         AND sucursal_id = ?
+         AND reparacion_id = ?
+         AND pago_indice = ?
+         AND accion = 'INGRESO'
+       LIMIT 1
+       FOR UPDATE`,
+      [
+        empresaId,
+        sucursalId,
+        reparacionId,
+        indice,
+      ]
+    );
+
+  if (!movement) {
+    throw repairError(
+      'El pago financiero original no está registrado',
+      409,
+      'REPAIR_FINANCIAL_PAYMENT_NOT_FOUND'
+    );
+  }
+
+  if (
+    amount >
+    Number(movement.monto_centavos)
+  ) {
+    throw repairError(
+      'La devolución excede el pago financiero original',
+      409,
+      'REPAIR_FINANCIAL_REFUND_EXCEEDS_PAYMENT'
+    );
+  }
+
+  const [[existing]] =
+    await connection.query(
+      `SELECT id
+       FROM reparacion_movimientos_financieros
+       WHERE empresa_id = ?
+         AND sucursal_id = ?
+         AND reparacion_id = ?
+         AND pago_indice = ?
+         AND accion = 'REVERSA'
+       LIMIT 1
+       FOR UPDATE`,
+      [
+        empresaId,
+        sucursalId,
+        reparacionId,
+        indice,
+      ]
+    );
+
+  if (existing) {
+    throw repairError(
+      'Este pago financiero ya fue revertido',
+      409,
+      'REPAIR_FINANCIAL_ALREADY_REVERSED'
+    );
+  }
+
+  const metodo =
+    String(
+      movement.metodo || ''
+    ).toUpperCase();
+
+  const esEfectivo =
+    metodo === 'EFECTIVO';
+
+  let sesionReversa = null;
+
+  if (esEfectivo) {
+    sesionReversa =
+      await cajaSesionModel
+        .resolverActivaParaOperacion(
+          connection,
+          {
+            empresaId,
+            sucursalId,
+            usuarioId,
+          }
+        );
+
+    await validateCajaScope(connection, {
+      branchScope,
+      cajaId: sesionReversa.caja_id,
+    });
+  }
+
+  const [result] =
+    await connection.query(
+      `INSERT INTO reparacion_movimientos_financieros
+       (
+         empresa_id,
+         sucursal_id,
+         reparacion_id,
+         pago_indice,
+         accion,
+         metodo,
+         monto_centavos,
+         caja_id,
+         caja_sesion_id,
+         usuario_id
+       )
+       VALUES (
+         ?,
+         ?,
+         ?,
+         ?,
+         'REVERSA',
+         ?,
+         ?,
+         ?,
+         ?,
+         ?
+       )`,
+      [
+        empresaId,
+        sucursalId,
+        reparacionId,
+        indice,
+        metodo,
+        amount,
+        esEfectivo
+          ? Number(sesionReversa.caja_id)
+          : null,
+        esEfectivo
+          ? Number(sesionReversa.id)
+          : null,
+        usuarioId || null,
+      ]
+    );
+
+  return {
+    count: 1,
+    ingresoId: Number(movement.id),
+    reversaId: Number(result.insertId),
+    metodo,
+    montoCentavos: amount,
+    cajaId:
+      esEfectivo
+        ? Number(sesionReversa.caja_id)
+        : null,
+    cajaSesionId:
+      esEfectivo
+        ? Number(sesionReversa.id)
+        : null,
+  };
+}
+
 /**
  * Revierte todos los movimientos financieros de una reparación.
  * Una reversa en efectivo pertenece a la sesión abierta ACTUAL.
@@ -678,6 +888,7 @@ module.exports = {
   requireSpecific,
   reverseAllRegalias,
   reverseAllRepuestos,
+  reverseFinancialPaymentAmount,
   reverseFinancialMovements,
   reverseRegalia,
   reverseRepuesto,

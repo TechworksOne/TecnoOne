@@ -53,7 +53,13 @@ const consolidated = { mode: 'consolidated', empresaId: 10, sucursalId: null, al
 const otherBranch  = { mode: 'specific',     empresaId: 10, sucursalId: 8, allowedSucursalIds: [7, 8] };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function fakeConn({ cajaExists = true, rows = [], duplicate = false, throwOnFinancial = false } = {}) {
+function fakeConn({
+  cajaExists = true,
+  sesionExists = true,
+  rows = [],
+  duplicate = false,
+  throwOnFinancial = false
+} = {}) {
   const calls = [];
   return {
     calls,
@@ -65,6 +71,24 @@ function fakeConn({ cajaExists = true, rows = [], duplicate = false, throwOnFina
     release() {},
     async query(sql, params) {
       calls.push({ sql, params });
+
+      if (/FROM caja_sesiones cs/.test(sql)) {
+        return [[
+          sesionExists
+            ? {
+                id: 51,
+                empresa_id: Number(params[0]),
+                sucursal_id: Number(params[1]),
+                caja_id: 3,
+                usuario_apertura_id: Number(params[2]),
+                fondo_inicial_centavos: 0,
+                fecha_apertura:
+                  '2026-08-09 05:00:00',
+              }
+            : undefined
+        ].filter(Boolean)];
+      }
+
       if (/SELECT id FROM cajas/.test(sql)) {
         return [[cajaExists ? { id: params[0] } : undefined].filter(Boolean)];
       }
@@ -145,13 +169,22 @@ async function main() {
     branchScope: specific, cajaId: 3,
   });
 
-  // ── 7. registerFinancialMovement efectivo sin caja → rechaza ──────────────
+  // ── 7. Efectivo sin sesión operativa abierta → rechaza ────────────────────
   await assert.rejects(
-    reparacionService.registerFinancialMovement(fakeConn(), {
-      branchScope: specific, reparacionId: 'REP001', pagoIndice: 0,
-      metodo: 'EFECTIVO', montoCentavos: 1000,
-    }),
-    e => e.code === 'REPAIR_CASH_REGISTER_REQUIRED'
+    reparacionService.registerFinancialMovement(
+      fakeConn({
+        sesionExists: false,
+      }),
+      {
+        branchScope: specific,
+        reparacionId: 'REP001',
+        pagoIndice: 0,
+        metodo: 'EFECTIVO',
+        montoCentavos: 1000,
+        usuarioId: 77,
+      }
+    ),
+    e => e.code === 'CAJA_SESION_REQUERIDA'
   );
 
   // ── 8. Fallo financiero NO deja inventario aplicado (semántica de rollback) ─
@@ -171,8 +204,12 @@ async function main() {
   // registerFinancialMovement debe lanzar error
   await assert.rejects(
     reparacionService.registerFinancialMovement(connFail, {
-      branchScope: specific, reparacionId: 'REP002', pagoIndice: 0,
-      metodo: 'EFECTIVO', montoCentavos: 5000, cajaId: 3,
+      branchScope: specific,
+      reparacionId: 'REP002',
+      pagoIndice: 0,
+      metodo: 'EFECTIVO',
+      montoCentavos: 5000,
+      usuarioId: 77,
     }),
     e => e.message.includes('DB error financiero simulado')
   );
@@ -227,7 +264,33 @@ async function main() {
     'registrarPagoSaldo debe aceptar transferencia y variantes de tarjeta'
   );
   // Acepta cajaId del body
-  assert.match(repCtrl, /cajaId/);
+  // La caja NO se recibe manualmente desde el controller.
+  // Para efectivo, reparacionInventoryService deriva caja_id y
+  // caja_sesion_id desde la sesión operativa abierta del usuario.
+  assert.doesNotMatch(
+    repCtrl,
+    /req\.body\.(cajaId|caja_id)/
+  );
+
+  const repairServiceSrc = fs.readFileSync(
+    path.join(
+      __dirname,
+      '..',
+      'services',
+      'reparacionInventoryService.js'
+    ),
+    'utf8'
+  );
+
+  assert.match(
+    repairServiceSrc,
+    /resolverActivaParaOperacion/
+  );
+
+  assert.match(
+    repairServiceSrc,
+    /caja_sesion_id/
+  );
 
   console.log('OK flujoReparacionMultisucursal: scope, cross-branch 404, consolidated, caja, rollback y análisis estático');
 }
