@@ -1737,7 +1737,13 @@ exports.registrarPagoSaldo = async (req, res) => {
 
     const tenant = repairScopeClause(req);
     const [[rep]] = await connection.query(
-      `SELECT r.id, r.estado, r.total, r.monto_anticipo, r.monto_pagado_adicional
+      `SELECT
+         r.id,
+         r.estado,
+         r.total,
+         r.monto_anticipo,
+         r.monto_pagado_adicional,
+         r.monto_pago_final
        FROM reparaciones r
        WHERE r.id = ?${tenant.sql}
        FOR UPDATE`,
@@ -1752,9 +1758,15 @@ exports.registrarPagoSaldo = async (req, res) => {
       return res.status(409).json({ success: false, message: 'No se puede registrar pago en una reparación cancelada' });
     }
 
-    const totalCentavos = rep.total || 0;
-    const yaPageadoCentavos = (rep.monto_anticipo || 0) + (rep.monto_pagado_adicional || 0);
-    const saldoPendienteCentavos = totalCentavos - yaPageadoCentavos;
+    const totalCentavos = Number(rep.total || 0);
+
+    const yaPagadoCentavos =
+      Number(rep.monto_anticipo || 0) +
+      Number(rep.monto_pagado_adicional || 0) +
+      Number(rep.monto_pago_final || 0);
+
+    const saldoPendienteCentavos =
+      Math.max(0, totalCentavos - yaPagadoCentavos);
 
     if (saldoPendienteCentavos <= 0) {
       await connection.rollback();
@@ -1772,12 +1784,21 @@ exports.registrarPagoSaldo = async (req, res) => {
 
     // Validar caja scope para efectivo; registrar en ledger financiero.
     const metodoLedger = metodoNorm.toUpperCase();
-    const [[pagoCount]] = await connection.query(
-      `SELECT COUNT(*) AS cnt FROM reparacion_movimientos_financieros
-       WHERE empresa_id = ? AND sucursal_id = ? AND reparacion_id = ? AND accion = 'INGRESO'`,
-      [Number(req.branchScope.empresaId), Number(req.branchScope.sucursalId), id]
+    const [[pagoIndiceRow]] = await connection.query(
+      `SELECT COALESCE(MAX(pago_indice), -1) + 1 AS siguiente_indice
+       FROM reparacion_movimientos_financieros
+       WHERE empresa_id = ?
+         AND sucursal_id = ?
+         AND reparacion_id = ?
+         AND accion = 'INGRESO'`,
+      [
+        Number(req.branchScope.empresaId),
+        Number(req.branchScope.sucursalId),
+        id,
+      ]
     );
-    const pagoIndice = Number(pagoCount.cnt);
+
+    const pagoIndice = Number(pagoIndiceRow.siguiente_indice);
 
     await reparacionInventoryService.registerFinancialMovement(connection, {
       branchScope: req.branchScope,
@@ -1788,10 +1809,39 @@ exports.registrarPagoSaldo = async (req, res) => {
       usuarioId,
     });
 
-    const nuevoMontoPagadoAdicional = (rep.monto_pagado_adicional || 0) + montoCentavos;
+    const nuevoMontoPagadoAdicional =
+      Number(rep.monto_pagado_adicional || 0) +
+      montoCentavos;
+
+    const nuevoTotalPagado =
+      Number(rep.monto_anticipo || 0) +
+      nuevoMontoPagadoAdicional +
+      Number(rep.monto_pago_final || 0);
+
+    const nuevoEstadoPago =
+      nuevoTotalPagado >= totalCentavos
+        ? 'pagado'
+        : nuevoTotalPagado > 0
+          ? 'parcial'
+          : 'pendiente';
+
     await connection.query(
-      `UPDATE reparaciones SET monto_pagado_adicional = ?, metodo_pago_adicional = ?, updated_by = ? WHERE id = ?${tenant.sql}`,
-      [nuevoMontoPagadoAdicional, metodoNorm, usuario, id, ...tenant.params]
+      `UPDATE reparaciones r
+       SET monto_pagado_adicional = ?,
+           metodo_pago_adicional = ?,
+           total_pagado = ?,
+           estado_pago = ?,
+           updated_by = ?
+       WHERE r.id = ?${tenant.sql}`,
+      [
+        nuevoMontoPagadoAdicional,
+        metodoNorm,
+        nuevoTotalPagado,
+        nuevoEstadoPago,
+        usuario,
+        id,
+        ...tenant.params,
+      ]
     );
 
     await connection.query(
@@ -1808,8 +1858,13 @@ exports.registrarPagoSaldo = async (req, res) => {
 
     await connection.commit();
 
-    const totalPagado = centavosAQuetzales((rep.monto_anticipo || 0) + nuevoMontoPagadoAdicional);
-    const saldoRestante = centavosAQuetzales(totalCentavos - (rep.monto_anticipo || 0) - nuevoMontoPagadoAdicional);
+    const totalPagado =
+      centavosAQuetzales(nuevoTotalPagado);
+
+    const saldoRestante =
+      centavosAQuetzales(
+        Math.max(0, totalCentavos - nuevoTotalPagado)
+      );
 
     res.json({
       success: true,
@@ -2404,7 +2459,10 @@ exports.completarReparacion = async (req, res) => {
       montoPagoFinalCentavos = montoBaseCentavos + interesMontoCentavos;
     }
 
-    const totalPagadoCentavos = (reparacion.monto_anticipo || 0) + montoPagoFinalCentavos;
+    const totalPagadoCentavos =
+      Number(reparacion.monto_anticipo || 0) +
+      Number(reparacion.monto_pagado_adicional || 0) +
+      montoPagoFinalCentavos;
     const totalReparacion     = reparacion.total || 0;
     const estadoPago =
       totalPagadoCentavos >= totalReparacion ? 'pagado' :
@@ -2491,10 +2549,27 @@ exports.completarReparacion = async (req, res) => {
     // ── 9. Registrar movimiento financiero en ledger (dentro de la transacción) ──
     // Pago + inventario + reparación son atómicos. Si el ledger falla → rollback total.
     if (metodoPagoFinal && montoPagoFinalCentavos > 0) {
+      const [[pagoIndiceRow]] = await connection.query(
+        `SELECT COALESCE(MAX(pago_indice), -1) + 1 AS siguiente_indice
+         FROM reparacion_movimientos_financieros
+         WHERE empresa_id = ?
+           AND sucursal_id = ?
+           AND reparacion_id = ?
+           AND accion = 'INGRESO'`,
+        [
+          Number(req.branchScope.empresaId),
+          Number(req.branchScope.sucursalId),
+          id,
+        ]
+      );
+
+      const pagoIndice =
+        Number(pagoIndiceRow.siguiente_indice);
+
       await reparacionInventoryService.registerFinancialMovement(connection, {
         branchScope: req.branchScope,
         reparacionId: id,
-        pagoIndice: 0,
+        pagoIndice,
         metodo: metodoPagoFinal,
         montoCentavos: montoPagoFinalCentavos,
         usuarioId: authUserId,

@@ -80,7 +80,10 @@ function makeConnection({
   ledgerRows        = [],
   financialRows     = [],
   repuestosConsumo  = [],
-  pagoCountRows     = [{ cnt: 0 }],
+  pagoCountRows     = [{ siguiente_indice: 0 }],
+  sessionExists     = true,
+  sessionId         = 44,
+  sessionCajaId     = 3,
 } = {}) {
   const conn = {
     calls:       [],
@@ -100,13 +103,18 @@ function makeConnection({
         return [[{
           id: 'REP001', empresa_id: 10, sucursal_id: 7,
           estado: 'EN_REPARACION', total: 50000,
-          monto_anticipo: 10000, monto_pagado_adicional: 0,
+          monto_anticipo: 10000,
+          monto_pagado_adicional: 0,
+          monto_pago_final: 0,
           cliente_nombre: 'Test Cliente',
         }]];
       }
 
-      // COUNT para pago_indice
-      if (/COUNT\(\*\).*reparacion_movimientos_financieros/.test(sql)) {
+      // Siguiente índice financiero
+      if (
+        /MAX\(pago_indice\)/.test(sql) &&
+        /FROM reparacion_movimientos_financieros/.test(sql)
+      ) {
         return [pagoCountRows];
       }
 
@@ -135,6 +143,18 @@ function makeConnection({
           const e = new Error('DB error financiero simulado'); throw e;
         }
         return [{ affectedRows: 1 }];
+      }
+
+      // Sesión operativa de caja (Sprint 2B)
+      if (/FROM caja_sesiones/.test(sql)) {
+        return [sessionExists ? [{
+          id: sessionId,
+          empresa_id: 10,
+          sucursal_id: 7,
+          caja_id: sessionCajaId,
+          usuario_apertura_id: 5,
+          fondo_inicial_centavos: 0,
+        }] : []];
       }
 
       // SELECT id FROM cajas (validateCajaScope)
@@ -257,20 +277,46 @@ async function main() {
     assert.strictEqual(updateAfterFail, -1, 'UPDATE de reparaciones no debe ejecutarse después del fallo financiero');
   }
 
-  // ── 3. registrarPagoSaldo: efectivo sin caja → 400, rollback ─────────────
+  // ── 3. registrarPagoSaldo: efectivo sin sesión → 409, rollback ──────────
   {
-    const r = req({ body: { monto: '100', metodoPago: 'efectivo', cajaId: null } });
-    const { res: response, conn } = await invoke('registrarPagoSaldo', r, {
-      repExists: true, financialFails: false,
+    const r = req({
+      body: {
+        monto: '100',
+        metodoPago: 'efectivo',
+      },
     });
-    // registerFinancialMovement lanza REPAIR_CASH_REGISTER_REQUIRED para efectivo sin caja
-    assert.strictEqual(conn.rolledBack, true, 'efectivo sin caja debe hacer rollback');
-    assert.strictEqual(conn.committed,  false);
+
+    const { res: response, conn } = await invoke(
+      'registrarPagoSaldo',
+      r,
+      {
+        repExists: true,
+        financialFails: false,
+        sessionExists: false,
+      }
+    );
+
+    assert.strictEqual(
+      response.statusCode,
+      409,
+      'efectivo sin sesión debe retornar 409'
+    );
+    assert.strictEqual(
+      response.body?.error,
+      'Debe abrir una caja en la sucursal activa antes de operar efectivo'
+    );
+    assert.strictEqual(conn.rolledBack, true);
+    assert.strictEqual(conn.committed, false);
   }
 
-  // ── 4. registrarPagoSaldo: efectivo con caja válida → éxito ──────────────
+  // ── 4. registrarPagoSaldo: efectivo con sesión válida → éxito ────────────
   {
-    const r = req({ body: { monto: '100', metodoPago: 'efectivo', cajaId: 3 } });
+    const r = req({
+      body: {
+        monto: '100',
+        metodoPago: 'efectivo',
+      },
+    });
     const { res: response, conn } = await invoke('registrarPagoSaldo', r, {
       repExists: true, financialFails: false,
     });
@@ -279,7 +325,10 @@ async function main() {
     const cajaQuery = conn.calls.find(c =>
       typeof c === 'object' && /SELECT id FROM cajas/.test(c.sql)
     );
-    assert.ok(cajaQuery, 'debe validar caja scope para efectivo');
+    assert.ok(
+      cajaQuery,
+      'debe validar la caja derivada de la sesión activa'
+    );
   }
 
   // ── 5. cancelarReparacion: llama reverseAllRepuestos y reverseFinancialMovements ──
@@ -436,7 +485,7 @@ async function main() {
       body: {
         repuestosUsados: '[]',
         regaliasUsadas: '[]',
-        pagoFinal: JSON.stringify({ monto: '100', metodo: 'EFECTIVO', caja_id: 3 }),
+        pagoFinal: JSON.stringify({ monto: '100', metodo: 'EFECTIVO' }),
       },
       files: [],
     });
@@ -452,13 +501,31 @@ async function main() {
         // Reparación existe, no COMPLETADA ni ENTREGADA
         if (/FROM reparaciones r[\s\S]*?WHERE r\.id/.test(sql)) {
           return [[{ id: 'REP001', empresa_id: 10, sucursal_id: 7,
-            estado: 'EN_REPARACION', total: 50000, monto_anticipo: 0, monto_pagado_adicional: 0,
+            estado: 'EN_REPARACION', total: 50000,
+            monto_anticipo: 0,
+            monto_pagado_adicional: 0,
+            monto_pago_final: 0,
             cliente_nombre: 'Test' }]];
         }
-        // SELECT id FROM cajas (caja activa para scope check)
+        // Sesión activa de caja
+        if (/FROM caja_sesiones/.test(sql)) {
+          return [[{
+            id: 44,
+            empresa_id: 10,
+            sucursal_id: 7,
+            caja_id: 3,
+            usuario_apertura_id: 5,
+          }]];
+        }
+        // SELECT id FROM cajas (scope secundario)
         if (/SELECT id FROM cajas/.test(sql)) return [[{ id: params[0] }]];
-        // Ledger financiero COUNT para pago_indice
-        if (/COUNT\(\*\).*reparacion_movimientos_financieros/.test(sql)) return [[{ cnt: 0 }]];
+        // Siguiente índice financiero
+        if (
+          /MAX\(pago_indice\)/.test(sql) &&
+          /FROM reparacion_movimientos_financieros/.test(sql)
+        ) {
+          return [[{ siguiente_indice: 0 }]];
+        }
         // Ledger financiero INSERT (éxito)
         if (/INSERT INTO reparacion_movimientos_financieros/.test(sql)) return [{ affectedRows: 1 }];
         // users query (getAuthUserName)
@@ -489,7 +556,7 @@ async function main() {
       body: {
         repuestosUsados: '[]',
         regaliasUsadas: '[]',
-        pagoFinal: JSON.stringify({ monto: '100', metodo: 'EFECTIVO', caja_id: 3 }),
+        pagoFinal: JSON.stringify({ monto: '100', metodo: 'EFECTIVO' }),
       },
       files: [],
     });
@@ -503,11 +570,28 @@ async function main() {
         this.calls.push({ sql, params });
         if (/FROM reparaciones r[\s\S]*?WHERE r\.id/.test(sql)) {
           return [[{ id: 'REP001', empresa_id: 10, sucursal_id: 7,
-            estado: 'EN_REPARACION', total: 50000, monto_anticipo: 0, monto_pagado_adicional: 0,
+            estado: 'EN_REPARACION', total: 50000,
+            monto_anticipo: 0,
+            monto_pagado_adicional: 0,
+            monto_pago_final: 0,
             cliente_nombre: 'Test' }]];
         }
+        if (/FROM caja_sesiones/.test(sql)) {
+          return [[{
+            id: 44,
+            empresa_id: 10,
+            sucursal_id: 7,
+            caja_id: 3,
+            usuario_apertura_id: 5,
+          }]];
+        }
         if (/SELECT id FROM cajas/.test(sql)) return [[{ id: params[0] }]];
-        if (/COUNT\(\*\).*reparacion_movimientos_financieros/.test(sql)) return [[{ cnt: 0 }]];
+        if (
+          /MAX\(pago_indice\)/.test(sql) &&
+          /FROM reparacion_movimientos_financieros/.test(sql)
+        ) {
+          return [[{ siguiente_indice: 0 }]];
+        }
         if (/INSERT INTO reparacion_movimientos_financieros/.test(sql)) {
           const e = new Error('DB error financiero simulado'); throw e;
         }
