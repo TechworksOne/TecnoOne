@@ -2,6 +2,7 @@
 // Devuelve reparaciones con fecha_entrega_programada y eventos del calendario.
 
 const db = require('../config/database');
+const auditoriaService = require('../services/auditoriaService');
 const reparacionInventoryService = require('../services/reparacionInventoryService');
 
 function isSuperadminTenant(req) {
@@ -226,7 +227,7 @@ exports.patchFechaEntrega = async (req, res) => {
 
     const tenant = repairTenantClause(req);
     const [rows] = await db.query(
-      `SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
+      `SELECT id, fecha_entrega_programada, nota_entrega_programada FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [id, ...tenant.params]
     );
     if (rows.length === 0) {
@@ -248,6 +249,14 @@ exports.patchFechaEntrega = async (req, res) => {
       [id, ...tenant.params]
     );
 
+    await auditoriaService.registrar({
+      req, empresaId: req.branchScope.empresaId, scope: 'branch', sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'REPARACION_FECHA_ENTREGA_CAMBIADA', entidad: 'REPARACION', entidadId: id,
+      descripcion: `Fecha programada de entrega de reparación ${id} actualizada`,
+      datosAnteriores: { fecha_entrega_programada: rows[0].fecha_entrega_programada, nota_entrega_programada: rows[0].nota_entrega_programada },
+      datosNuevos: { fecha_entrega_programada, nota_entrega_programada: nota_entrega_programada ?? null },
+    });
+
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('[agendaController] patchFechaEntrega error:', error);
@@ -262,7 +271,7 @@ exports.deleteFechaEntrega = async (req, res) => {
 
     const tenant = repairTenantClause(req);
     const [rows] = await db.query(
-      `SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
+      `SELECT id, fecha_entrega_programada, nota_entrega_programada FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [id, ...tenant.params]
     );
     if (rows.length === 0) {
@@ -277,6 +286,14 @@ exports.deleteFechaEntrega = async (req, res) => {
        WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [id, ...tenant.params]
     );
+
+    await auditoriaService.registrar({
+      req, empresaId: req.branchScope.empresaId, scope: 'branch', sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'REPARACION_FECHA_ENTREGA_CAMBIADA', entidad: 'REPARACION', entidadId: id,
+      descripcion: `Fecha programada de entrega de reparación ${id} retirada`,
+      datosAnteriores: { fecha_entrega_programada: rows[0].fecha_entrega_programada, nota_entrega_programada: rows[0].nota_entrega_programada },
+      datosNuevos: { fecha_entrega_programada: null, nota_entrega_programada: null },
+    });
 
     res.json({ success: true, message: 'Fecha de entrega eliminada' });
   } catch (error) {

@@ -106,6 +106,9 @@ async function adjust(data) {
   try {
     await connection.beginTransaction();
     const result = await changeWithConnection(connection, data);
+    if (typeof data.audit === 'function') {
+      await data.audit(connection, result);
+    }
     await connection.commit();
     return result;
   } catch (error) {

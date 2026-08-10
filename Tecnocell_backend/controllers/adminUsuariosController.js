@@ -490,7 +490,8 @@ exports.createUsuario = async (req, res) => {
       await auditoriaService.registrar({
         req,
         empresaId,
-        accion: 'CREAR',
+        scope: 'company',
+        accion: 'USUARIO_CREADO',
         entidad: 'USUARIO',
         entidadId: userId,
         descripcion:
@@ -935,7 +936,8 @@ exports.updateUsuario = async (req, res) => {
       await auditoriaService.registrar({
         req,
         empresaId: existing.empresa_id,
-        accion: 'EDITAR',
+        scope: 'company',
+        accion: 'USUARIO_EDITADO',
         entidad: 'USUARIO',
         entidadId: id,
         descripcion:
@@ -947,7 +949,8 @@ exports.updateUsuario = async (req, res) => {
         await auditoriaService.registrar({
           req,
           empresaId: existing.empresa_id,
-          accion: 'CAMBIAR_ROLES',
+          scope: 'company',
+          accion: 'USUARIO_ROL_CAMBIADO',
           entidad: 'USUARIO',
           entidadId: id,
           descripcion:
@@ -1219,10 +1222,8 @@ exports.toggleEstado = async (req, res) => {
       await auditoriaService.registrar({
         req,
         empresaId: user.empresa_id,
-        accion:
-          newActive
-            ? 'ACTIVAR'
-            : 'DESACTIVAR',
+        scope: 'company',
+        accion: 'USUARIO_ESTADO_CAMBIADO',
         entidad: 'USUARIO',
         entidadId: targetId,
         descripcion:
@@ -1401,6 +1402,7 @@ exports.deleteUsuario = async (req, res) => {
     await auditoriaService.registrar({
       req,
       empresaId: user.empresa_id,
+      scope: 'company',
       accion: 'ELIMINAR',
       entidad: 'USUARIO',
       entidadId: targetId,
@@ -1486,6 +1488,10 @@ exports.createRol = async (req, res) => {
       'INSERT INTO roles (empresa_id, nombre, descripcion, activo, es_sistema) VALUES (?, ?, ?, 1, 0)',
       [empresaId, nombre.toUpperCase(), descripcion || null]
     );
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'company', accion: 'ROL_CREADO', entidad: 'ROL', entidadId: result.insertId,
+      descripcion: `Rol ${nombre.toUpperCase()} creado`, datosNuevos: { nombre: nombre.toUpperCase(), descripcion: descripcion || null, activo: true },
+    });
     res.status(201).json({ success: true, message: 'Rol creado', data: { id: result.insertId } });
   } catch (error) {
     console.error('createRol error:', error);
@@ -1500,11 +1506,15 @@ exports.updateRol = async (req, res) => {
     const { id } = req.params;
     const { descripcion, activo } = req.body;
 
-    const [[existing]] = await db.query(
+    const [[roleExists]] = await db.query(
       'SELECT id FROM roles WHERE id = ? AND empresa_id = ?',
       [id, empresaId]
     );
-    if (!existing) return res.status(404).json({ success: false, message: 'Rol no encontrado' });
+    if (!roleExists) return res.status(404).json({ success: false, message: 'Rol no encontrado' });
+    const [[existing]] = await db.query(
+      'SELECT id, nombre, descripcion, activo FROM roles WHERE id = ? AND empresa_id = ?',
+      [id, empresaId]
+    );
 
     const fields = [];
     const params = [];
@@ -1517,6 +1527,12 @@ exports.updateRol = async (req, res) => {
         [...params, id, empresaId]
       );
     }
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'company', accion: activo !== undefined ? 'ROL_ESTADO_CAMBIADO' : 'ROL_EDITADO',
+      entidad: 'ROL', entidadId: id, descripcion: `Rol ${existing.nombre} actualizado`,
+      datosAnteriores: existing,
+      datosNuevos: { descripcion: descripcion === undefined ? existing.descripcion : descripcion, activo: activo === undefined ? Boolean(existing.activo) : Boolean(activo) },
+    });
     res.json({ success: true, message: 'Rol actualizado' });
   } catch (error) {
     console.error('updateRol error:', error);

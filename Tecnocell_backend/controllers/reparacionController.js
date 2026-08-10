@@ -749,6 +749,19 @@ exports.createReparacion = async (req, res) => {
       }
     }
     
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'branch', sucursalId,
+      accion: 'REPARACION_CREADA', entidad: 'REPARACION', entidadId: repairId,
+      descripcion: `Reparación ${repairId} creada para ${clienteNombre}`,
+      datosNuevos: {
+        estado, prioridad, cliente_id: clienteId || null, tipo_equipo: tipoEquipo,
+        marca, modelo, total_centavos: totalCentavos, anticipo_centavos: anticipoCentavos,
+        fecha_ingreso: fechaIngreso || new Date().toISOString().split('T')[0],
+      },
+      metadata: { sucursal_id: sucursalId, repuestos_solicitados: items.length },
+      connection, strict: true,
+    });
+
     await connection.commit();
     
     // ── 6. Guardar firma del cliente (post-commit, no fatal) ──────────────
@@ -890,15 +903,6 @@ exports.createReparacion = async (req, res) => {
       console.error('⚠️ Error generando contrato PDF:', pdfErr.message);
     }
 
-    await auditoriaService.registrar({
-      req,
-      empresaId,
-      accion: 'CREAR',
-      entidad: 'REPARACION',
-      entidadId: repairId,
-      descripcion: `Reparación ${repairId} creada para ${clienteNombre}`,
-      datosNuevos: req.body,
-    });
     res.status(201).json({
       success: true,
       message: 'Reparación creada exitosamente',
@@ -1378,18 +1382,22 @@ exports.changeRepairState = async (req, res) => {
       [...updateValues, id, ...tenant.params]
     );
     
-    await connection.commit();
-    
     await auditoriaService.registrar({
       req,
-      empresaId: req.tenant?.empresa_id ?? req.branchScope?.empresaId,
-      accion: 'EDITAR',
+      empresaId: Number(req.branchScope.empresaId),
+      scope: 'branch',
+      sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'REPARACION_ESTADO_CAMBIADO',
       entidad: 'REPARACION',
       entidadId: id,
-      descripcion: `Reparación ${id} actualizada`,
+      descripcion: `Estado de reparación ${id} cambiado de ${estadoAnterior} a ${estado}`,
       datosAnteriores: { estado: estadoAnterior },
-      datosNuevos: updates,
+      datosNuevos: { ...updates, estado, repuestos_consumidos: repuestosUsadosEstado },
+      metadata: { sucursal_id: Number(req.branchScope.sucursalId), historial_id: historialId },
+      connection,
+      strict: true,
     });
+    await connection.commit();
     res.json({
       success: true,
       message: 'Estado actualizado exitosamente',
@@ -2336,11 +2344,12 @@ exports.cancelarReparacion = async (req, res) => {
       ]
     );
 
-    await connection.commit();
     await auditoriaService.registrar({
       req,
-      empresaId: req.tenant?.empresa_id ?? req.branchScope?.empresaId,
-      accion: 'CANCELAR',
+      empresaId: Number(req.branchScope.empresaId),
+      scope: 'branch',
+      sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'REPARACION_CANCELADA',
       entidad: 'REPARACION',
       entidadId: id,
       descripcion: `Reparación ${id} cancelada`,
@@ -2351,7 +2360,11 @@ exports.cancelarReparacion = async (req, res) => {
         devolucion_monto: montoDev,
         monto_retenido: montoRetenido,
       },
+      metadata: { sucursal_id: Number(req.branchScope.sucursalId), reversa_inventario: true },
+      connection,
+      strict: true,
     });
+    await connection.commit();
     res.json({
       success: true,
       message: 'Reparación cancelada exitosamente',
@@ -2762,6 +2775,17 @@ exports.completarReparacion = async (req, res) => {
         usuarioId: authUserId,
       });
     }
+
+    await auditoriaService.registrar({
+      req, empresaId: reparacion.empresa_id, scope: 'branch',
+      sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'REPARACION_FINALIZADA', entidad: 'REPARACION', entidadId: id,
+      descripcion: `Reparación ${id} finalizada`,
+      datosAnteriores: { estado: reparacion.estado },
+      datosNuevos: { estado: 'COMPLETADA', estado_pago: estadoPago, repuestos_consumidos: repuestosUsados, regalias_consumidas: regaliasUsadas },
+      metadata: { sucursal_id: Number(req.branchScope.sucursalId), historial_id: historialId },
+      connection, strict: true,
+    });
 
     await connection.commit();
 

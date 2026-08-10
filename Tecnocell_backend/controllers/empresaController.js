@@ -258,6 +258,7 @@ const updateEmpresaMe = async (req, res) => {
 
     params.push(empresaId);
 
+    const [[empresaAnterior]] = await db.query(buildEmpresaSelect(), [empresaId]);
     const [result] = await db.query(
       `UPDATE empresas
        SET ${updates.join(', ')}
@@ -277,10 +278,12 @@ const updateEmpresaMe = async (req, res) => {
     await auditoriaService.registrar({
       req,
       empresaId,
-      accion: 'EDITAR',
+      scope: 'company',
+      accion: 'EMPRESA_CONFIGURACION_EDITADA',
       entidad: 'EMPRESA',
       entidadId: empresaId,
       descripcion: 'Configuración de empresa actualizada',
+      datosAnteriores: empresaAnterior,
       datosNuevos: allowedFields,
     });
     return res.json({
