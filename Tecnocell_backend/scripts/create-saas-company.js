@@ -125,17 +125,6 @@ async function createSaasCompany() {
       `Ya existe un usuario con email: ${admin.email}`
     );
 
-    const [roles] = await connection.query(
-      'SELECT id, nombre FROM roles WHERE nombre = ? LIMIT 1',
-      ['ADMINISTRADOR']
-    );
-
-    if (roles.length === 0) {
-      throw new Error('No existe el rol ADMINISTRADOR en la tabla roles');
-    }
-
-    const administradorRoleId = roles[0].id;
-
     const [empresaResult] = await connection.query(
       `
         INSERT INTO empresas (
@@ -170,6 +159,13 @@ async function createSaasCompany() {
     );
 
     const empresaId = empresaResult.insertId;
+    const [roleResult] = await connection.query(
+      `INSERT INTO roles (
+         empresa_id, nombre, descripcion, activo, es_sistema
+       ) VALUES (?, 'ADMINISTRADOR', 'Administrador de la empresa', 1, 1)`,
+      [empresaId]
+    );
+    const administradorRoleId = roleResult.insertId;
     const passwordHash = await bcrypt.hash(admin.password, 10);
 
     const [userResult] = await connection.query(
@@ -221,6 +217,12 @@ async function createSaasCompany() {
     await connection.query(
       'INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)',
       [adminUserId, administradorRoleId]
+    );
+
+    await connection.query(
+      `INSERT IGNORE INTO rol_permisos (empresa_id, rol_id, permiso_id)
+       SELECT ?, ?, id FROM permisos`,
+      [empresaId, administradorRoleId]
     );
 
     await connection.commit();

@@ -8,7 +8,7 @@ function requirePermission(code) {
       }
       const permissions = await permisoService.getEffectivePermissions(req);
       req.user.permissions = permissions;
-      if (permissions.includes('*') || permissions.includes(code)) return next();
+      if (permissions.includes(code)) return next();
       return res.status(403).json({
         message: 'No tienes permisos para esta acción',
         permission: code,
