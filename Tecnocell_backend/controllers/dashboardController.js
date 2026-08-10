@@ -1,16 +1,8 @@
 const pool = require('../config/database');
 const planAccess = require('../services/planAccessService');
+const permisoService = require('../services/permisoService');
 
 // ── Role helpers ──────────────────────────────────────────────────────────────
-function resolveRole(user) {
-  const list   = Array.isArray(user.roles) ? user.roles : [];
-  const legacy = String(user.role || '').toLowerCase().trim();
-  if (list.includes('ADMINISTRADOR') || legacy === 'admin' || legacy === 'administrador') return 'admin';
-  if (list.includes('TECNICO')       || legacy === 'tecnico')                             return 'tecnico';
-  if (list.includes('VENTAS')        || legacy === 'ventas')                              return 'ventas';
-  return 'ventas'; // empleado sin rol específico → sin datos sensibles
-}
-
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
 }
@@ -33,6 +25,24 @@ function tenantClause(req, alias = null) {
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
   const prefix = alias ? `${alias}.` : '';
   return { sql: ` AND ${prefix}empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
+}
+
+function tenantBranchClause(req, alias = null) {
+  if (!req.branchScope) return tenantClause(req, alias);
+  const prefix = alias ? `${alias}.` : '';
+  const empresaId = Number(req.branchScope.empresaId);
+  if (req.branchScope.mode === 'specific') {
+    return {
+      sql: ` AND ${prefix}empresa_id = ? AND ${prefix}sucursal_id = ?`,
+      params: [empresaId, Number(req.branchScope.sucursalId)],
+    };
+  }
+  const allowed = (req.branchScope.allowedSucursalIds || []).map(Number).filter(Number.isInteger);
+  if (!allowed.length) return { sql: ' AND 1 = 0', params: [] };
+  return {
+    sql: ` AND ${prefix}empresa_id = ? AND ${prefix}sucursal_id IN (${allowed.map(() => '?').join(',')})`,
+    params: [empresaId, ...allowed],
+  };
 }
 
 async function getDashboardModuleAccess(req, connection = pool) {
@@ -67,21 +77,16 @@ function canReadTechnicalDashboard(modules) {
 }
 
 exports.getDashboardStats = async (req, res) => {
-  const callerRole = resolveRole(req.user);
-  if (callerRole === 'tecnico') {
-    return res.status(403).json({ error: 'Acceso denegado. Endpoint exclusivo para administradores.' });
-  }
-
   try {
     const connection = await pool.getConnection();
     const moduleAccess = await getDashboardModuleAccess(req, connection);
     const includeTechnical = canReadTechnicalDashboard(moduleAccess);
-    const ventasTenant = tenantClause(req);
-    const cajaTenant = tenantClause(req);
-    const comprasTenant = tenantClause(req);
+    const ventasTenant = tenantBranchClause(req);
+    const cajaTenant = tenantBranchClause(req);
+    const comprasTenant = tenantBranchClause(req);
     const productosTenant = tenantClause(req);
-    const reparacionesTenant = tenantClause(req);
-    const reparacionesAliasTenant = tenantClause(req, 'r');
+    const reparacionesTenant = tenantBranchClause(req);
+    const reparacionesAliasTenant = tenantBranchClause(req, 'r');
     const clientesTenant = tenantClause(req);
     const cotizacionesTenant = tenantClause(req);
 
@@ -376,11 +381,6 @@ exports.getDashboardStats = async (req, res) => {
 // Dashboard técnico — estadísticas filtradas por técnico autenticado
 // ═══════════════════════════════════════════════════════════════════════════
 exports.getTecnicoDashboardStats = async (req, res) => {
-  // Solo técnicos pueden acceder
-  if (resolveRole(req.user) !== 'tecnico') {
-    return res.status(403).json({ error: 'Acceso denegado. Endpoint exclusivo para técnicos.' });
-  }
-
   const moduleAccess = await getDashboardModuleAccess(req);
   if (!canReadTechnicalDashboard(moduleAccess)) {
     return res.status(403).json({
@@ -400,8 +400,8 @@ exports.getTecnicoDashboardStats = async (req, res) => {
   console.log('[DashboardTecnico] usando filtro tecnico_asignado_id:', req.user?.id);
 
   const tecnicoId = req.user.id;
-  const reparacionesTenant = tenantClause(req);
-  const reparacionesAliasTenant = tenantClause(req, 'r');
+  const reparacionesTenant = tenantBranchClause(req);
+  const reparacionesAliasTenant = tenantBranchClause(req, 'r');
 
   try {
     const connection = await pool.getConnection();
@@ -574,8 +574,8 @@ exports.getVentasDashboard = async (req, res) => {
     const connection = await pool.getConnection();
     const moduleAccess = await getDashboardModuleAccess(req, connection);
     const includeTechnical = canReadTechnicalDashboard(moduleAccess);
-    const ventasTenant = tenantClause(req);
-    const reparacionesTenant = tenantClause(req);
+    const ventasTenant = tenantBranchClause(req);
+    const reparacionesTenant = tenantBranchClause(req);
     const productosTenant = tenantClause(req);
     const cotizacionesTenant = tenantClause(req);
 
@@ -748,8 +748,17 @@ exports.getVentasDashboard = async (req, res) => {
 
 // ── Dispatcher unificado: detecta rol y devuelve el dashboard correcto ─────────
 exports.getDashboard = async (req, res) => {
-  const role = resolveRole(req.user);
-  if (role === 'tecnico') return exports.getTecnicoDashboardStats(req, res);
-  if (role === 'ventas')  return exports.getVentasDashboard(req, res);
-  return exports.getDashboardStats(req, res); // admin
+  if (await permisoService.hasPermission(req, 'dashboard.ver_financiero')) {
+    return exports.getDashboardStats(req, res);
+  }
+  if (await permisoService.hasPermission(req, 'dashboard.ver_tecnico')) {
+    return exports.getTecnicoDashboardStats(req, res);
+  }
+  if (await permisoService.hasPermission(req, 'dashboard.ver_ventas')) {
+    return exports.getVentasDashboard(req, res);
+  }
+  return res.status(403).json({
+    success: false,
+    message: 'No tienes permisos para una vista del dashboard',
+  });
 };

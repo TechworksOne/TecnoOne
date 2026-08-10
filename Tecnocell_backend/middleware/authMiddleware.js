@@ -190,31 +190,4 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-// Middleware para verificar roles.
-const verifyRole = (...allowedRoles) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ message: 'No autorizado' });
-    }
-
-    const userRoles = Array.isArray(req.user.roles)
-      ? req.user.roles
-      : [];
-
-    const hasRole = allowedRoles.some(
-      (allowedRole) =>
-        userRoles.includes(allowedRole) ||
-        req.user.role === allowedRole
-    );
-
-    if (!hasRole) {
-      return res.status(403).json({
-        message: 'No tienes permisos para esta acción',
-      });
-    }
-
-    return next();
-  };
-};
-
-module.exports = { verifyToken, verifyRole };
+module.exports = { verifyToken };

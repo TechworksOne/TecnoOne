@@ -244,8 +244,16 @@ exports.asignarTecnico = async (req, res) => {
 
     if (tecnicoId) {
       const [tecnicos] = await db.query(
-        'SELECT id FROM users WHERE id = ? AND empresa_id = ? AND active = TRUE LIMIT 1',
-        [tecnicoId, reparacion.empresa_id]
+        `SELECT u.id FROM users u
+         WHERE u.id = ? AND u.empresa_id = ? AND u.active = TRUE
+           AND EXISTS (
+             SELECT 1 FROM usuario_sucursales us
+             WHERE us.usuario_id = u.id
+               AND us.empresa_id = u.empresa_id
+               AND us.sucursal_id = ?
+           )
+         LIMIT 1`,
+        [tecnicoId, reparacion.empresa_id, reparacion.sucursal_id]
       );
 
       if (tecnicos.length === 0) {

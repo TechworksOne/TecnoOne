@@ -2,16 +2,13 @@
 // Gestiona la asignación de reparaciones a técnicos
 const db = require('../config/database');
 const auditoriaService = require('../services/auditoriaService');
+const permisoService = require('../services/permisoService');
+const reparacionInventoryService = require('../services/reparacionInventoryService');
 
 // Estados que ya no son trabajo activo
 const ESTADOS_INACTIVOS = ['CANCELADA', 'ENTREGADA'];
 
 // ── Helper: verificar si el usuario es admin ───────────────────────────────
-function isAdmin(user) {
-  const roles = Array.isArray(user.roles) ? user.roles : [];
-  return roles.includes('ADMINISTRADOR') || user.role === 'admin';
-}
-
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
 }
@@ -31,12 +28,15 @@ function requireTenantEmpresaId(req) {
 }
 
 function addRepairTenantFilter(req, where, params, alias = 'r') {
-  if (isSuperadminTenant(req)) return where;
-  params.push(requireTenantEmpresaId(req));
-  return `${where} AND ${alias}.empresa_id = ?`;
+  const scope = repairTenantClause(req, alias);
+  params.push(...scope.params);
+  return `${where}${scope.sql}`;
 }
 
 function repairTenantClause(req, alias = 'r') {
+  if (req.branchScope) {
+    return reparacionInventoryService.reparacionScopeClause(req.branchScope, alias);
+  }
   return isSuperadminTenant(req)
     ? { sql: '', params: [] }
     : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
@@ -69,7 +69,7 @@ const OT_SELECT = `
 exports.getOrdenesTrabajo = async (req, res) => {
   try {
     const { estado, tecnico_id, busqueda, limit = 200 } = req.query;
-    const userIsAdmin = isAdmin(req.user);
+    const canViewAll = await permisoService.hasPermission(req, 'ordenes_trabajo.ver_todas');
 
     const params = [];
 
@@ -78,7 +78,7 @@ exports.getOrdenesTrabajo = async (req, res) => {
     where = addRepairTenantFilter(req, where, params);
 
     // Restricción de rol: técnico solo ve sus propias reparaciones asignadas
-    if (!userIsAdmin) {
+    if (!canViewAll) {
       where += ' AND r.tecnico_asignado_id = ?';
       params.push(req.user.id);
     }
@@ -88,7 +88,7 @@ exports.getOrdenesTrabajo = async (req, res) => {
       where += ' AND r.estado = ?';
       params.push(estado);
     }
-    if (tecnico_id !== undefined && userIsAdmin) {
+    if (tecnico_id !== undefined && canViewAll) {
       const tid = parseInt(tecnico_id, 10);
       if (tid === 0) {
         // Sin asignar
@@ -138,14 +138,14 @@ exports.getOrdenesTrabajo = async (req, res) => {
 exports.getHistorialOT = async (req, res) => {
   try {
     const { busqueda, tecnico_id, limit = 100 } = req.query;
-    const userIsAdmin = isAdmin(req.user);
+    const canViewAll = await permisoService.hasPermission(req, 'ordenes_trabajo.ver_todas');
     const params = [];
 
     let where = `WHERE r.estado IN ('CANCELADA','ENTREGADA')`;
     where = addRepairTenantFilter(req, where, params);
 
     // Técnico solo ve su propio historial
-    if (!userIsAdmin) {
+    if (!canViewAll) {
       where += ' AND r.tecnico_asignado_id = ?';
       params.push(req.user.id);
     } else if (tecnico_id !== undefined) {
@@ -196,15 +196,15 @@ exports.getHistorialOT = async (req, res) => {
 // Técnico: solo sus propios conteos.
 exports.getResumenOT = async (req, res) => {
   try {
-    const userIsAdmin = isAdmin(req.user);
+    const canViewAll = await permisoService.hasPermission(req, 'ordenes_trabajo.ver_todas');
     const tenant = repairTenantClause(req);
 
-    if (userIsAdmin) {
+    if (canViewAll) {
       // Conteos por estado (solo activos)
       const [stateCounts] = await db.query(
         `SELECT estado, COUNT(*) AS total
          FROM reparaciones
-         WHERE estado NOT IN ('CANCELADA','ENTREGADA')${tenant.sql.replace('r.', '')}
+         WHERE estado NOT IN ('CANCELADA','ENTREGADA')${tenant.sql.replaceAll('r.', '')}
          GROUP BY estado`,
         tenant.params
       );
@@ -214,7 +214,7 @@ exports.getResumenOT = async (req, res) => {
         `SELECT COUNT(*) AS total
          FROM reparaciones
          WHERE tecnico_asignado_id IS NULL
-           AND estado NOT IN ('CANCELADA','ENTREGADA')${tenant.sql.replace('r.', '')}`,
+           AND estado NOT IN ('CANCELADA','ENTREGADA')${tenant.sql.replaceAll('r.', '')}`,
         tenant.params
       );
 
@@ -273,7 +273,7 @@ exports.getResumenOT = async (req, res) => {
          FROM reparaciones
          WHERE tecnico_asignado_id = ?
            AND estado NOT IN ('CANCELADA','ENTREGADA')
-           ${tenant.sql.replace('r.', '')}
+           ${tenant.sql.replaceAll('r.', '')}
          GROUP BY estado`,
         [userId, ...tenant.params]
       );
@@ -285,7 +285,7 @@ exports.getResumenOT = async (req, res) => {
            AND estado NOT IN ('CANCELADA','ENTREGADA')
            AND fecha_entrega_programada IS NOT NULL
            AND fecha_entrega_programada < NOW()
-           ${tenant.sql.replace('r.', '')}`,
+           ${tenant.sql.replaceAll('r.', '')}`,
         [userId, ...tenant.params]
       );
 
@@ -319,7 +319,7 @@ exports.asignarTecnico = async (req, res) => {
 
     // Verificar que la reparación existe
     const tenant = repairTenantClause(req);
-    const [[rep]] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`, [id, ...tenant.params]);
+    const [[rep]] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`, [id, ...tenant.params]);
     if (!rep) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
     }
@@ -330,8 +330,15 @@ exports.asignarTecnico = async (req, res) => {
               CONCAT(COALESCE(p.nombres,''), ' ', COALESCE(p.apellidos,'')) AS nombre_completo
        FROM users u
        LEFT JOIN user_profiles p ON p.user_id = u.id
-       WHERE u.id = ? AND u.active = 1${isSuperadminTenant(req) ? '' : ' AND u.empresa_id = ?'}`,
-      isSuperadminTenant(req) ? [parseInt(tecnico_id, 10)] : [parseInt(tecnico_id, 10), requireTenantEmpresaId(req)]
+       WHERE u.id = ? AND u.active = 1
+         AND u.empresa_id = ?
+         AND EXISTS (
+           SELECT 1 FROM usuario_sucursales us
+           WHERE us.usuario_id = u.id
+             AND us.empresa_id = u.empresa_id
+             AND us.sucursal_id = ?
+         )`,
+      [parseInt(tecnico_id, 10), requireTenantEmpresaId(req), Number(req.branchScope.sucursalId)]
     );
     if (!tecnico) {
       return res.status(404).json({ success: false, message: 'Técnico no encontrado o inactivo' });
@@ -344,7 +351,7 @@ exports.asignarTecnico = async (req, res) => {
              tecnico_asignado_id = ?,
              asignado_por = ?,
              asignado_en = NOW()
-       WHERE id = ?${tenant.sql.replace('r.', '')}`,
+       WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [tecnico.name, parseInt(tecnico_id, 10), req.user.id, id, ...tenant.params]
     );
 
@@ -393,7 +400,7 @@ exports.quitarAsignacion = async (req, res) => {
     const { id } = req.params;
 
     const tenant = repairTenantClause(req);
-    const [[rep]] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`, [id, ...tenant.params]);
+    const [[rep]] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`, [id, ...tenant.params]);
     if (!rep) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
     }
@@ -404,7 +411,7 @@ exports.quitarAsignacion = async (req, res) => {
              tecnico_asignado_id = NULL,
              asignado_por = NULL,
              asignado_en = NULL
-       WHERE id = ?${tenant.sql.replace('r.', '')}`,
+       WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [id, ...tenant.params]
     );
 
@@ -419,6 +426,13 @@ exports.quitarAsignacion = async (req, res) => {
 // Devuelve usuarios que pueden recibir OT (rol ADMINISTRADOR o TECNICO, activos)
 exports.getTecnicos = async (req, res) => {
   try {
+    const allowedSucursalIds = req.branchScope.mode === 'specific'
+      ? [Number(req.branchScope.sucursalId)]
+      : req.branchScope.allowedSucursalIds.map(Number).filter(Number.isInteger);
+    if (!allowedSucursalIds.length) {
+      return res.json({ success: true, data: [] });
+    }
+    const branchPlaceholders = allowedSucursalIds.map(() => '?').join(',');
     const [rows] = await db.query(
       `SELECT
          u.id,
@@ -431,13 +445,17 @@ exports.getTecnicos = async (req, res) => {
        LEFT JOIN user_profiles p ON p.user_id = u.id
        INNER JOIN user_roles ur ON ur.user_id = u.id
        INNER JOIN roles r ON r.id = ur.role_id
-        WHERE u.active = 1${isSuperadminTenant(req) ? '' : ' AND u.empresa_id = ?'}
+       INNER JOIN usuario_sucursales us
+         ON us.usuario_id = u.id
+        AND us.empresa_id = u.empresa_id
+        AND us.sucursal_id IN (${branchPlaceholders})
+        WHERE u.active = 1 AND u.empresa_id = ?
        GROUP BY u.id, u.username, u.name, u.email, p.nombres, p.apellidos
        HAVING SUM(
            CASE WHEN LOWER(r.nombre) IN ('admin','administrador','tecnico','técnico') THEN 1 ELSE 0 END
          ) > 0
        ORDER BY nombre_completo, u.username`,
-      isSuperadminTenant(req) ? [] : [requireTenantEmpresaId(req)]
+      [...allowedSucursalIds, requireTenantEmpresaId(req)]
     );
 
     const result = rows.map(u => ({

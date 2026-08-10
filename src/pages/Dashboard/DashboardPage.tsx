@@ -5,6 +5,8 @@ import API_URL from "../../services/config";
 import { formatMoney as formatMoneyBase } from "../../lib/format";
 import { useAuth } from "../../store/useAuth";
 import { useEmpresa } from "../../store/useEmpresa";
+import { useSucursalContext } from "../../store/useSucursalContext";
+import { ACTIVE_BRANCH_STORAGE_KEY } from "../../lib/branchContext";
 import {
   ShoppingCart, Package, AlertTriangle, FileText, Wrench,
   DollarSign, TrendingUp, TrendingDown, Users, ClipboardCheck, ClipboardX,
@@ -1493,6 +1495,9 @@ function getStoredAuthToken(): string | null {
 export default function DashboardPage() {
   const { user, hasModule } = useAuth();
   const { loadEmpresa } = useEmpresa();
+  const contextVersion = useSucursalContext(state => state.contextVersion);
+  const branchContextLoading = useSucursalContext(state => state.loading);
+  const branchContextUserId = useSucursalContext(state => state.currentUserId);
 
   // Detectar rol usando array RBAC (user.roles) y campo legado (user.role)
   const userRoles: string[] = user?.roles ?? [];
@@ -1518,6 +1523,15 @@ export default function DashboardPage() {
   }, [user, loadEmpresa]);
 
   useEffect(() => {
+    if (
+      !user ||
+      branchContextLoading ||
+      branchContextUserId !== Number(user.id)
+    ) return;
+
+    const activeBranch = localStorage.getItem(ACTIVE_BRANCH_STORAGE_KEY);
+    if (!activeBranch) return;
+
     let mounted = true;
 
     const loadDashboard = async () => {
@@ -1550,6 +1564,7 @@ export default function DashboardPage() {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
+            "X-Sucursal-Id": activeBranch,
           },
         });
 
@@ -1589,7 +1604,7 @@ export default function DashboardPage() {
 
     loadDashboard();
     return () => { mounted = false; };
-  }, [user]);
+  }, [user, contextVersion, branchContextLoading, branchContextUserId]);
 
   if (loading) {
     return (

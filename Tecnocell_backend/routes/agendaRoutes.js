@@ -6,6 +6,7 @@ const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePlanModule = require('../middleware/requirePlanModule');
 const requirePermission = require('../middleware/requirePermission');
+const branchScope = require('../middleware/branchScope');
 
 router.use(verifyToken);
 router.use(tenantScope);
@@ -13,7 +14,7 @@ router.use(checkEmpresaActiva);
 router.use(requirePlanModule('taller_operativo'));
 
 // GET /api/agenda/entregas  — listado de reparaciones con fecha de entrega programada
-router.get('/entregas', requirePermission('agenda.ver'), agendaController.getEntregas);
+router.get('/entregas', requirePermission('agenda.ver'), branchScope, agendaController.getEntregas);
 
 // CRUD /api/agenda/eventos  — eventos y notas libres del calendario
 router.get('/usuarios', requirePermission('agenda.ver'), agendaController.getUsuariosSimple);

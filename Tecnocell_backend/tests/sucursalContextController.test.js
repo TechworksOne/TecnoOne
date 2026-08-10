@@ -7,8 +7,12 @@ const sucursales = [
 require.cache[require.resolve('../services/sucursalService')] = {
   exports: { listarSucursalesActivasUsuario: async () => sucursales },
 };
+let canConsolidate = true;
 require.cache[require.resolve('../services/permisoService')] = {
-  exports: { hasPermission: async (_req, code) => code === 'sucursales.contexto_consolidado' },
+  exports: { hasPermission: async (req, code) => {
+    assert.strictEqual(req.tenant.empresa_id, 20);
+    return canConsolidate && code === 'sucursales.contexto_consolidado';
+  } },
 };
 const branchScopeStub = () => {};
 branchScopeStub.CONSOLIDATED_PERMISSION = 'sucursales.contexto_consolidado';
@@ -17,7 +21,7 @@ require.cache[require.resolve('../middleware/branchScope')] = { exports: branchS
 const controller = require('../controllers/sucursalContextController');
 
 async function main() {
-  const req = { user: { id: 5, userId: 5, empresa_id: 10, empresaId: 10 } };
+  const req = { tenant: { empresa_id: 20 }, user: { id: 28, userId: 28, empresa_id: 20, empresaId: 20 } };
   const res = {
     statusCode: 200,
     body: null,
@@ -34,6 +38,13 @@ async function main() {
       defaultSucursalId: 7,
     },
   });
+
+  canConsolidate = false;
+  await controller.listarMisSucursales(
+    { tenant: { empresa_id: 20 }, user: { id: 29, userId: 29, empresa_id: 20, empresaId: 20 } },
+    res
+  );
+  assert.strictEqual(res.body.data.canUseConsolidated, false);
 
   console.log('OK sucursalContextController: contrato extendido de mis-sucursales');
 }

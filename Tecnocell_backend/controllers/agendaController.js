@@ -2,6 +2,7 @@
 // Devuelve reparaciones con fecha_entrega_programada y eventos del calendario.
 
 const db = require('../config/database');
+const reparacionInventoryService = require('../services/reparacionInventoryService');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -24,6 +25,9 @@ function requireTenantEmpresaId(req) {
 }
 
 function repairTenantClause(req, alias = 'r') {
+  if (req.branchScope) {
+    return reparacionInventoryService.reparacionScopeClause(req.branchScope, alias);
+  }
   return isGlobalSuperadminTenant(req)
     ? { sql: '', params: [] }
     : { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
@@ -222,7 +226,7 @@ exports.patchFechaEntrega = async (req, res) => {
 
     const tenant = repairTenantClause(req);
     const [rows] = await db.query(
-      `SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`,
+      `SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [id, ...tenant.params]
     );
     if (rows.length === 0) {
@@ -234,13 +238,13 @@ exports.patchFechaEntrega = async (req, res) => {
          SET fecha_entrega_programada = ?,
              nota_entrega_programada  = ?,
              updated_at               = NOW()
-       WHERE id = ?${tenant.sql.replace('r.', '')}`,
+       WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [fecha_entrega_programada, nota_entrega_programada ?? null, id, ...tenant.params]
     );
 
     const [[updated]] = await db.query(
       `SELECT id, fecha_entrega_programada, nota_entrega_programada, estado
-         FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`,
+         FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [id, ...tenant.params]
     );
 
@@ -258,7 +262,7 @@ exports.deleteFechaEntrega = async (req, res) => {
 
     const tenant = repairTenantClause(req);
     const [rows] = await db.query(
-      `SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replace('r.', '')}`,
+      `SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [id, ...tenant.params]
     );
     if (rows.length === 0) {
@@ -270,7 +274,7 @@ exports.deleteFechaEntrega = async (req, res) => {
          SET fecha_entrega_programada = NULL,
              nota_entrega_programada  = NULL,
              updated_at               = NOW()
-       WHERE id = ?${tenant.sql.replace('r.', '')}`,
+       WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [id, ...tenant.params]
     );
 

@@ -7,12 +7,14 @@ const tenantScope = require('../middleware/tenantScope');
 const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const requirePlanModule = require('../middleware/requirePlanModule');
 const requirePermission = require('../middleware/requirePermission');
+const branchScope = require('../middleware/branchScope');
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
 router.use(tenantScope);
 router.use(checkEmpresaActiva);
 router.use(requirePlanModule('taller_operativo'));
+router.use(branchScope);
 
 // GET /api/ot/resumen  — KPI cards del dashboard (activas, por estado, carga técnico)
 router.get('/resumen', requirePermission('ordenes_trabajo.ver'), otController.getResumenOT);

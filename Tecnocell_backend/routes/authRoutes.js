@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const tenantScope = require('../middleware/tenantScope');
 const loginRateLimiter = require('../middleware/loginRateLimiter');
 const sucursalContextController = require('../controllers/sucursalContextController');
 
@@ -12,7 +13,7 @@ router.get('/verify', verifyToken, authController.verifyToken);
 
 // Rutas protegidas
 router.get('/me', verifyToken, authController.getMe);
-router.get('/mis-sucursales', verifyToken, sucursalContextController.listarMisSucursales);
+router.get('/mis-sucursales', verifyToken, tenantScope, sucursalContextController.listarMisSucursales);
 router.put('/me/perfil', verifyToken, authController.uploadMe.single('foto_perfil'), authController.updateMePerfil);
 
 module.exports = router;
