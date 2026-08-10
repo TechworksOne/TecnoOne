@@ -6,6 +6,7 @@ const checkEmpresaActiva = require('../middleware/checkEmpresaActiva');
 const reportesController = require('../controllers/reportesController');
 const requirePermission = require('../middleware/requirePermission');
 const requirePlanModule = require('../middleware/requirePlanModule');
+const branchScope = require('../middleware/branchScope');
 
 const soloAdmin = [
   verifyToken,
@@ -13,6 +14,7 @@ const soloAdmin = [
   checkEmpresaActiva,
   requirePlanModule('reportes_comerciales'),
   requirePermission('reportes.ver'),
+  branchScope,
 ];
 
 router.get('/resumen',               ...soloAdmin, reportesController.getResumen);

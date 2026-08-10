@@ -1,31 +1,10 @@
 const db = require('../config/database');
 const { parsePagination, parseLimit } = require('../utils/pagination');
+const {
+  normalizeScope, reportScopeClause, inventoryStockClause, validateDate, validateRange,
+} = require('../services/reportScopeService');
 
 // ===== HELPERS =====
-
-function isSuperadminTenant(req) {
-  return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
-}
-
-function getTenantEmpresaId(req) {
-  return req.tenant?.empresa_id ?? req.user?.empresa_id ?? null;
-}
-
-function requireTenantEmpresaId(req) {
-  const empresaId = getTenantEmpresaId(req);
-  if (empresaId === null || empresaId === undefined || empresaId === '') {
-    const error = new Error('Empresa requerida');
-    error.statusCode = 403;
-    throw error;
-  }
-  return empresaId;
-}
-
-function tenantClause(req, alias = null) {
-  if (isSuperadminTenant(req)) return { sql: '', params: [] };
-  const prefix = alias ? `${alias}.` : '';
-  return { sql: ` AND ${prefix}empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
-}
 
 function parseItems(itemsField) {
   if (!itemsField) return [];
@@ -35,7 +14,112 @@ function parseItems(itemsField) {
   } catch { return []; }
 }
 
-async function getCostMaps(ventas, empresaId = null) {
+async function salesByBranch(req, dateSql = '', dateParams = []) {
+  const scoped = reportScopeClause(req, 'v');
+  if (scoped.scope.mode !== 'consolidated') return undefined;
+  const [rows] = await db.query(`
+    SELECT v.sucursal_id, s.nombre AS sucursal_nombre,
+           COUNT(*) AS ventas, COALESCE(SUM(v.total), 0) AS ingresos
+    FROM ventas v
+    INNER JOIN sucursales s ON s.id = v.sucursal_id AND s.empresa_id = v.empresa_id
+    WHERE v.estado != 'ANULADA' ${dateSql} ${scoped.sql}
+    GROUP BY v.sucursal_id, s.nombre ORDER BY s.nombre, v.sucursal_id
+  `, [...dateParams, ...scoped.params]);
+  return rows.map(row => ({ ...row, ventas: Number(row.ventas), ingresos: Number(row.ingresos) / 100 }));
+}
+
+async function managementMetrics(req, desde, hasta) {
+  const scope = normalizeScope(req);
+  const comprasScope = reportScopeClause(req, 'c');
+  const cajaScope = reportScopeClause(req, 'cs');
+  const reparacionesScope = reportScopeClause(req, 'r');
+  const productoMovScope = reportScopeClause(req, 'pm');
+  const repuestoMovScope = reportScopeClause(req, 'rm');
+
+  const [[compras]] = await db.query(`
+    SELECT COUNT(*) AS cantidad, COALESCE(SUM(c.total), 0) AS total
+    FROM compras c WHERE c.estado IN ('CONFIRMADA','RECIBIDA')
+      AND DATE(c.fecha_compra) BETWEEN ? AND ? ${comprasScope.sql}`,
+  [desde, hasta, ...comprasScope.params]);
+  const [[caja]] = await db.query(`
+    SELECT SUM(DATE(cs.fecha_apertura) BETWEEN ? AND ?) AS abiertas,
+      SUM(cs.fecha_cierre IS NOT NULL AND DATE(cs.fecha_cierre) BETWEEN ? AND ?) AS cerradas,
+      COALESCE(SUM(CASE WHEN DATE(cs.fecha_apertura) BETWEEN ? AND ? THEN cs.fondo_inicial_centavos ELSE 0 END), 0) AS apertura,
+      COALESCE(SUM(CASE WHEN DATE(cs.fecha_cierre) BETWEEN ? AND ? THEN cs.efectivo_contado_centavos ELSE 0 END), 0) AS cierre,
+      COALESCE(SUM(CASE WHEN DATE(cs.fecha_cierre) BETWEEN ? AND ? THEN cs.diferencia_centavos ELSE 0 END), 0) AS diferencia,
+      COALESCE(SUM(CASE WHEN DATE(cs.fecha_cierre) BETWEEN ? AND ? AND cs.diferencia_centavos > 0 THEN cs.diferencia_centavos ELSE 0 END), 0) AS sobrantes,
+      COALESCE(SUM(CASE WHEN DATE(cs.fecha_cierre) BETWEEN ? AND ? AND cs.diferencia_centavos < 0 THEN -cs.diferencia_centavos ELSE 0 END), 0) AS faltantes
+    FROM caja_sesiones cs
+    WHERE (DATE(cs.fecha_apertura) BETWEEN ? AND ? OR DATE(cs.fecha_cierre) BETWEEN ? AND ?) ${cajaScope.sql}`,
+  [desde, hasta, desde, hasta, desde, hasta, desde, hasta, desde, hasta,
+    desde, hasta, desde, hasta, desde, hasta, desde, hasta, ...cajaScope.params]);
+  const [[reparaciones]] = await db.query(`
+    SELECT COUNT(*) AS creadas,
+      SUM(r.estado IN ('COMPLETADA','ENTREGADA')) AS finalizadas,
+      SUM(r.estado = 'CANCELADA') AS canceladas,
+      SUM(r.estado NOT IN ('COMPLETADA','ENTREGADA','CANCELADA')) AS pendientes
+    FROM reparaciones r WHERE DATE(r.fecha_ingreso) BETWEEN ? AND ? ${reparacionesScope.sql}`,
+  [desde, hasta, ...reparacionesScope.params]);
+  const [[productosMov]] = await db.query(`
+    SELECT COALESCE(SUM(CASE WHEN pm.tipo LIKE '%entrada%' OR pm.tipo LIKE '%recepcion%' THEN ABS(pm.cantidad) ELSE 0 END),0) AS entradas,
+      COALESCE(SUM(CASE WHEN pm.tipo LIKE '%salida%' OR pm.tipo LIKE '%venta%' OR pm.tipo LIKE '%reparacion%' THEN ABS(pm.cantidad) ELSE 0 END),0) AS salidas,
+      COALESCE(SUM(CASE WHEN pm.tipo LIKE '%ajuste%' THEN ABS(pm.cantidad) ELSE 0 END),0) AS ajustes
+    FROM producto_movimientos pm WHERE DATE(pm.created_at) BETWEEN ? AND ? ${productoMovScope.sql}`,
+  [desde, hasta, ...productoMovScope.params]);
+  const [[repuestosMov]] = await db.query(`
+    SELECT COALESCE(SUM(CASE WHEN rm.tipo LIKE '%entrada%' OR rm.tipo LIKE '%recepcion%' OR rm.tipo LIKE '%devolucion%' THEN ABS(rm.cantidad) ELSE 0 END),0) AS entradas,
+      COALESCE(SUM(CASE WHEN rm.tipo LIKE '%salida%' OR rm.tipo LIKE '%venta%' OR rm.tipo LIKE '%reparacion%' THEN ABS(rm.cantidad) ELSE 0 END),0) AS salidas,
+      COALESCE(SUM(CASE WHEN rm.tipo LIKE '%ajuste%' THEN ABS(rm.cantidad) ELSE 0 END),0) AS ajustes
+    FROM repuesto_movimientos rm WHERE DATE(rm.created_at) BETWEEN ? AND ? ${repuestoMovScope.sql}`,
+  [desde, hasta, ...repuestoMovScope.params]);
+
+  let stockProductos = 0, stockRepuestos = 0;
+  if (scope.sucursalIds.length) {
+    const placeholders = scope.sucursalIds.map(() => '?').join(',');
+    ([[{ total: stockProductos }]] = await db.query(
+      `SELECT COALESCE(SUM(existencia),0) AS total FROM producto_existencias
+       WHERE empresa_id = ? AND sucursal_id IN (${placeholders})`, [scope.empresaId, ...scope.sucursalIds]));
+    ([[{ total: stockRepuestos }]] = await db.query(
+      `SELECT COALESCE(SUM(existencia),0) AS total FROM repuesto_existencias
+       WHERE empresa_id = ? AND sucursal_id IN (${placeholders})`, [scope.empresaId, ...scope.sucursalIds]));
+  }
+
+  let porSucursal;
+  if (scope.mode === 'consolidated' && scope.sucursalIds.length) {
+    const [rows] = await db.query(`
+      SELECT s.id AS sucursal_id, s.nombre AS sucursal_nombre,
+        (SELECT COUNT(*) FROM compras c WHERE c.empresa_id=s.empresa_id AND c.sucursal_id=s.id
+          AND c.estado IN ('CONFIRMADA','RECIBIDA') AND DATE(c.fecha_compra) BETWEEN ? AND ?) AS compras_cantidad,
+        (SELECT COALESCE(SUM(c.total),0) FROM compras c WHERE c.empresa_id=s.empresa_id AND c.sucursal_id=s.id
+          AND c.estado IN ('CONFIRMADA','RECIBIDA') AND DATE(c.fecha_compra) BETWEEN ? AND ?) AS compras_total,
+        (SELECT COUNT(*) FROM reparaciones r WHERE r.empresa_id=s.empresa_id AND r.sucursal_id=s.id
+          AND DATE(r.fecha_ingreso) BETWEEN ? AND ?) AS reparaciones_creadas
+      FROM sucursales s WHERE s.empresa_id=? AND s.id IN (${scope.sucursalIds.map(() => '?').join(',')})
+      ORDER BY s.nombre, s.id`, [desde, hasta, desde, hasta, desde, hasta, scope.empresaId, ...scope.sucursalIds]);
+    porSucursal = rows.map(row => ({ ...row, compras_cantidad: Number(row.compras_cantidad), compras_total: Number(row.compras_total) }));
+  }
+
+  return {
+    compras: { cantidad: Number(compras.cantidad || 0), total: Number(compras.total || 0) },
+    caja_operativa: {
+      sesiones_abiertas: Number(caja.abiertas || 0), sesiones_cerradas: Number(caja.cerradas || 0),
+      monto_apertura: Number(caja.apertura || 0) / 100, monto_cierre: Number(caja.cierre || 0) / 100,
+      diferencia: Number(caja.diferencia || 0) / 100, sobrantes: Number(caja.sobrantes || 0) / 100,
+      faltantes: Number(caja.faltantes || 0) / 100,
+    },
+    reparaciones: Object.fromEntries(Object.entries(reparaciones).map(([key, value]) => [key, Number(value || 0)])),
+    inventario: {
+      entradas: Number(productosMov.entradas || 0) + Number(repuestosMov.entradas || 0),
+      salidas: Number(productosMov.salidas || 0) + Number(repuestosMov.salidas || 0),
+      ajustes: Number(productosMov.ajustes || 0) + Number(repuestosMov.ajustes || 0),
+      stock_productos: Number(stockProductos || 0), stock_repuestos: Number(stockRepuestos || 0),
+      stock_consolidado: Number(stockProductos || 0) + Number(stockRepuestos || 0),
+    },
+    ...(porSucursal ? { por_sucursal: porSucursal } : {}),
+  };
+}
+
+async function getCostMaps(ventas, scope) {
   if (!ventas || ventas.length === 0) {
     return { productos: {}, repuestos: {}, missingCosts: false };
   }
@@ -56,11 +140,12 @@ async function getCostMaps(ventas, empresaId = null) {
   let missingCosts = false;
 
   if (prodIds.size > 0) {
-    const empresaSql = empresaId ? ' AND empresa_id = ?' : '';
-    const empresaParams = empresaId ? [empresaId] : [];
+    const stock = inventoryStockClause(scope, 'p', 'producto_id');
     const [rows] = await db.query(
-      `SELECT id, sku, nombre, categoria, precio_costo, precio_venta, stock FROM productos WHERE id IN (?)${empresaSql}`,
-      [[...prodIds], ...empresaParams]
+      `SELECT p.id, p.sku, p.nombre, p.categoria, p.precio_costo, p.precio_venta,
+              ${stock.sql} AS stock
+       FROM productos p WHERE p.id IN (?) AND p.empresa_id = ?`,
+      [...stock.params, [...prodIds], scope.empresaId]
     );
     rows.forEach(r => {
       productos[r.id] = r;
@@ -69,11 +154,11 @@ async function getCostMaps(ventas, empresaId = null) {
   }
 
   if (repIds.size > 0) {
-    const empresaSql = empresaId ? ' AND empresa_id = ?' : '';
-    const empresaParams = empresaId ? [empresaId] : [];
+    const stock = inventoryStockClause(scope, 'r', 'repuesto_id');
     const [rows] = await db.query(
-      `SELECT id, sku, nombre, precio_costo, stock FROM repuestos WHERE id IN (?)${empresaSql}`,
-      [[...repIds], ...empresaParams]
+      `SELECT r.id, r.sku, r.nombre, r.precio_costo, ${stock.sql} AS stock
+       FROM repuestos r WHERE r.id IN (?) AND r.empresa_id = ?`,
+      [...stock.params, [...repIds], scope.empresaId]
     );
     rows.forEach(r => {
       repuestos[r.id] = r;
@@ -107,10 +192,10 @@ function getCostoVenta(venta, costMaps) {
  */
 exports.getResumen = async (req, res) => {
   try {
-    const ventasTenant = tenantClause(req, 'v');
-    const ventasNoAliasTenant = tenantClause(req);
-    const cajaTenant = tenantClause(req);
-    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
+    const scope = normalizeScope(req);
+    const ventasTenant = reportScopeClause(req, 'v');
+    const ventasNoAliasTenant = reportScopeClause(req);
+    const cajaTenant = reportScopeClause(req);
     const [ventasDia] = await db.query(`
       SELECT v.* FROM ventas v
       WHERE DATE(COALESCE(v.fecha_venta, v.created_at)) = CURDATE()
@@ -154,7 +239,10 @@ exports.getResumen = async (req, res) => {
 
     // Unir ventas evitando duplicados (día ya está en mes)
     const ventasUnicas = [...ventasMes];
-    const costMaps = await getCostMaps(ventasUnicas, empresaId);
+    const costMaps = await getCostMaps(ventasUnicas, scope);
+    const porSucursal = await salesByBranch(req,
+      `AND MONTH(COALESCE(v.fecha_venta, v.created_at)) = MONTH(CURDATE())
+       AND YEAR(COALESCE(v.fecha_venta, v.created_at)) = YEAR(CURDATE())`);
 
     let ingresosDia = 0, costosDia = 0, cantProdDia = 0, cantRepDia = 0, descuentosDia = 0;
     for (const v of ventasDia) {
@@ -192,7 +280,8 @@ exports.getResumen = async (req, res) => {
       ticket_promedio: ticketPromedio / 100,
       ventas_anuladas: anuladas[0].total,
       monto_anulado: anuladas[0].monto / 100,
-      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null
+      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null,
+      ...(porSucursal ? { por_sucursal: porSucursal } : {})
     });
   } catch (error) {
     console.error('Error en getResumen:', error);
@@ -207,11 +296,11 @@ exports.getResumen = async (req, res) => {
 exports.getDiario = async (req, res) => {
   try {
     const { fecha } = req.query;
-    const fechaFiltro = fecha || new Date().toISOString().split('T')[0];
-    const ventasTenant = tenantClause(req, 'v');
-    const ventasNoAliasTenant = tenantClause(req);
-    const cajaTenant = tenantClause(req);
-    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
+    const fechaFiltro = validateDate(fecha, 'fecha') || new Date().toISOString().split('T')[0];
+    const scope = normalizeScope(req);
+    const ventasTenant = reportScopeClause(req, 'v');
+    const ventasNoAliasTenant = reportScopeClause(req);
+    const cajaTenant = reportScopeClause(req);
 
     const [ventas] = await db.query(`
       SELECT v.*, u.name as vendedor_nombre
@@ -237,7 +326,9 @@ exports.getDiario = async (req, res) => {
       ${cajaTenant.sql}
     `, [fechaFiltro, ...cajaTenant.params]);
 
-    const costMaps = await getCostMaps(ventas, empresaId);
+    const costMaps = await getCostMaps(ventas, scope);
+    const porSucursal = await salesByBranch(req,
+      'AND DATE(COALESCE(v.fecha_venta, v.created_at)) = ?', [fechaFiltro]);
 
     const metodosPago = {};
     let totalIngresos = 0, costoTotal = 0, descuentosTotal = 0;
@@ -271,7 +362,8 @@ exports.getDiario = async (req, res) => {
       metodos_pago: Object.entries(metodosPago).map(([metodo, d]) => ({
         metodo, count: d.count, monto: d.monto / 100
       })),
-      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null
+      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null,
+      ...(porSucursal ? { por_sucursal: porSucursal } : {})
     });
   } catch (error) {
     console.error('Error en getDiario:', error);
@@ -286,8 +378,8 @@ exports.getDiario = async (req, res) => {
 exports.getSemanal = async (req, res) => {
   try {
     let { fechaInicio, fechaFin } = req.query;
-    const ventasTenant = tenantClause(req, 'v');
-    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
+    const scope = normalizeScope(req);
+    const ventasTenant = reportScopeClause(req, 'v');
 
     if (!fechaInicio || !fechaFin) {
       const today = new Date();
@@ -300,6 +392,7 @@ exports.getSemanal = async (req, res) => {
       fechaInicio = mon.toISOString().split('T')[0];
       fechaFin = sun.toISOString().split('T')[0];
     }
+    ({ desde: fechaInicio, hasta: fechaFin } = validateRange(fechaInicio, fechaFin));
 
     const [ventas] = await db.query(`
       SELECT v.* FROM ventas v
@@ -321,7 +414,9 @@ exports.getSemanal = async (req, res) => {
     `, [prevInicio.toISOString().split('T')[0], prevFin.toISOString().split('T')[0], ...ventasTenant.params]);
 
     const allVentas = [...ventas, ...ventasPrev];
-    const costMaps = await getCostMaps(allVentas, empresaId);
+    const costMaps = await getCostMaps(allVentas, scope);
+    const porSucursal = await salesByBranch(req,
+      'AND DATE(COALESCE(v.fecha_venta, v.created_at)) BETWEEN ? AND ?', [fechaInicio, fechaFin]);
 
     // Ventas por día
     const porDia = {};
@@ -394,7 +489,8 @@ exports.getSemanal = async (req, res) => {
           ganancia: (d.ingresos - d.costo) / 100
         })),
       productos_mas_vendidos: topProductos,
-      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null
+      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null,
+      ...(porSucursal ? { por_sucursal: porSucursal } : {})
     });
   } catch (error) {
     console.error('Error en getSemanal:', error);
@@ -409,8 +505,9 @@ exports.getSemanal = async (req, res) => {
 exports.getProductosMasVendidos = async (req, res) => {
   try {
     const { desde, hasta, limit = 20 } = req.query;
-    const ventasTenant = tenantClause(req, 'v');
-    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
+    validateRange(desde, hasta);
+    const scope = normalizeScope(req);
+    const ventasTenant = reportScopeClause(req, 'v');
 
     let query = `SELECT v.* FROM ventas v WHERE v.estado != 'ANULADA'`;
     const params = [...ventasTenant.params];
@@ -420,7 +517,12 @@ exports.getProductosMasVendidos = async (req, res) => {
     if (hasta) { query += ' AND DATE(COALESCE(v.fecha_venta, v.created_at)) <= ?'; params.push(hasta); }
 
     const [ventas] = await db.query(query, params);
-    const costMaps = await getCostMaps(ventas, empresaId);
+    const costMaps = await getCostMaps(ventas, scope);
+    const branchDateParts = [];
+    const branchDateParams = [];
+    if (desde) { branchDateParts.push('AND DATE(COALESCE(v.fecha_venta, v.created_at)) >= ?'); branchDateParams.push(desde); }
+    if (hasta) { branchDateParts.push('AND DATE(COALESCE(v.fecha_venta, v.created_at)) <= ?'); branchDateParams.push(hasta); }
+    const porSucursal = await salesByBranch(req, branchDateParts.join(' '), branchDateParams);
 
     const productosAgg = {};
     for (const v of ventas) {
@@ -460,7 +562,8 @@ exports.getProductosMasVendidos = async (req, res) => {
     res.json({
       data: resultado,
       total: resultado.length,
-      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null
+      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null,
+      ...(porSucursal ? { por_sucursal: porSucursal } : {})
     });
   } catch (error) {
     console.error('Error en getProductosMasVendidos:', error);
@@ -475,8 +578,9 @@ exports.getProductosMasVendidos = async (req, res) => {
 exports.getHistorialVentas = async (req, res) => {
   try {
     const { desde, hasta, estado, metodo_pago, vendedor, cliente, page = 1, limit = 100 } = req.query;
-    const ventasTenant = tenantClause(req, 'v');
-    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
+    validateRange(desde, hasta);
+    const scope = normalizeScope(req);
+    const ventasTenant = reportScopeClause(req, 'v');
 
     let query = `
       SELECT v.*, u.name as vendedor_nombre
@@ -494,6 +598,11 @@ exports.getHistorialVentas = async (req, res) => {
     if (cliente) { query += ' AND v.cliente_nombre LIKE ?'; params.push(`%${cliente}%`); }
     if (vendedor) { query += ' AND u.name LIKE ?'; params.push(`%${vendedor}%`); }
 
+    const countQuery = query.replace(
+      /SELECT v\.\*, u\.name as vendedor_nombre[\s\S]*?FROM ventas v/,
+      'SELECT COUNT(*) AS total FROM ventas v'
+    );
+    const countParams = [...params];
     query += ' ORDER BY COALESCE(v.fecha_venta, v.created_at) DESC';
 
     const { page: pageNum, limit: limitNum, offset } = parsePagination(req.query, {
@@ -503,13 +612,15 @@ exports.getHistorialVentas = async (req, res) => {
     query += ' LIMIT ? OFFSET ?';
     params.push(limitNum, offset);
 
+    const [[countRow]] = await db.query(countQuery, countParams);
     const [ventas] = await db.query(query, params);
-    const costMaps = await getCostMaps(ventas, empresaId);
+    const costMaps = await getCostMaps(ventas, scope);
 
     const resultado = ventas.map(v => {
       const { costo } = getCostoVenta(v, costMaps);
       return {
         id: v.id,
+        sucursal_id: v.sucursal_id,
         codigo: v.numero_venta,
         fecha: v.fecha_venta || v.created_at,
         cliente: v.cliente_nombre,
@@ -527,9 +638,10 @@ exports.getHistorialVentas = async (req, res) => {
 
     res.json({
       data: resultado,
-      total: resultado.length,
+      total: Number(countRow.total),
       page: pageNum,
       limit: limitNum,
+      totalPages: Math.ceil(Number(countRow.total) / limitNum),
       advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null
     });
   } catch (error) {
@@ -545,16 +657,17 @@ exports.getHistorialVentas = async (req, res) => {
 exports.getMetricasFinancieras = async (req, res) => {
   try {
     const { desde, hasta } = req.query;
-    const ventasTenant = tenantClause(req, 'v');
-    const ventasNoAliasTenant = tenantClause(req);
-    const cajaTenant = tenantClause(req);
-    const empresaId = isSuperadminTenant(req) ? null : requireTenantEmpresaId(req);
+    const scope = normalizeScope(req);
+    const ventasTenant = reportScopeClause(req, 'v');
+    const ventasNoAliasTenant = reportScopeClause(req);
+    const cajaTenant = reportScopeClause(req);
     const hoy = new Date();
     const desdeDefault = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`;
     const hastaDefault = hoy.toISOString().split('T')[0];
 
     const desdeStr = desde || desdeDefault;
     const hastaStr = hasta || hastaDefault;
+    validateRange(desdeStr, hastaStr);
 
     const [ventas] = await db.query(`
       SELECT v.* FROM ventas v
@@ -579,7 +692,10 @@ exports.getMetricasFinancieras = async (req, res) => {
       ${cajaTenant.sql}
     `, [desdeStr, hastaStr, ...cajaTenant.params]);
 
-    const costMaps = await getCostMaps(ventas, empresaId);
+    const costMaps = await getCostMaps(ventas, scope);
+    const gerencial = await managementMetrics(req, desdeStr, hastaStr);
+    const porSucursalVentas = await salesByBranch(req,
+      'AND DATE(COALESCE(v.fecha_venta, v.created_at)) BETWEEN ? AND ?', [desdeStr, hastaStr]);
 
     let totalIngresos = 0, costoTotal = 0, descuentosTotal = 0;
     const metodosPago = {};
@@ -634,7 +750,17 @@ exports.getMetricasFinancieras = async (req, res) => {
           ingresos: d.ingresos / 100,
           ganancia: (d.ingresos - d.costo) / 100
         })),
-      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null
+      advertencia_costos: costMaps.missingCosts ? 'Algunos productos no tienen costo registrado.' : null,
+      compras: gerencial.compras,
+      caja_operativa: gerencial.caja_operativa,
+      reparaciones: gerencial.reparaciones,
+      inventario: gerencial.inventario,
+      ...(gerencial.por_sucursal ? {
+        por_sucursal: gerencial.por_sucursal.map(branch => ({
+          ...branch,
+          ...(porSucursalVentas || []).find(v => Number(v.sucursal_id) === Number(branch.sucursal_id)),
+        }))
+      } : {})
     });
   } catch (error) {
     console.error('Error en getMetricasFinancieras:', error);

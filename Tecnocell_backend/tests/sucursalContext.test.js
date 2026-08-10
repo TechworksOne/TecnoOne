@@ -69,10 +69,8 @@ async function main() {
   assert.strictEqual(require('../middleware/sucursalContext'), middleware);
   const authRoutes = fs.readFileSync(path.join(__dirname, '..', 'routes', 'authRoutes.js'), 'utf8');
   assert.match(authRoutes, /mis-sucursales', verifyToken/);
-  const untouchedRoutes = [
-    'reportesRoutes.js',
-  ].map(file => fs.readFileSync(path.join(__dirname, '..', 'routes', file), 'utf8')).join('\n');
-  assert.doesNotMatch(untouchedRoutes, /branchScope/);
+  const reportesRoutes = fs.readFileSync(path.join(__dirname, '..', 'routes', 'reportesRoutes.js'), 'utf8');
+  assert.match(reportesRoutes, /branchScope/);
 
   console.log('OK branchScope: specific, consolidated, permiso, asignacion y compatibilidad');
 }
