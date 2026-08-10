@@ -186,9 +186,8 @@ export default function CajaBancosPage() {
     hasPermission('bancos.administrar');
   const canReponerManual = hasPermission('caja.reponer_manual');
   const canManageBanks = hasPermission('bancos.administrar');
-  const isAdmin = user?.role === 'admin' || user?.rol === 'admin' ||
-    user?.role === 'ADMIN' || user?.rol === 'ADMIN' ||
-    (Array.isArray((user as any)?.roles) && ((user as any).roles.includes('ADMINISTRADOR') || (user as any).roles.includes('admin') || (user as any).roles.includes('ADMIN')));
+  const canViewCards = hasPermission('tarjetas.ver');
+  const canManageCards = hasPermission('tarjetas.administrar');
 
   useEffect(() => {
     loadData(1);
@@ -281,7 +280,7 @@ export default function CajaBancosPage() {
 
   // ── Tarjetas helpers ─────────────────────────────────────────────────────
   const cargarTarjetas = useCallback(async () => {
-    if (!hasTarjetasModule) {
+    if (!hasTarjetasModule || !canViewCards) {
       setTarjetas([]);
       return;
     }
@@ -289,7 +288,7 @@ export default function CajaBancosPage() {
     setLoadingTarjetas(true);
     try { setTarjetas(await TarjetaService.getTarjetas()); } catch { toast.error('Error al cargar tarjetas'); }
     finally { setLoadingTarjetas(false); }
-  }, [hasTarjetasModule, toast]);
+  }, [hasTarjetasModule, canViewCards, toast]);
 
   const handleGuardarTarjeta = async () => {
     setSavingTarjeta(true);
@@ -812,7 +811,7 @@ export default function CajaBancosPage() {
         <CajaSesionHistorial />
 
         {/* ── TARJETAS RESUMEN ───────────────────────────────────────────── */}
-        <div className={`grid gap-3 md:gap-4 ${isAdmin ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2'}`}>
+        <div className={`grid gap-3 md:gap-4 ${canManageBanks ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2'}`}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 md:p-5 border border-slate-200 dark:border-slate-800 shadow-sm">
             <div className="flex items-start justify-between">
               <div>
@@ -845,7 +844,7 @@ export default function CajaBancosPage() {
             </div>
           </div>
 
-          {isAdmin && (
+          {canManageBanks && (
             <>
               <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 md:p-5 border border-slate-200 dark:border-slate-800 shadow-sm">
                 <div className="flex items-start justify-between">
@@ -886,7 +885,7 @@ export default function CajaBancosPage() {
               { label: 'Retiro de banco', icon: <Building2 size={18} />, color: 'hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700 dark:hover:bg-rose-950/40 dark:hover:border-rose-800 dark:hover:text-rose-300', tipo: 'RETIRO_BANCO' as const },
               { label: 'Depósito a banco', icon: <ArrowUpCircle size={18} />, color: 'hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 dark:hover:bg-blue-950/40 dark:hover:border-blue-800 dark:hover:text-blue-300', tipo: 'DEPOSITO' as const },
               { label: 'Transferencia', icon: <ArrowRightLeft size={18} />, color: 'hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 dark:hover:bg-violet-950/40 dark:hover:border-violet-800 dark:hover:text-violet-300', tipo: 'TRANSFERENCIA' as const },
-            ].filter(item => !['RETIRO_BANCO', 'TRANSFERENCIA'].includes(item.tipo) || isAdmin).map(({ label, icon, color, tipo }) => (
+            ].filter(item => !['RETIRO_BANCO', 'TRANSFERENCIA'].includes(item.tipo) || canManageBanks).map(({ label, icon, color, tipo }) => (
               <button
                 key={tipo}
                 onClick={() => abrirModal(tipo)}
@@ -907,8 +906,8 @@ export default function CajaBancosPage() {
           <div className="flex border-b border-slate-200 dark:border-slate-800">
             {[
               { key: 'caja', label: 'Caja Chica', icon: <Wallet size={16} />, badge: pendientesCaja },
-              ...(isAdmin ? [{ key: 'bancos', label: 'Bancos', icon: <Landmark size={16} />, badge: pendientesBancos }] : []),
-              ...(isAdmin && hasTarjetasModule ? [{ key: 'tarjetas', label: 'Tarjetas de Crédito', icon: <CreditCard size={16} />, badge: 0 }] : []),
+              ...(canManageBanks ? [{ key: 'bancos', label: 'Bancos', icon: <Landmark size={16} />, badge: pendientesBancos }] : []),
+              ...(canViewCards && hasTarjetasModule ? [{ key: 'tarjetas', label: 'Tarjetas de Crédito', icon: <CreditCard size={16} />, badge: 0 }] : []),
             ].map(({ key, label, icon, badge }) => (
               <button
                 key={key}
@@ -1047,8 +1046,9 @@ export default function CajaBancosPage() {
           )}
 
           {/* ── VISTA TARJETAS DE CRÉDITO ────────────────────────────── */}
-          {hasTarjetasModule && vistaActual === 'tarjetas' && (
+          {hasTarjetasModule && canViewCards && vistaActual === 'tarjetas' && (
             <TarjetasCreditoPanel
+              canManage={canManageCards}
               tarjetas={tarjetas}
               loading={loadingTarjetas}
               cuentasBancarias={cuentasBancarias}
@@ -1285,7 +1285,7 @@ export default function CajaBancosPage() {
               <div className="p-4 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Cuentas bancarias</p>
-                  {isAdmin && (
+                  {canManageBanks && (
                     <button
                       onClick={() => abrirModalBanco()}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
@@ -1316,7 +1316,7 @@ export default function CajaBancosPage() {
                             ) : (
                               <span className="text-[10px] font-semibold bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400 px-2 py-0.5 rounded-full">Inactiva</span>
                             )}
-                            {isAdmin && cuenta.activa && (
+                            {canManageBanks && cuenta.activa && (
                               <>
                                 <button
                                   onClick={() => abrirModalBanco(cuenta)}
@@ -1933,6 +1933,7 @@ export default function CajaBancosPage() {
 
 // ─── Subcomponente: Tarjetas de Crédito ──────────────────────────────────────
 interface TarjetasCreditoPanelProps {
+  canManage: boolean;
   tarjetas: TarjetaCredito[];
   loading: boolean;
   cuentasBancarias: { id: number; nombre: string; activa: boolean }[];
@@ -1948,7 +1949,7 @@ interface TarjetasCreditoPanelProps {
 }
 
 function TarjetasCreditoPanel({
-  tarjetas, loading, tarjetaDetalle, movsTarjeta, loadingMovs,
+  canManage, tarjetas, loading, tarjetaDetalle, movsTarjeta, loadingMovs,
   onVerDetalle, onCerrarDetalle, onNueva, onEditar, onPagar, onDesactivar
 }: TarjetasCreditoPanelProps) {
   const fmtQ = (cents: number) =>
@@ -1984,14 +1985,14 @@ function TarjetasCreditoPanel({
             <p className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wide">Movimientos</p>
             <p className="text-base font-bold text-slate-900 dark:text-slate-100">{TarjetaService.formatTarjeta(tarjetaDetalle)}</p>
           </div>
-          <div className="ml-auto flex gap-2">
+          {canManage && <div className="ml-auto flex gap-2">
             <button onClick={() => onPagar(tarjetaDetalle)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors">
               <Banknote size={13} /> Pagar
             </button>
             <button onClick={() => onEditar(tarjetaDetalle)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
               <Pencil size={13} /> Editar
             </button>
-          </div>
+          </div>}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 border-b border-slate-100 dark:border-slate-800">
           {[
@@ -2052,9 +2053,9 @@ function TarjetasCreditoPanel({
           <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide font-semibold">Total pendiente</p>
           <p className="text-2xl font-bold text-red-600 dark:text-red-400">Q{TarjetaService.centsToQ(totalSaldo).toLocaleString('es-GT', { minimumFractionDigits: 2 })}</p>
         </div>
-        <button onClick={onNueva} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors">
+        {canManage && <button onClick={onNueva} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors">
           <Plus size={16} /> Nueva tarjeta
-        </button>
+        </button>}
       </div>
       {tarjetas.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-14 text-center border border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
@@ -2097,13 +2098,13 @@ function TarjetasCreditoPanel({
                   <button onClick={() => onVerDetalle(t)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
                     <Eye size={11} /> Movimientos
                   </button>
-                  <button onClick={() => onPagar(t)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors">
+                  {canManage && <button onClick={() => onPagar(t)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors">
                     <Banknote size={11} /> Pagar
-                  </button>
-                  <button onClick={() => onEditar(t)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                  </button>}
+                  {canManage && <button onClick={() => onEditar(t)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
                     <Pencil size={11} /> Editar
-                  </button>
-                  {t.activo === 1 && (
+                  </button>}
+                  {canManage && t.activo === 1 && (
                     <button onClick={() => onDesactivar(t)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
                       <Trash2 size={11} /> Desactivar
                     </button>

@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../store/useAuth';
 import { useToast } from '../../components/ui/Toast';
-import { canViewCosts, isAdmin } from '../../lib/permissions';
 import { getInitialsFromName, getSafeImageUrl } from '../../lib/avatar';
 import API_URL from '../../services/config';
 import axios from 'axios';
@@ -462,15 +461,14 @@ function PermissionRow({ label, granted }: { label: string; granted: boolean }) 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
-  const { user, token } = useAuth();
+  const { token, hasPermission } = useAuth();
   const toast = useToast();
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
 
-  const showCost   = canViewCosts(user?.roles);
-  const userIsAdmin = isAdmin(user?.roles);
+  const showCost = hasPermission('costos.ver');
 
   async function loadProfile() {
     try {
@@ -685,12 +683,12 @@ export default function ProfilePage() {
           <div className="rounded-2xl border p-5" style={cardStyle}>
             <SectionTitle icon={<Shield size={14} />} label="Permisos del sistema" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <PermissionRow label="Acceso de administrador"  granted={userIsAdmin} />
+              <PermissionRow label="Administrar permisos"     granted={hasPermission('permisos.administrar')} />
               <PermissionRow label="Ver datos de costos"      granted={showCost} />
-              <PermissionRow label="Gestion de compras"       granted={userIsAdmin} />
-              <PermissionRow label="Gestion de proveedores"   granted={userIsAdmin} />
-              <PermissionRow label="Stickers de garantia"     granted={userIsAdmin} />
-              <PermissionRow label="Admin de usuarios"        granted={userIsAdmin} />
+              <PermissionRow label="Gestion de compras"       granted={hasPermission('compras.ver')} />
+              <PermissionRow label="Gestion de proveedores"   granted={hasPermission('proveedores.ver')} />
+              <PermissionRow label="Stickers de garantia"     granted={hasPermission('stickers.ver')} />
+              <PermissionRow label="Admin de usuarios"        granted={hasPermission('usuarios.administrar')} />
             </div>
           </div>
 

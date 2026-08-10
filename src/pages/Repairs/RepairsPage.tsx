@@ -23,7 +23,6 @@ import {
 } from '../../services/repairService';
 import { getTecnicos, asignarTecnico } from '../../services/otService';
 import type { Tecnico } from '../../types/ot';
-import { isAdmin } from '../../lib/permissions';
 import { useAuth } from '../../store/useAuth';
 
 // ── Style maps ────────────────────────────────────────────────────────────
@@ -835,7 +834,6 @@ export default function RepairsPage() {
   const navigate = useNavigate();
   const { repairs, deleteRepair, changeRepairState, updateRepair, searchRepairs, isLoading, validateStickerUniqueness } = useRepairs();
   const { user, hasPermission } = useAuth();
-  const userIsAdmin = isAdmin(user?.roles);
   const canAssignTech = hasPermission('reparaciones.asignar_tecnico');
   const { empresa, loadEmpresa } = useEmpresa();
 
@@ -860,10 +858,10 @@ export default function RepairsPage() {
   useEffect(() => { loadRepairs(); loadEmpresa(); }, [loadEmpresa]);
 
   useEffect(() => {
-    if (userIsAdmin) {
+    if (canAssignTech) {
       getTecnicos().then(setTecnicos).catch(() => {});
     }
-  }, [userIsAdmin]);
+  }, [canAssignTech]);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });

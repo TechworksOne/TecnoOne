@@ -35,17 +35,7 @@ import PermisosPage from "./pages/Permisos/PermisosPage";
 import SucursalesPage from "./pages/Sucursales/SucursalesPage";
 import CajasPage from "./pages/Cajas/CajasPage";
 import ProtectedRoute from "./components/common/ProtectedRoute";
-import { PERMISSIONS, ROLES } from "./lib/permissions";
-
-const ADMIN         = [ROLES.ADMINISTRADOR];
-const ADMIN_CONFIG  = [ROLES.ADMINISTRADOR, 'SUPERADMIN'];
-const ADMIN_TECNICO = [ROLES.ADMINISTRADOR, ROLES.TECNICO];
-const ADMIN_VENTAS  = [ROLES.ADMINISTRADOR, ROLES.VENTAS];
-const ALL_ROLES     = [ROLES.ADMINISTRADOR, ROLES.TECNICO, ROLES.VENTAS];
-
-const PR = (roles: string[], child: React.ReactElement) => (
-  <ProtectedRoute roles={roles}>{child}</ProtectedRoute>
-);
+import { PERMISSIONS } from "./lib/permissions";
 const PP = (
   permission: string,
   child: React.ReactElement,
@@ -69,20 +59,6 @@ const PPM = (
     moduleCode={moduleCode}
   >
     {child}
-  </ProtectedRoute>
-);
-const APR = (
-  permission: string,
-  child: React.ReactElement,
-  moduleCode?: string
-) => (
-  <ProtectedRoute roles={ADMIN_CONFIG}>
-    <ProtectedRoute
-      permission={permission}
-      moduleCode={moduleCode}
-    >
-      {child}
-    </ProtectedRoute>
   </ProtectedRoute>
 );
 
@@ -113,7 +89,7 @@ const routes = [
   { path: "/flujo-reparaciones/:id",  element: PPM('flujo_reparaciones.ver', 'taller_operativo', <FlujoReparacionDetailPage />) },
   { path: "/ordenes-trabajo",         element: PPM('ordenes_trabajo.ver', 'taller_operativo', <OrdenesTrabajoPage />) },
   { path: "/agenda",                  element: PPM('agenda.ver', 'taller_operativo', <AgendaPage />) },
-  { path: "/pago-tarjeta",            element: PR(ADMIN_VENTAS, PPM('ventas.crear', 'ventas', <CardPaymentPage />)) },
+  { path: "/pago-tarjeta",            element: PPM('ventas.crear', 'ventas', <CardPaymentPage />) },
 
   // ── Administración ─────────────────────────────────────────────────────────
   { path: "/clientes",       element: PP('clientes.ver', <CustomersPage />, 'clientes') },
@@ -127,7 +103,7 @@ const routes = [
   { path: "/configuracion/empresa", element: PP(PERMISSIONS.EMPRESA_EDITAR, <EmpresaPage />, 'configuracion') },
   { path: "/reportes",       element: PP(PERMISSIONS.REPORTES_VER, <ReportesPage />, 'reportes_comerciales') },
   { path: "/auditoria",      element: PP(PERMISSIONS.AUDITORIA_VER, <AuditoriaPage />, 'auditoria') },
-  { path: "/permisos",       element: APR(PERMISSIONS.PERMISOS_ADMINISTRAR, <PermisosPage />, 'roles_permisos') },
+  { path: "/permisos",       element: PP(PERMISSIONS.PERMISOS_ADMINISTRAR, <PermisosPage />, 'roles_permisos') },
   { path: "/usuarios",       element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <UsersPage />, 'usuarios') },
 
   // ── Sin restricción de rol (solo autenticación) ────────────────────────────

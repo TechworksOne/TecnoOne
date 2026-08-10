@@ -963,7 +963,7 @@ export default function ReportesPage() {
           style={{ borderColor: 'rgba(72,185,230,0.28)', background: 'rgba(72,185,230,0.08)', color: 'var(--color-primary)' }}
         >
           <Shield size={12} />
-          Solo visible para administradores
+                    Visible con el permiso de reportes
         </span>
       </div>
 

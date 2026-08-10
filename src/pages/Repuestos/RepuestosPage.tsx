@@ -37,7 +37,7 @@ import type { Repuesto } from '../../types/repuesto';
 import * as repuestoService from '../../services/repuestoService';
 import { useToast } from '../../components/ui/Toast';
 import RepuestoForm from './RepuestoForm';
-import { canViewCosts } from '../../lib/permissions';
+import { PERMISSIONS } from '../../lib/permissions';
 import { getImageUrl } from '../../utils/getImageUrl';
 import { printBarcode } from '../../lib/printBarcode';
 
@@ -138,8 +138,8 @@ function RepuestoRow({ repuesto, onView, onEdit, onToggle, onKardex }: {
   onToggle: (r: Repuesto) => void;
   onKardex: (r: Repuesto) => void;
 }) {
-  const { user } = useAuth();
-  const showCost = canViewCosts(user?.roles);
+  const { hasPermission } = useAuth();
+  const showCost = hasPermission(PERMISSIONS.COSTOS_VER);
   const stock = toNum(repuesto.stock);
   const precio = toNum(repuesto.precio);
   const precioCosto = toNum(repuesto.precioCosto);
@@ -275,8 +275,8 @@ function RepuestoRow({ repuesto, onView, onEdit, onToggle, onKardex }: {
 // ─── Main Component ───────────────────────────────────────────────────────────
 export function RepuestosPage() {
   const toast = useToast();
-  const { user } = useAuth();
-  const showCost = canViewCosts(user?.roles);
+  const { hasPermission } = useAuth();
+  const showCost = hasPermission(PERMISSIONS.COSTOS_VER);
   const { repuestos, removeRepuesto, duplicateRepuesto, loadRepuestos, isLoading } = useRepuestosStore();
   const branchMode = useSucursalContext((state) => state.mode);
   const sucursalActiva = useSucursalContext((state) => state.sucursalActiva);

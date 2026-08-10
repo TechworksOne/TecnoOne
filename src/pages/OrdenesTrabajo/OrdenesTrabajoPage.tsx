@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../store/useAuth';
-import { isAdmin } from '../../lib/permissions';
+import { PERMISSIONS } from '../../lib/permissions';
 import {
   getOrdenesTrabajo,
   getTecnicos,
@@ -557,8 +557,9 @@ function OTList({ ots, loading, userIsAdmin, onAsignar, onQuitar, onVer, onFlujo
 // ── Main Page ──────────────────────────────────────────────────────────────
 export default function OrdenesTrabajoPage() {
   const navigate    = useNavigate();
-  const { user }    = useAuth();
-  const userIsAdmin = isAdmin(user?.roles);
+  const { user, hasPermission } = useAuth();
+  const canViewAllOrders = hasPermission(PERMISSIONS.ORDENES_TRABAJO_VER_TODAS);
+  const canAssignTech = hasPermission(PERMISSIONS.REPARACIONES_ASIGNAR_TECNICO);
 
   // Data
   const [ots,          setOts]          = useState<OrdenTrabajo[]>([]);
@@ -600,7 +601,7 @@ export default function OrdenesTrabajoPage() {
       setLoading(true); setError('');
       const filters: OTFilters = {};
       if (estadoFilt)                 filters.estado     = estadoFilt;
-      if (tecnicoFilt && userIsAdmin) filters.tecnico_id = Number(tecnicoFilt);
+      if (tecnicoFilt && canViewAllOrders) filters.tecnico_id = Number(tecnicoFilt);
       if (busqueda)                   filters.busqueda   = busqueda;
       setOts(await getOrdenesTrabajo(filters));
     } catch {
@@ -608,31 +609,31 @@ export default function OrdenesTrabajoPage() {
     } finally {
       setLoading(false);
     }
-  }, [estadoFilt, tecnicoFilt, busqueda, userIsAdmin]);
+  }, [estadoFilt, tecnicoFilt, busqueda, canViewAllOrders]);
 
   const loadHistorial = useCallback(async () => {
     try {
       setLoadingH(true);
       const filters: HistorialFilters = {};
       if (hBusqueda)                   filters.busqueda   = hBusqueda;
-      if (hTecnicoFilt && userIsAdmin) filters.tecnico_id = Number(hTecnicoFilt);
+      if (hTecnicoFilt && canViewAllOrders) filters.tecnico_id = Number(hTecnicoFilt);
       setHistorial(await getHistorialOT(filters));
     } catch {
       // fallo silencioso
     } finally {
       setLoadingH(false);
     }
-  }, [hBusqueda, hTecnicoFilt, userIsAdmin]);
+  }, [hBusqueda, hTecnicoFilt, canViewAllOrders]);
 
   const loadResumen = useCallback(async () => {
     try {
       const data = await getResumenOT();
-      if (userIsAdmin) setResumenAdmin(data as ResumenAdmin);
+      if (canViewAllOrders) setResumenAdmin(data as ResumenAdmin);
       else             setResumenTec(data as ResumenTecnico);
     } catch {
       // fallo silencioso
     }
-  }, [userIsAdmin]);
+  }, [canViewAllOrders]);
 
   // ── Effects ───────────────────────────────────────────────────────────────
   useEffect(() => { loadOts(); loadResumen(); }, [loadOts, loadResumen]);
@@ -642,9 +643,9 @@ export default function OrdenesTrabajoPage() {
   }, [activeTab, loadHistorial]);
 
   useEffect(() => {
-    if (!userIsAdmin) return;
+    if (!canViewAllOrders && !canAssignTech) return;
     getTecnicos().then(setTecnicos).catch(() => {});
-  }, [userIsAdmin]);
+  }, [canViewAllOrders, canAssignTech]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleQuitarAsignacion = async (ot: OrdenTrabajo) => {
@@ -690,7 +691,7 @@ export default function OrdenesTrabajoPage() {
             <div>
               <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Órdenes de Trabajo</h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {userIsAdmin
+                {canViewAllOrders
                   ? 'Dashboard administrador — gestión de reparaciones y técnicos'
                   : `Dashboard técnico — ${user?.username ?? ''}`}
               </p>
@@ -705,11 +706,11 @@ export default function OrdenesTrabajoPage() {
         </div>
 
         {/* KPI Cards */}
-        {userIsAdmin && resumenAdmin && <AdminKpiCards resumen={resumenAdmin} />}
-        {!userIsAdmin && resumenTec   && <TecnicoKpiCards resumen={resumenTec} />}
+        {canViewAllOrders && resumenAdmin && <AdminKpiCards resumen={resumenAdmin} />}
+        {!canViewAllOrders && resumenTec   && <TecnicoKpiCards resumen={resumenTec} />}
 
         {/* Carga por técnico — solo admin */}
-        {userIsAdmin && resumenAdmin && resumenAdmin.tecnicos.length > 0 && (
+        {canViewAllOrders && resumenAdmin && resumenAdmin.tecnicos.length > 0 && (
           <CargaTecnicos tecnicos={resumenAdmin.tecnicos} onFiltrar={handleFiltrarTecnico} />
         )}
 
@@ -731,16 +732,16 @@ export default function OrdenesTrabajoPage() {
             <FilterBar
               busqueda={busqueda} onBusqueda={setBusqueda}
               estadoFilt={estadoFilt} onEstado={setEstadoFilt}
-              userIsAdmin={userIsAdmin}
+              userIsAdmin={canViewAllOrders}
               tecnicoFilt={tecnicoFilt} onTecnico={setTecnicoFilt} tecnicos={tecnicos}
             />
             <OTList
-              ots={ots} loading={loading} userIsAdmin={userIsAdmin}
-              onAsignar={userIsAdmin ? setAsignarOT : undefined}
-              onQuitar={userIsAdmin ? handleQuitarAsignacion : undefined}
+              ots={ots} loading={loading} userIsAdmin={canAssignTech}
+              onAsignar={canAssignTech ? setAsignarOT : undefined}
+              onQuitar={canAssignTech ? handleQuitarAsignacion : undefined}
               onVer={id => navigate('/reparaciones', { state: { highlightId: id } })}
               onFlujo={id => setFlujoOT(ots.find(o => o.id === id) ?? null)}
-              emptyMsg={userIsAdmin ? 'No hay OT activas con esos filtros' : 'No tienes reparaciones activas asignadas'}
+              emptyMsg={canViewAllOrders ? 'No hay OT activas con esos filtros' : 'No tienes reparaciones activas asignadas'}
             />
           </>
         )}
@@ -752,21 +753,21 @@ export default function OrdenesTrabajoPage() {
               <History size={13} className="text-slate-500 dark:text-slate-400 shrink-0" />
               <p className="text-xs text-slate-600 dark:text-slate-400">
                 Historial de reparaciones <strong>canceladas</strong> y <strong>entregadas</strong>.
-                {!userIsAdmin && ' Solo tus propias reparaciones.'}
+                {!canViewAllOrders && ' Solo tus propias reparaciones.'}
               </p>
             </div>
             <FilterBar
               busqueda={hBusqueda} onBusqueda={setHBusqueda}
               estadoFilt={hEstadoFilt} onEstado={setHEstadoFilt}
               isHistorial
-              userIsAdmin={userIsAdmin}
+              userIsAdmin={canViewAllOrders}
               tecnicoFilt={hTecnicoFilt} onTecnico={setHTecnicoFilt} tecnicos={tecnicos}
             />
             <OTList
-              ots={historialFiltrado} loading={loadingH} userIsAdmin={userIsAdmin}
+              ots={historialFiltrado} loading={loadingH} userIsAdmin={false}
               onVer={id => navigate('/reparaciones', { state: { highlightId: id } })}
               onFlujo={id => setFlujoOT(historialFiltrado.find(o => o.id === id) ?? null)}
-              emptyMsg={userIsAdmin ? 'No hay historial con esos filtros' : 'No tienes historial de OT'}
+              emptyMsg={canViewAllOrders ? 'No hay historial con esos filtros' : 'No tienes historial de OT'}
             />
           </>
         )}

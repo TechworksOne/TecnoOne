@@ -12,60 +12,58 @@ import { useEmpresa } from "../../store/useEmpresa";
 import { getImageUrl } from "../../utils/getImageUrl";
 
 // ─── Grupos de navegación ──────────────────────────────────────────────────
-// roles: null = visible para todos los roles autenticados
-// roles: [...] = visible solo para los roles indicados
 const GROUPS = [
   {
     label: "Principal",
     items: [
-      { to: "/dashboard", label: "Dashboard", icon: <Home size={17} />, roles: null, permission: "dashboard.ver", moduleCode: "dashboard" },
-      { to: "/perfil", label: "Perfil", icon: <User size={17} />, roles: null },
+      { to: "/dashboard", label: "Dashboard", icon: <Home size={17} />, permission: "dashboard.ver", moduleCode: "dashboard" },
+      { to: "/perfil", label: "Perfil", icon: <User size={17} /> },
     ],
   },
   {
     label: "Servicio técnico",
     items: [
-      { to: "/reparaciones", label: "Reparaciones", icon: <Wrench size={17} />, roles: ["ADMINISTRADOR", "TECNICO", "VENTAS"], permission: "reparaciones.ver", moduleCode: "reparaciones" },
-      { to: "/flujo-reparaciones", label: "Flujo de Reparaciones", icon: <GitBranch size={17} />, roles: null, permission: "flujo_reparaciones.ver", moduleCode: "taller_operativo" },
-      { to: "/ordenes-trabajo", label: "Órdenes de Trabajo", icon: <ClipboardList size={17} />, roles: ["ADMINISTRADOR", "TECNICO"], permission: "ordenes_trabajo.ver", moduleCode: "taller_operativo" },
-      { to: "/agenda", label: "Agenda de Entregas", icon: <CalendarDays size={17} />, roles: null, permission: "agenda.ver", moduleCode: "taller_operativo" },
-      { to: "/stickers-garantia", label: "Stickers de Garantía", icon: <Tag size={17} />, roles: ["ADMINISTRADOR"], permission: "stickers.ver", moduleCode: "taller_operativo" },
+      { to: "/reparaciones", label: "Reparaciones", icon: <Wrench size={17} />, permission: "reparaciones.ver", moduleCode: "reparaciones" },
+      { to: "/flujo-reparaciones", label: "Flujo de Reparaciones", icon: <GitBranch size={17} />, permission: "flujo_reparaciones.ver", moduleCode: "taller_operativo" },
+      { to: "/ordenes-trabajo", label: "Órdenes de Trabajo", icon: <ClipboardList size={17} />, permission: "ordenes_trabajo.ver", moduleCode: "taller_operativo" },
+      { to: "/agenda", label: "Agenda de Entregas", icon: <CalendarDays size={17} />, permission: "agenda.ver", moduleCode: "taller_operativo" },
+      { to: "/stickers-garantia", label: "Stickers de Garantía", icon: <Tag size={17} />, permission: "stickers.ver", moduleCode: "taller_operativo" },
     ],
   },
   {
     label: "Comercial",
     items: [
-      { to: "/clientes", label: "Clientes", icon: <Users size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "clientes.ver", moduleCode: "clientes" },
-      { to: "/cotizaciones", label: "Cotizaciones", icon: <FileText size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "cotizaciones.ver", moduleCode: "cotizaciones" },
-      { to: "/ventas", label: "Ventas", icon: <CreditCard size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "ventas.ver", moduleCode: "ventas" },
+      { to: "/clientes", label: "Clientes", icon: <Users size={17} />, permission: "clientes.ver", moduleCode: "clientes" },
+      { to: "/cotizaciones", label: "Cotizaciones", icon: <FileText size={17} />, permission: "cotizaciones.ver", moduleCode: "cotizaciones" },
+      { to: "/ventas", label: "Ventas", icon: <CreditCard size={17} />, permission: "ventas.ver", moduleCode: "ventas" },
     ],
   },
   {
     label: "Inventario y compras",
     items: [
-      { to: "/productos", label: "Productos", icon: <Box size={17} />, roles: ["ADMINISTRADOR", "VENTAS"], permission: "productos.ver", moduleCode: "productos" },
-      { to: "/repuestos", label: "Repuestos", icon: <Settings size={17} />, roles: null, permission: "repuestos.ver", moduleCode: "taller_operativo" },
-      { to: "/compras", label: "Compras", icon: <ShoppingBag size={17} />, roles: ["ADMINISTRADOR"], permission: "compras.ver", moduleCode: "compras" },
-      { to: "/proveedores", label: "Proveedores", icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"], permission: "proveedores.ver", moduleCode: "proveedores" },
+      { to: "/productos", label: "Productos", icon: <Box size={17} />, permission: "productos.ver", moduleCode: "productos" },
+      { to: "/repuestos", label: "Repuestos", icon: <Settings size={17} />, permission: "repuestos.ver", moduleCode: "taller_operativo" },
+      { to: "/compras", label: "Compras", icon: <ShoppingBag size={17} />, permission: "compras.ver", moduleCode: "compras" },
+      { to: "/proveedores", label: "Proveedores", icon: <Building2 size={17} />, permission: "proveedores.ver", moduleCode: "proveedores" },
     ],
   },
   {
     label: "Finanzas",
     items: [
-      { to: "/caja-bancos", label: "Caja y Bancos", icon: <Wallet size={17} />, roles: null, permission: "caja.ver", moduleCode: "caja_bancos" },
-      { to: "/deudores", label: "Deudores", icon: <Receipt size={17} />, roles: ["ADMINISTRADOR"], permission: "deudores.ver", moduleCode: "deudores_pagos" },
-      { to: "/reportes", label: "Reportes", icon: <BarChart3 size={17} />, roles: ["ADMINISTRADOR"], permission: "reportes.ver", moduleCode: "reportes_comerciales" },
+      { to: "/caja-bancos", label: "Caja y Bancos", icon: <Wallet size={17} />, permission: "caja.ver", moduleCode: "caja_bancos" },
+      { to: "/deudores", label: "Deudores", icon: <Receipt size={17} />, permission: "deudores.ver", moduleCode: "deudores_pagos" },
+      { to: "/reportes", label: "Reportes", icon: <BarChart3 size={17} />, permission: "reportes.ver", moduleCode: "reportes_comerciales" },
     ],
   },
   {
     label: "Administración",
     items: [
-      { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />, roles: ["ADMINISTRADOR"], permission: "usuarios.administrar", moduleCode: "usuarios" },
-      { to: "/sucursales", label: "Sucursales", icon: <Building2 size={17} />, roles: ["ADMINISTRADOR"], permission: "usuarios.administrar", moduleCode: "usuarios" },
-      { to: "/cajas", label: "Cajas", icon: <Wallet size={17} />, roles: ["ADMINISTRADOR"], permission: "cajas.ver" },
-      { to: "/permisos", label: "Permisos", icon: <KeyRound size={17} />, roles: ["ADMINISTRADOR"], permission: "permisos.administrar", adminOnly: true, moduleCode: "roles_permisos" },
-      { to: "/auditoria", label: "Auditoría", icon: <History size={17} />, roles: ["ADMINISTRADOR"], permission: "auditoria.ver", moduleCode: "auditoria" },
-      { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, roles: ["ADMINISTRADOR"], permission: "empresa.editar", moduleCode: "configuracion" },
+      { to: "/admin-usuarios", label: "Admin. usuarios", icon: <Shield size={17} />, permission: "usuarios.administrar", moduleCode: "usuarios" },
+      { to: "/sucursales", label: "Sucursales", icon: <Building2 size={17} />, permission: "usuarios.administrar", moduleCode: "usuarios" },
+      { to: "/cajas", label: "Cajas", icon: <Wallet size={17} />, permission: "cajas.ver" },
+      { to: "/permisos", label: "Permisos", icon: <KeyRound size={17} />, permission: "permisos.administrar", moduleCode: "roles_permisos" },
+      { to: "/auditoria", label: "Auditoría", icon: <History size={17} />, permission: "auditoria.ver", moduleCode: "auditoria" },
+      { to: "/configuracion/empresa", label: "Empresa", icon: <Settings size={17} />, permission: "empresa.editar", moduleCode: "configuracion" },
     ],
   },
 ];
@@ -80,10 +78,10 @@ export default function Sidebar() {
   const { isOpen, toggle } = useSidebar();
   const {
     user,
-    permissions,
     permissionsLoaded,
-    modules,
     modulesLoaded,
+    hasPermission,
+    hasModule,
   } = useAuth();
   const { empresa, loadEmpresa } = useEmpresa();
   const location = useLocation();
@@ -106,13 +104,6 @@ export default function Sidebar() {
     if (user) loadEmpresa();
   }, [user, loadEmpresa]);
 
-  // Calcular roles efectivos (RBAC + campo legado para compatibilidad)
-  const userRoles: string[] = user?.roles ?? [];
-  const legacyRole = (user?.role ?? '').toLowerCase();
-  const effectiveRoles = new Set(userRoles);
-  if (legacyRole === 'admin' || legacyRole === 'administrador') effectiveRoles.add('ADMINISTRADOR');
-  if (legacyRole === 'tecnico')                                  effectiveRoles.add('TECNICO');
-  if (legacyRole === 'ventas' || legacyRole === 'employee')      effectiveRoles.add('VENTAS');
 
   const sidebarWidth = isMobile ? 264 : (isOpen ? 264 : 72);
   const sidebarTransform = isMobile && !isOpen ? 'translateX(-100%)' : 'translateX(0)';
@@ -214,51 +205,23 @@ export default function Sidebar() {
                 ? item.moduleCode
                 : undefined;
 
-            const adminOnly =
-              'adminOnly' in item
-                ? item.adminOnly
-                : false;
-
             if (moduleCode) {
               if (!modulesLoaded) {
                 return false;
               }
 
-              const moduleAllowed =
-                legacyRole === 'superadmin' ||
-                modules.includes('*') ||
-                modules.includes(moduleCode);
+              const moduleAllowed = hasModule(moduleCode);
 
               if (!moduleAllowed) {
                 return false;
               }
             }
 
-            if (
-              adminOnly &&
-              !effectiveRoles.has('ADMINISTRADOR') &&
-              legacyRole !== 'superadmin'
-            ) {
-              return false;
-            }
-
             if (permission) {
-              return (
-                permissionsLoaded &&
-                (
-                  legacyRole === 'superadmin' ||
-                  permissions.includes('*') ||
-                  permissions.includes(permission)
-                )
-              );
+              return permissionsLoaded && hasPermission(permission);
             }
 
-            return (
-              !item.roles ||
-              item.roles.some(role =>
-                effectiveRoles.has(role)
-              )
-            );
+            return true;
           });
           if (visible.length === 0) return null;
 
