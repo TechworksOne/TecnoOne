@@ -5,6 +5,8 @@ import API_URL from "../../services/config";
 import { formatMoney as formatMoneyBase } from "../../lib/format";
 import { useAuth } from "../../store/useAuth";
 import { useEmpresa } from "../../store/useEmpresa";
+import { useSucursalContext } from "../../store/useSucursalContext";
+import { ACTIVE_BRANCH_STORAGE_KEY } from "../../lib/branchContext";
 import {
   ShoppingCart, Package, AlertTriangle, FileText, Wrench,
   DollarSign, TrendingUp, TrendingDown, Users, ClipboardCheck, ClipboardX,
@@ -1493,13 +1495,9 @@ function getStoredAuthToken(): string | null {
 export default function DashboardPage() {
   const { user, hasModule } = useAuth();
   const { loadEmpresa } = useEmpresa();
-
-  // Detectar rol usando array RBAC (user.roles) y campo legado (user.role)
-  const userRoles: string[] = user?.roles ?? [];
-  const legacyRole          = (user?.role ?? '').toLowerCase();
-  const isAdminUser   = userRoles.includes('ADMINISTRADOR') || legacyRole === 'admin';
-  const isTecnicoUser = userRoles.includes('TECNICO')       || legacyRole === 'tecnico';
-  const isVentasUser  = userRoles.includes('VENTAS')        || legacyRole === 'ventas';
+  const contextVersion = useSucursalContext(state => state.contextVersion);
+  const branchContextLoading = useSucursalContext(state => state.loading);
+  const branchContextUserId = useSucursalContext(state => state.currentUserId);
 
   const [adminStats,  setAdminStats]  = useState<DashboardStats | null>(null);
   const [tecnicoData, setTecnicoData] = useState<TecnicoData | null>(null);
@@ -1518,6 +1516,15 @@ export default function DashboardPage() {
   }, [user, loadEmpresa]);
 
   useEffect(() => {
+    if (
+      !user ||
+      branchContextLoading ||
+      branchContextUserId !== Number(user.id)
+    ) return;
+
+    const activeBranch = localStorage.getItem(ACTIVE_BRANCH_STORAGE_KEY);
+    if (!activeBranch) return;
+
     let mounted = true;
 
     const loadDashboard = async () => {
@@ -1529,17 +1536,6 @@ export default function DashboardPage() {
       if (!token) {
         if (!mounted) return;
         setError("Sesión no válida. Vuelve a iniciar sesión.");
-        if (isAdminUser) {
-          setAdminStats({
-            ventas:       { hoy: 0, mes: 0, total: 0, cantidad: 0 },
-            productos:    { total: 0, bajo_stock: 0, sin_stock: 0 },
-            reparaciones: { total: 0, con_checklist: 0, sin_checklist: 0, completadas: 0, completadas_mes: 0, atrasadas: 0 },
-            cotizaciones: { total: 0, abiertas: 0, conversion_rate: 0 },
-            gastos:       { mes: 0 },
-            ganancias:    { hoy: 0, mes: 0 },
-            clientes:     { nuevos_mes: 0, total: 0 },
-          });
-        }
         setLoading(false);
         return;
       }
@@ -1550,6 +1546,7 @@ export default function DashboardPage() {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
+            "X-Sucursal-Id": activeBranch,
           },
         });
 
@@ -1559,6 +1556,9 @@ export default function DashboardPage() {
 
         if (!mounted) return;
 
+        setAdminStats(null);
+        setTecnicoData(null);
+        setVentasStats(null);
         if (data.dashboardType === 'tecnico') {
           setTecnicoData(data as TecnicoData);
         } else if (data.dashboardType === 'ventas') {
@@ -1571,17 +1571,6 @@ export default function DashboardPage() {
         console.error("Dashboard fetch error:", err);
         if (!mounted) return;
         setError("No se pudieron cargar las estadísticas. Verifica la sesión o permisos.");
-        if (isAdminUser) {
-          setAdminStats({
-            ventas:       { hoy: 0, mes: 0, total: 0, cantidad: 0 },
-            productos:    { total: 0, bajo_stock: 0, sin_stock: 0 },
-            reparaciones: { total: 0, con_checklist: 0, sin_checklist: 0, completadas: 0, completadas_mes: 0, atrasadas: 0 },
-            cotizaciones: { total: 0, abiertas: 0, conversion_rate: 0 },
-            gastos:       { mes: 0 },
-            ganancias:    { hoy: 0, mes: 0 },
-            clientes:     { nuevos_mes: 0, total: 0 },
-          });
-        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -1589,7 +1578,7 @@ export default function DashboardPage() {
 
     loadDashboard();
     return () => { mounted = false; };
-  }, [user]);
+  }, [user, contextVersion, branchContextLoading, branchContextUserId]);
 
   if (loading) {
     return (
@@ -1620,7 +1609,7 @@ export default function DashboardPage() {
     </div>
   );
 
-  if (isTecnicoUser && tecnicoData) {
+  if (tecnicoData) {
     return (
       <>
         {errorBanner}
@@ -1633,7 +1622,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (isVentasUser && ventasStats) {
+  if (ventasStats) {
     return (
       <>
         {errorBanner}

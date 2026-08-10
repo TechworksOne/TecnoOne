@@ -9,7 +9,6 @@ import { patchFechaEntrega, deleteFechaEntrega } from '../../services/agendaServ
 import { getTecnicos, asignarTecnico } from '../../services/otService';
 import type { Tecnico } from '../../types/ot';
 import { useAuth } from '../../store/useAuth';
-import { isAdmin } from '../../lib/permissions';
 import { useSucursalContext } from '../../store/useSucursalContext';
 import API_URL from '../../services/config';
 import axios from 'axios';
@@ -44,8 +43,8 @@ export default function FlujoReparacionDetailPage() {
   const [reparacion, setReparacion] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const { user } = useAuth();
-  const userIsAdmin = isAdmin(user?.roles);
+  const { hasPermission } = useAuth();
+  const canAssignTech = hasPermission('reparaciones.asignar_tecnico');
   const branchMode = useSucursalContext((s) => s.mode);
   const contextVersion = useSucursalContext((s) => s.contextVersion);
   const isConsolidated = branchMode === 'consolidated';
@@ -215,10 +214,10 @@ export default function FlujoReparacionDetailPage() {
   }, [id, contextVersion]);
 
   useEffect(() => {
-    if (userIsAdmin) {
+    if (canAssignTech) {
       getTecnicos().then(setTecnicos).catch(() => {});
     }
-  }, [userIsAdmin]);
+  }, [canAssignTech]);
 
   // Cargar cuentas bancarias para selector de transferencia
   useEffect(() => {
@@ -556,7 +555,7 @@ export default function FlujoReparacionDetailPage() {
             <UserCheck size={18} className="text-blue-500" />
             <h3 className="text-base font-semibold">Orden de Trabajo</h3>
           </div>
-          {userIsAdmin && reparacion.estado !== 'CANCELADA' && (
+          {canAssignTech && reparacion.estado !== 'CANCELADA' && (
             <button
               onClick={() => { setOtSelectedId(reparacion.tecnicoAsignadoId ?? ''); setOtError(''); setShowOTModal(true); }}
               className="text-sm px-3 py-1.5 rounded-xl font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"

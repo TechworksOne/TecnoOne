@@ -45,19 +45,21 @@ router.post(
 
 // Asignación técnica (OT)
 const otController = require('../controllers/otController');
-router.patch('/:id/asignar-tecnico', requirePermission('reparaciones.asignar_tecnico'), otController.asignarTecnico);
-router.delete('/:id/asignar-tecnico', requirePermission('reparaciones.asignar_tecnico'), otController.quitarAsignacion);
+router.patch('/:id/asignar-tecnico', requirePermission('reparaciones.asignar_tecnico'), requireBranchSpecific, otController.asignarTecnico);
+router.delete('/:id/asignar-tecnico', requirePermission('reparaciones.asignar_tecnico'), requireBranchSpecific, otController.quitarAsignacion);
 
 // Fecha de entrega programada (Agenda)
 const agendaController = require('../controllers/agendaController');
 router.patch(
   '/:id/fecha-entrega',
   requirePermission('agenda.editar'),
+  requireBranchSpecific,
   agendaController.patchFechaEntrega
 );
 router.delete(
   '/:id/fecha-entrega',
   requirePermission('agenda.editar'),
+  requireBranchSpecific,
   agendaController.deleteFechaEntrega
 );
 

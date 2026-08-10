@@ -63,6 +63,8 @@ const verifyToken = async (req, res, next) => {
            FROM user_roles ur
            INNER JOIN roles r ON r.id = ur.role_id
            WHERE ur.user_id = u.id
+             AND r.empresa_id = u.empresa_id
+             AND r.activo = 1
          ) AS roles_csv
        FROM users u
        LEFT JOIN empresas e ON e.id = u.empresa_id
@@ -188,31 +190,4 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-// Middleware para verificar roles.
-const verifyRole = (...allowedRoles) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ message: 'No autorizado' });
-    }
-
-    const userRoles = Array.isArray(req.user.roles)
-      ? req.user.roles
-      : [];
-
-    const hasRole = allowedRoles.some(
-      (allowedRole) =>
-        userRoles.includes(allowedRole) ||
-        req.user.role === allowedRole
-    );
-
-    if (!hasRole) {
-      return res.status(403).json({
-        message: 'No tienes permisos para esta acción',
-      });
-    }
-
-    return next();
-  };
-};
-
-module.exports = { verifyToken, verifyRole };
+module.exports = { verifyToken };

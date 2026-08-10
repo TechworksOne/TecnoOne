@@ -3,6 +3,7 @@ const { parsePagination, parseLimit } = require('../utils/pagination');
 const fs = require('fs');
 const path = require('path');
 const productInventoryService = require('../services/productInventoryService');
+const permisoService = require('../services/permisoService');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -133,10 +134,10 @@ exports.getAllProducts = async (req, res) => {
     const [products] = await db.query(query, params);
     
     // Parsear las imágenes de JSON string a array
-    const isAdmin = req.user?.roles?.includes('ADMINISTRADOR') || req.user?.role === 'admin';
+    const canViewCosts = await permisoService.hasPermission(req, 'costos.ver');
     const productsWithImages = products.map(p => {
       const product = { ...p, imagenes: p.imagenes ? JSON.parse(`[${p.imagenes}]`) : [] };
-      if (!isAdmin) {
+      if (!canViewCosts) {
         delete product.precio_compra;
         delete product.precioProducto;
         delete product.costo_unitario;
@@ -215,8 +216,8 @@ exports.getProductById = async (req, res) => {
       imagenes: products[0].imagenes ? JSON.parse(`[${products[0].imagenes}]`) : []
     };
 
-    const isAdmin = req.user?.roles?.includes('ADMINISTRADOR') || req.user?.role === 'admin';
-    if (!isAdmin) {
+    const canViewCosts = await permisoService.hasPermission(req, 'costos.ver');
+    if (!canViewCosts) {
       delete product.precio_compra;
       delete product.precioProducto;
       delete product.costo_unitario;

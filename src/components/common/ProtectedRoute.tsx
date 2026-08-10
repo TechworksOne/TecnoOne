@@ -1,64 +1,19 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { ShieldOff } from 'lucide-react';
 import { useAuth } from '../../store/useAuth';
-import { canAccessRoute } from '../../lib/permissions';
 
 interface Props {
   children: React.ReactNode;
-  roles?: string[];
   permission?: string;
   moduleCode?: string;
 }
 
-function getEffectiveRoles(
-  user: {
-    roles?: string[];
-    role?: string;
-  } | null
-): string[] {
-  const rbac =
-    Array.isArray(user?.roles)
-      ? user.roles
-      : [];
-
-  const legacy =
-    (user?.role ?? '').toLowerCase();
-
-  const roles = new Set(rbac);
-
-  if (
-    legacy === 'admin' ||
-    legacy === 'administrador'
-  ) {
-    roles.add('ADMINISTRADOR');
-  }
-
-  if (legacy === 'tecnico') {
-    roles.add('TECNICO');
-  }
-
-  if (
-    legacy === 'ventas' ||
-    legacy === 'employee'
-  ) {
-    roles.add('VENTAS');
-  }
-
-  if (legacy === 'superadmin') {
-    roles.add('SUPERADMIN');
-  }
-
-  return [...roles];
-}
-
 export default function ProtectedRoute({
   children,
-  roles,
   permission,
   moduleCode,
 }: Props) {
   const {
-    user,
     role,
     permissionsLoaded,
     modulesLoaded,
@@ -87,18 +42,9 @@ export default function ProtectedRoute({
     );
   }
 
-  const userRoles = getEffectiveRoles(user);
-
   const permissionAccess = permission
     ? hasPermission(permission)
-    : roles
-      ? roles.some(requiredRole =>
-          userRoles.includes(requiredRole)
-        )
-      : canAccessRoute(
-          userRoles,
-          location.pathname
-        );
+    : true;
 
   const moduleAccess = moduleCode
     ? hasModule(moduleCode)

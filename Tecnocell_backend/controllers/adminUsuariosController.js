@@ -442,9 +442,15 @@ exports.createUsuario = async (req, res) => {
       await connection.query(
         `SELECT id, nombre
          FROM roles
-         WHERE nombre IN (${placeholders})`,
-        rolesArray
+         WHERE empresa_id = ?
+           AND activo = 1
+           AND nombre IN (${placeholders})`,
+        [empresaId, ...rolesArray]
       );
+
+    if (roleRows.length !== rolesArray.length) {
+      throw Object.assign(new Error('Uno o más roles no pertenecen a la empresa o están inactivos'), { statusCode: 400 });
+    }
 
     for (const roleRow of roleRows) {
       await connection.query(
@@ -855,9 +861,15 @@ exports.updateUsuario = async (req, res) => {
         await connection.query(
           `SELECT id, nombre
            FROM roles
-           WHERE nombre IN (${placeholders})`,
-          rolesArray
+           WHERE empresa_id = ?
+             AND activo = 1
+             AND nombre IN (${placeholders})`,
+          [existing.empresa_id, ...rolesArray]
         );
+
+      if (roleRows.length !== rolesArray.length) {
+        throw Object.assign(new Error('Uno o más roles no pertenecen a la empresa o están inactivos'), { statusCode: 400 });
+      }
 
       for (const roleRow of roleRows) {
         await connection.query(
@@ -1440,12 +1452,15 @@ exports.changePassword = async (req, res) => {
 // ── GET /api/admin/roles ──────────────────────────────────────────────────
 exports.getRoles = async (req, res) => {
   try {
+    const empresaId = req.tenant.empresa_id;
     const [roles] = await db.query(
       `SELECT r.*, COUNT(ur.user_id) as total_usuarios
        FROM roles r
        LEFT JOIN user_roles ur ON ur.role_id = r.id
+       WHERE r.empresa_id = ?
        GROUP BY r.id
-       ORDER BY r.nombre`
+       ORDER BY r.nombre`,
+      [empresaId]
     );
     res.json({ success: true, data: roles.map(r => ({ ...r, activo: Boolean(r.activo) })) });
   } catch (error) {
@@ -1457,15 +1472,19 @@ exports.getRoles = async (req, res) => {
 // ── POST /api/admin/roles ─────────────────────────────────────────────────
 exports.createRol = async (req, res) => {
   try {
+    const empresaId = req.tenant.empresa_id;
     const { nombre, descripcion } = req.body;
     if (!nombre) return res.status(400).json({ success: false, message: 'El nombre del rol es requerido' });
 
-    const [[ex]] = await db.query('SELECT id FROM roles WHERE nombre = ?', [nombre.toUpperCase()]);
+    const [[ex]] = await db.query(
+      'SELECT id FROM roles WHERE empresa_id = ? AND nombre = ?',
+      [empresaId, nombre.toUpperCase()]
+    );
     if (ex) return res.status(400).json({ success: false, message: 'Ya existe un rol con ese nombre' });
 
     const [result] = await db.query(
-      'INSERT INTO roles (nombre, descripcion) VALUES (?, ?)',
-      [nombre.toUpperCase(), descripcion || null]
+      'INSERT INTO roles (empresa_id, nombre, descripcion, activo, es_sistema) VALUES (?, ?, ?, 1, 0)',
+      [empresaId, nombre.toUpperCase(), descripcion || null]
     );
     res.status(201).json({ success: true, message: 'Rol creado', data: { id: result.insertId } });
   } catch (error) {
@@ -1477,10 +1496,14 @@ exports.createRol = async (req, res) => {
 // ── PUT /api/admin/roles/:id ──────────────────────────────────────────────
 exports.updateRol = async (req, res) => {
   try {
+    const empresaId = req.tenant.empresa_id;
     const { id } = req.params;
     const { descripcion, activo } = req.body;
 
-    const [[existing]] = await db.query('SELECT id FROM roles WHERE id = ?', [id]);
+    const [[existing]] = await db.query(
+      'SELECT id FROM roles WHERE id = ? AND empresa_id = ?',
+      [id, empresaId]
+    );
     if (!existing) return res.status(404).json({ success: false, message: 'Rol no encontrado' });
 
     const fields = [];
@@ -1489,7 +1512,10 @@ exports.updateRol = async (req, res) => {
     if (activo !== undefined) { fields.push('activo = ?'); params.push(activo ? 1 : 0); }
 
     if (fields.length) {
-      await db.query(`UPDATE roles SET ${fields.join(', ')} WHERE id = ?`, [...params, id]);
+      await db.query(
+        `UPDATE roles SET ${fields.join(', ')} WHERE id = ? AND empresa_id = ?`,
+        [...params, id, empresaId]
+      );
     }
     res.json({ success: true, message: 'Rol actualizado' });
   } catch (error) {

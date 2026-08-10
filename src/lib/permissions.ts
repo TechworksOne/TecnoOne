@@ -1,10 +1,11 @@
-/** Roles del sistema */
+/** Roles del sistema usados como clasificación funcional o presentación. */
 export const ROLES = {
   ADMINISTRADOR: 'ADMINISTRADOR',
   TECNICO: 'TECNICO',
   VENTAS: 'VENTAS',
 } as const;
 
+/** Catálogo frontend de permisos existentes en el backend. */
 export const PERMISSIONS = {
   COMPRAS_VER: 'compras.ver',
   VENTAS_VER: 'ventas.ver',
@@ -17,46 +18,21 @@ export const PERMISSIONS = {
   REPORTES_VER: 'reportes.ver',
   CAJA_VER: 'caja.ver',
   CAJAS_VER: 'cajas.ver',
+  COSTOS_VER: 'costos.ver',
+  ORDENES_TRABAJO_VER_TODAS: 'ordenes_trabajo.ver_todas',
+  REPARACIONES_ASIGNAR_TECNICO: 'reparaciones.asignar_tecnico',
+  FLUJO_REPARACIONES_EDITAR: 'flujo_reparaciones.editar',
+  AGENDA_EDITAR: 'agenda.editar',
+  BANCOS_ADMINISTRAR: 'bancos.administrar',
+  TARJETAS_VER: 'tarjetas.ver',
+  TARJETAS_ADMINISTRAR: 'tarjetas.administrar',
 } as const;
 
-/** Rutas exclusivas de ADMINISTRADOR */
-export const ADMIN_ONLY_ROUTES = [
-  '/compras',
-  '/stickers-garantia',
-  '/proveedores',
-  '/admin-usuarios',
-  '/reportes',
-  '/caja-bancos',
-  '/deudores',
-  '/configuracion/empresa',
-  '/auditoria',
-];
-
-/** Verifica si el usuario tiene el rol indicado */
+/** Helpers de roles: no conceden capacidades empresariales. */
 export function hasRole(roles: string[] | undefined, role: string): boolean {
   return Array.isArray(roles) && roles.includes(role);
 }
 
-/** Verifica si el usuario tiene alguno de los roles indicados */
 export function hasAnyRole(roles: string[] | undefined, allowedRoles: string[]): boolean {
-  return Array.isArray(roles) && allowedRoles.some(r => roles.includes(r));
-}
-
-/** El usuario es administrador */
-export function isAdmin(roles: string[] | undefined): boolean {
-  return hasRole(roles, ROLES.ADMINISTRADOR);
-}
-
-/** El usuario puede ver datos de costos */
-export function canViewCosts(roles: string[] | undefined): boolean {
-  return isAdmin(roles);
-}
-
-/** Verifica si el usuario puede acceder a una ruta */
-export function canAccessRoute(roles: string[] | undefined, pathname: string): boolean {
-  const isAdminUser = isAdmin(roles);
-  // Las rutas admin-only sólo son accesibles por ADMINISTRADOR
-  const restricted = ADMIN_ONLY_ROUTES.some(route => pathname.startsWith(route));
-  if (restricted) return isAdminUser;
-  return true;
+  return Array.isArray(roles) && allowedRoles.some(role => roles.includes(role));
 }

@@ -203,6 +203,7 @@ exports.getEmpresaById = async (req, res) => {
        INNER JOIN user_roles ur ON ur.user_id = u.id
        INNER JOIN roles r ON r.id = ur.role_id
        WHERE u.empresa_id = ?
+         AND r.empresa_id = u.empresa_id
          AND UPPER(r.nombre) = 'ADMINISTRADOR'
          AND COALESCE(u.tipo_usuario, 'EMPRESA') = 'EMPRESA'
        ORDER BY u.created_at ASC
@@ -502,21 +503,24 @@ exports.createEmpresaAdministrador = async (req, res) => {
       });
     }
 
-    const [[role]] =
+    let [[role]] =
       await connection.query(
         `SELECT id
          FROM roles
-         WHERE UPPER(nombre) = 'ADMINISTRADOR'
-         LIMIT 1`
+         WHERE empresa_id = ?
+           AND UPPER(nombre) = 'ADMINISTRADOR'
+         LIMIT 1`,
+        [empresa.id]
       );
 
     if (!role) {
-      const error = new Error(
-        'No existe el rol ADMINISTRADOR'
+      const [roleResult] = await connection.query(
+        `INSERT INTO roles (
+           empresa_id, nombre, descripcion, activo, es_sistema
+         ) VALUES (?, 'ADMINISTRADOR', 'Administrador de la empresa', 1, 1)`,
+        [empresa.id]
       );
-
-      error.statusCode = 500;
-      throw error;
+      role = { id: roleResult.insertId };
     }
 
     const [[existingAdmin]] =

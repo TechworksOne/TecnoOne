@@ -127,8 +127,8 @@ interface ModalEventoProps {
   onSaved: () => void;
 }
 function ModalEvento({ evento, fechaInicial, onClose, onSaved }: ModalEventoProps) {
-  const { user } = useAuth();
-  const isAdmin = user?.roles?.includes('ADMINISTRADOR') ?? false;
+  const { user, hasPermission } = useAuth();
+  const canEditAgenda = hasPermission('agenda.editar');
 
   const [titulo, setTitulo] = useState(evento?.titulo ?? '');
   const [fecha, setFecha] = useState(evento?.fecha ?? fechaInicial ?? toLocalDateStr(new Date()));
@@ -152,14 +152,14 @@ function ModalEvento({ evento, fechaInicial, onClose, onSaved }: ModalEventoProp
   const [loadingUsuarios, setLoadingUsuarios] = useState(false);
 
   useEffect(() => {
-    if (visibilidad === 'usuario' && isAdmin && usuariosLista.length === 0) {
+    if (visibilidad === 'usuario' && canEditAgenda && usuariosLista.length === 0) {
       setLoadingUsuarios(true);
       getUsuariosParaAgenda()
         .then(data => setUsuariosLista(data))
         .catch(() => {})
         .finally(() => setLoadingUsuarios(false));
     }
-  }, [visibilidad, isAdmin]);
+  }, [visibilidad, canEditAgenda]);
 
   const TIPOS: { value: TipoEvento; label: string; emoji: string; color: string }[] = [
     { value: 'nota',         label: 'Nota',         emoji: '📝', color: '#F59E0B' },
@@ -216,7 +216,7 @@ function ModalEvento({ evento, fechaInicial, onClose, onSaved }: ModalEventoProp
   const VISIBILIDAD_OPTS: { value: 'todos' | 'solo_yo' | 'rol' | 'usuario'; label: string; emoji: string }[] = [
     { value: 'todos',    label: 'Todos',      emoji: '🌐' },
     { value: 'solo_yo',  label: 'Solo yo',    emoji: '🔒' },
-    ...(isAdmin ? [
+    ...(canEditAgenda ? [
       { value: 'rol'     as const, label: 'Por rol',      emoji: '👥' },
       { value: 'usuario' as const, label: 'Un usuario',   emoji: '👤' },
     ] : []),
@@ -297,7 +297,7 @@ function ModalEvento({ evento, fechaInicial, onClose, onSaved }: ModalEventoProp
                   }}>{opt.emoji} {opt.label}</button>
               ))}
             </div>
-            {visibilidad === 'rol' && isAdmin && (
+            {visibilidad === 'rol' && canEditAgenda && (
               <select value={paraRol} onChange={e => setParaRol(e.target.value)}
                 className="mt-2 w-full rounded-xl px-3 py-2 text-sm border outline-none focus:ring-2 focus:ring-sky-400"
                 style={{ background: 'var(--color-bg)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
@@ -307,7 +307,7 @@ function ModalEvento({ evento, fechaInicial, onClose, onSaved }: ModalEventoProp
                 <option value="VENTAS">Ventas</option>
               </select>
             )}
-            {visibilidad === 'usuario' && isAdmin && (
+            {visibilidad === 'usuario' && canEditAgenda && (
               loadingUsuarios
                 ? <p className="mt-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>Cargando usuarios…</p>
                 : <select value={paraUsuarioId ?? ''} onChange={e => setParaUsuarioId(Number(e.target.value) || null)}

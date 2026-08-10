@@ -88,8 +88,9 @@ exports.getRoles = async (req, res) => {
     const [rows] = await db.query(
       `SELECT r.id, r.nombre, r.descripcion, r.activo, COUNT(DISTINCT u.id) AS total_usuarios
        FROM roles r
-       INNER JOIN user_roles ur ON ur.role_id = r.id
-       INNER JOIN users u ON u.id = ur.user_id AND u.empresa_id = ?
+       LEFT JOIN user_roles ur ON ur.role_id = r.id
+       LEFT JOIN users u ON u.id = ur.user_id AND u.empresa_id = r.empresa_id
+       WHERE r.empresa_id = ?
        GROUP BY r.id, r.nombre, r.descripcion, r.activo
        ORDER BY r.nombre`,
       [empresaId]
@@ -108,12 +109,7 @@ exports.getRolPermisos = async (req, res) => {
     const [[role]] = await db.query(
       `SELECT r.id, r.nombre, r.descripcion
        FROM roles r
-       WHERE r.id = ?
-         AND EXISTS (
-           SELECT 1 FROM user_roles ur
-           INNER JOIN users u ON u.id = ur.user_id
-           WHERE ur.role_id = r.id AND u.empresa_id = ?
-         )
+       WHERE r.id = ? AND r.empresa_id = ?
        LIMIT 1`,
       [req.params.rolId, empresaId]
     );
@@ -150,12 +146,7 @@ exports.updateRolPermisos = async (req, res) => {
     const [[role]] = await connection.query(
       `SELECT r.id, r.nombre
        FROM roles r
-       WHERE r.id = ?
-         AND EXISTS (
-           SELECT 1 FROM user_roles ur
-           INNER JOIN users u ON u.id = ur.user_id
-           WHERE ur.role_id = r.id AND u.empresa_id = ?
-         )
+       WHERE r.id = ? AND r.empresa_id = ?
        FOR UPDATE`,
       [req.params.rolId, empresaId]
     );

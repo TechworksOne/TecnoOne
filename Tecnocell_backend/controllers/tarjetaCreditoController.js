@@ -1,16 +1,6 @@
 const db = require('../config/database');
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-const soloAdmin = (req, res) => {
-  const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
-  const hasAdmin = roles.includes('ADMINISTRADOR') || roles.includes('admin') || req.user?.role === 'ADMINISTRADOR';
-  if (!hasAdmin) {
-    res.status(403).json({ success: false, message: 'Solo administradores pueden acceder a este módulo' });
-    return false;
-  }
-  return true;
-};
-
 const centsToQ = v => Number(v) / 100;
 const qToCents = v => Math.round(Number(v) * 100);
 
@@ -44,7 +34,6 @@ function movimientoTarjetaTenantClause(req, alias = 'm') {
 
 // ── GET /api/tarjetas-credito ──────────────────────────────────────────────
 exports.getTarjetas = async (req, res) => {
-  if (!soloAdmin(req, res)) return;
   try {
     const tenant = tarjetaTenantClause(req, 't');
     const [rows] = await db.query(`
@@ -73,7 +62,6 @@ exports.getTarjetas = async (req, res) => {
 
 // ── POST /api/tarjetas-credito ─────────────────────────────────────────────
 exports.createTarjeta = async (req, res) => {
-  if (!soloAdmin(req, res)) return;
   try {
     const { banco, alias, ultimos4, tasa_interes, dia_corte, dia_pago, limite_credito, moneda, notas } = req.body;
 
@@ -104,7 +92,6 @@ exports.createTarjeta = async (req, res) => {
 
 // ── PUT /api/tarjetas-credito/:id ──────────────────────────────────────────
 exports.updateTarjeta = async (req, res) => {
-  if (!soloAdmin(req, res)) return;
   try {
     const { id } = req.params;
     const { banco, alias, ultimos4, tasa_interes, dia_corte, dia_pago, limite_credito, moneda, notas } = req.body;
@@ -139,7 +126,6 @@ exports.updateTarjeta = async (req, res) => {
 
 // ── PATCH /api/tarjetas-credito/:id/desactivar ─────────────────────────────
 exports.desactivarTarjeta = async (req, res) => {
-  if (!soloAdmin(req, res)) return;
   try {
     const { id } = req.params;
     const tenant = tarjetaTenantClause(req, 'tarjetas_credito');
@@ -157,7 +143,6 @@ exports.desactivarTarjeta = async (req, res) => {
 
 // ── GET /api/tarjetas-credito/:id/movimientos ──────────────────────────────
 exports.getMovimientos = async (req, res) => {
-  if (!soloAdmin(req, res)) return;
   try {
     const { id } = req.params;
     const tarjetaTenant = tarjetaTenantClause(req, 't');
@@ -186,7 +171,6 @@ exports.getMovimientos = async (req, res) => {
 // ── POST /api/tarjetas-credito/:id/pagos ──────────────────────────────────
 // Paga la tarjeta desde una cuenta bancaria o caja chica
 exports.registrarPago = async (req, res) => {
-  if (!soloAdmin(req, res)) return;
 
   const connection = await db.getConnection();
   let transactionStarted = false;
@@ -618,7 +602,6 @@ exports.registrarPago = async (req, res) => {
 
 // ── POST /api/tarjetas-credito/:id/ajustes ────────────────────────────────
 exports.registrarAjuste = async (req, res) => {
-  if (!soloAdmin(req, res)) return;
   try {
     const { id } = req.params;
     const { monto, descripcion, fecha } = req.body;

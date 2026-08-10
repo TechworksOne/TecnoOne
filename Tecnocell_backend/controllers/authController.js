@@ -100,8 +100,10 @@ const login = async (req, res) => {
       `SELECT r.nombre
        FROM roles r
        INNER JOIN user_roles ur ON ur.role_id = r.id
-       WHERE ur.user_id = ?`,
-      [user.id]
+       WHERE ur.user_id = ?
+         AND r.empresa_id = ?
+         AND r.activo = 1`,
+      [user.id, empresaId]
     );
 
     const rolesArray = rolesRows.map((role) => role.nombre);
@@ -188,8 +190,10 @@ const getMe = async (req, res) => {
       [userId]
     );
     const [rolesRows] = await db.query(
-      'SELECT r.nombre FROM roles r INNER JOIN user_roles ur ON ur.role_id = r.id WHERE ur.user_id = ?',
-      [userId]
+      `SELECT r.nombre FROM roles r
+       INNER JOIN user_roles ur ON ur.role_id = r.id
+       WHERE ur.user_id = ? AND r.empresa_id = ? AND r.activo = 1`,
+      [userId, user.empresa_id]
     );
 
     res.json({

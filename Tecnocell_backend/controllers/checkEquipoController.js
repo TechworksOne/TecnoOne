@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const reparacionInventoryService = require('../services/reparacionInventoryService');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true;
@@ -9,6 +10,9 @@ function getTenantEmpresaId(req) {
 }
 
 function reparacionTenantClause(req, alias = 'r') {
+  if (req.branchScope) {
+    return reparacionInventoryService.reparacionScopeClause(req.branchScope, alias);
+  }
   if (isSuperadminTenant(req)) return { sql: '', params: [] };
 
   return {

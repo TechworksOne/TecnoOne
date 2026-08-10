@@ -13,7 +13,7 @@ import { Product } from "../../types/product";
 import * as categoryService from "../../services/categoryService";
 import { StockAlertsWidget } from "../../components/common/StockAlertsWidget";
 import { useAuth } from "../../store/useAuth";
-import { canViewCosts } from "../../lib/permissions";
+import { PERMISSIONS } from "../../lib/permissions";
 import { getImageUrl } from "../../utils/getImageUrl";
 import { printBarcode } from "../../lib/printBarcode";
 import { useSucursalContext } from "../../store/useSucursalContext";
@@ -52,8 +52,8 @@ function ProductRow({ product, onEdit, onView, onToggle, onStock, getImage, capi
   capitalize: (s: string) => string;
   stockReadOnly: boolean;
 }) {
-  const { user } = useAuth();
-  const showCost = canViewCosts(user?.roles);
+  const { hasPermission } = useAuth();
+  const showCost = hasPermission(PERMISSIONS.COSTOS_VER);
   const lowStock = product.stock <= product.stockMin && product.stock > 0;
   const noStock = product.stock === 0;
 
@@ -183,8 +183,8 @@ export default function ProductsPage() {
     pagination
   } = useCatalog();
   const toast = useToast();
-  const { user } = useAuth();
-  const showCost = canViewCosts(user?.roles);
+  const { hasPermission } = useAuth();
+  const showCost = hasPermission(PERMISSIONS.COSTOS_VER);
   const branchMode = useSucursalContext(state => state.mode);
   const sucursalActiva = useSucursalContext(state => state.sucursalActiva);
   const contextVersion = useSucursalContext(state => state.contextVersion);

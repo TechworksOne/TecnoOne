@@ -275,10 +275,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       return true;
     }
 
-    return (
-      state.permissions.includes("*") ||
-      state.permissions.includes(permission)
-    );
+    return state.permissions.includes(permission);
   },
 
   hasModule: (moduleCode: string) => {
