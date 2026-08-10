@@ -418,17 +418,21 @@ exports.createVenta = async (req, res) => {
 
     const venta = parseVentaJSON(newVenta[0]);
 
-    await connection.commit();
-
     await auditoriaService.registrar({
       req,
       empresaId,
-      accion: 'CREAR',
+      scope: 'branch',
+      sucursalId,
+      accion: 'VENTA_CREADA',
       entidad: 'VENTA',
       entidadId: result.insertId,
       descripcion: `Venta ${result.insertId} creada para ${cliente_nombre}`,
-      datosNuevos: { ...req.body, id: result.insertId },
+      datosNuevos: { ...req.body, id: result.insertId, sucursal_id: sucursalId },
+      metadata: { origen_financiero: metodoPagoNorm },
+      connection,
+      strict: true,
     });
+    await connection.commit();
     return res.status(201).json(venta);
   } catch (error) {
     if (connection) {
@@ -703,16 +707,21 @@ exports.createVentaFromQuote = async (req, res) => {
     );
     const venta = parseVentaJSON(newVenta[0]);
 
-    await connection.commit();
     await auditoriaService.registrar({
       req,
       empresaId,
-      accion: 'CREAR',
+      scope: 'branch',
+      sucursalId,
+      accion: 'VENTA_CREADA',
       entidad: 'VENTA',
       entidadId: venta.id,
       descripcion: `Venta ${venta.id} creada desde cotización ${cotizacionId}`,
       datosNuevos: venta,
+      metadata: { origen: 'COTIZACION', cotizacion_id: Number(cotizacionId), origen_financiero: metodo_pago },
+      connection,
+      strict: true,
     });
+    await connection.commit();
     res.status(201).json(venta);
   } catch (error) {
     if (connection) {
@@ -1049,18 +1058,22 @@ exports.registrarPago = async (req, res) => {
       [id, ...scope.params]
     );
     const venta = parseVentaJSON(ventasUpdated[0]);
-    await connection.commit();
-
     await auditoriaService.registrar({
       req,
       empresaId,
-      accion: 'REGISTRAR_PAGO',
+      scope: 'branch',
+      sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'VENTA_PAGO_REGISTRADO',
       entidad: 'VENTA',
       entidadId: id,
       descripcion: `Pago registrado en venta ${id}`,
       datosAnteriores: { monto_pagado: ventaActual.monto_pagado },
-      datosNuevos: { monto, metodo: metodoNormalizado, referencia, comprobanteUrl },
+      datosNuevos: { monto, metodo: metodoNormalizado, referencia, comprobanteUrl, monto_pagado: venta.monto_pagado },
+      metadata: { origen_financiero: metodoNormalizado, pago_parcial: Number(venta.monto_pagado) < Number(venta.total) },
+      connection,
+      strict: true,
     });
+    await connection.commit();
     res.json(venta);
   } catch (error) {
     if (connection) {
@@ -1212,20 +1225,24 @@ exports.anularVenta = async (req, res) => {
       [id, ...scope.params]
     );
 
-    await connection.commit();
-
-    const venta = parseVentaJSON(ventasUpdated[0]);
-
     await auditoriaService.registrar({
       req,
       empresaId,
-      accion: 'ANULAR',
+      scope: 'branch',
+      sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'VENTA_ANULADA',
       entidad: 'VENTA',
       entidadId: id,
       descripcion: `Venta ${id} anulada`,
       datosAnteriores: ventaActual,
       datosNuevos: { estado: 'ANULADA', motivo },
+      metadata: { origen_financiero: ventaActual.metodo_pago },
+      connection,
+      strict: true,
     });
+    await connection.commit();
+
+    const venta = parseVentaJSON(ventasUpdated[0]);
     res.json(venta);
   } catch (error) {
     if (connection) {

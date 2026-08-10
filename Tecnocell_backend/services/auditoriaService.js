@@ -123,6 +123,9 @@ async function registrar({
       tenantEmpresaId === undefined ||
       tenantEmpresaId === ''
     ) {
+      if (strict) {
+        throw new Error('empresa_id del tenant requerido para auditoría estricta');
+      }
       console.warn(
         '[Auditoria] Registro omitido: empresa_id del tenant no disponible'
       );
@@ -135,6 +138,9 @@ async function registrar({
       empresaId !== '' &&
       String(empresaId) !== String(tenantEmpresaId)
     ) {
+      if (strict) {
+        throw new Error('empresa_id no coincide con el tenant');
+      }
       console.warn(
         '[Auditoria] Registro omitido: empresa_id no coincide con el tenant'
       );
@@ -142,6 +148,9 @@ async function registrar({
     }
 
     if (!accion || !entidad || !descripcion) {
+      if (strict) {
+        throw new Error('faltan datos obligatorios de auditoría');
+      }
       console.warn(
         '[Auditoria] Registro omitido: faltan datos obligatorios'
       );

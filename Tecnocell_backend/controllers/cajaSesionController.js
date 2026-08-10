@@ -177,7 +177,7 @@ exports.abrirSesion = async (req, res) => {
     }
 
     const sesion = await cajaSesionModel.crear({
-      empresaId, sucursalId: Number(sucursalId), cajaId, usuarioId, fondoInicial,
+      empresaId, sucursalId: Number(sucursalId), cajaId, usuarioId, fondoInicial, req,
     });
 
     if (!sesion) {
@@ -264,6 +264,7 @@ exports.cerrarSesion = async (req, res) => {
       fondoSiguiente,
       cerradoPor,
       notas,
+      req,
     });
 
     if (!result) {

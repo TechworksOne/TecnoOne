@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const auditoriaService = require('../services/auditoriaService');
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const centsToQ = v => Number(v) / 100;
@@ -83,6 +84,11 @@ exports.createTarjeta = async (req, res) => {
         notas?.trim() || null, req.user.id
       ]
     );
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'company', accion: 'TARJETA_CREADA', entidad: 'TARJETA_CREDITO',
+      entidadId: result.insertId, descripcion: `Tarjeta ${banco.trim()} ****${String(ultimos4).trim()} creada`,
+      datosNuevos: { banco: banco.trim(), alias: alias?.trim() || null, ultimos4: String(ultimos4).trim(), limite_credito_centavos: qToCents(limite_credito || 0), moneda: moneda || 'GTQ', activo: 1 },
+    });
     res.status(201).json({ success: true, message: 'Tarjeta creada', data: { id: result.insertId } });
   } catch (error) {
     console.error('Error createTarjeta:', error);
@@ -102,7 +108,7 @@ exports.updateTarjeta = async (req, res) => {
 
     const tenant = tarjetaTenantClause(req, 'tarjetas_credito');
     const [existing] = await db.query(
-      `SELECT id FROM tarjetas_credito WHERE id = ? AND activo = 1${tenant.sql}`,
+      `SELECT * FROM tarjetas_credito WHERE id = ? AND activo = 1${tenant.sql}`,
       [id, ...tenant.params]
     );
     if (!existing.length) return res.status(404).json({ success: false, message: 'Tarjeta no encontrada' });
@@ -117,6 +123,11 @@ exports.updateTarjeta = async (req, res) => {
         notas?.trim() || null, id, ...tenant.params
       ]
     );
+    await auditoriaService.registrar({
+      req, empresaId: requireTenantEmpresaId(req), scope: 'company', accion: 'TARJETA_EDITADA', entidad: 'TARJETA_CREDITO', entidadId: id,
+      descripcion: `Tarjeta ${id} actualizada`, datosAnteriores: existing[0],
+      datosNuevos: { banco: banco.trim(), alias: alias?.trim() || null, ultimos4: String(ultimos4).trim(), tasa_interes: Number(tasa_interes) || 0, dia_corte: Number(dia_corte), dia_pago: Number(dia_pago), limite_credito_centavos: qToCents(limite_credito || 0), moneda: moneda || 'GTQ', notas: notas?.trim() || null },
+    });
     res.json({ success: true, message: 'Tarjeta actualizada' });
   } catch (error) {
     console.error('Error updateTarjeta:', error);
@@ -134,6 +145,10 @@ exports.desactivarTarjeta = async (req, res) => {
       [id, ...tenant.params]
     );
     if (!result.affectedRows) return res.status(404).json({ success: false, message: 'Tarjeta no encontrada' });
+    await auditoriaService.registrar({
+      req, empresaId: requireTenantEmpresaId(req), scope: 'company', accion: 'TARJETA_DESACTIVADA', entidad: 'TARJETA_CREDITO', entidadId: id,
+      descripcion: `Tarjeta ${id} desactivada`, datosAnteriores: { activo: 1 }, datosNuevos: { activo: 0 },
+    });
     res.json({ success: true, message: 'Tarjeta desactivada' });
   } catch (error) {
     console.error('Error desactivarTarjeta:', error);
@@ -562,6 +577,15 @@ exports.registrarPago = async (req, res) => {
         ]
       );
 
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'branch', sucursalId,
+      accion: 'TARJETA_PAGO_REGISTRADO', entidad: 'TARJETA_CREDITO_MOVIMIENTO', entidadId: movResult.insertId,
+      descripcion: `Pago de tarjeta ${id} registrado`,
+      datosNuevos: { tarjeta_id: Number(id), monto_centavos: montoCentavos, monto_quetzales: montoQuetzales, tipo_cuenta_origen, cuenta_origen_id: cuentaOrigenMovimiento },
+      metadata: { origen_financiero: tipo_cuenta_origen === 'banco' ? 'BANCO' : 'CAJA_CHICA' },
+      connection, strict: true,
+    });
+
     await connection.commit();
     transactionStarted = false;
 
@@ -616,11 +640,17 @@ exports.registrarAjuste = async (req, res) => {
     if (!tarjetas.length) return res.status(404).json({ success: false, message: 'Tarjeta no encontrada o inactiva' });
 
     // monto puede ser positivo (suma deuda) o negativo (resta deuda)
-    await db.query(
+    const [result] = await db.query(
       `INSERT INTO tarjeta_credito_movimientos (empresa_id, tarjeta_id, tipo, monto, descripcion, fecha_movimiento, created_by)
        VALUES (?, ?, 'ajuste', ?, ?, ?, ?)`,
       [empresaId, id, qToCents(monto), descripcion?.trim() || 'Ajuste manual', fecha || new Date(), req.user.id]
     );
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'company', accion: 'TARJETA_AJUSTE_REGISTRADO', entidad: 'TARJETA_CREDITO_MOVIMIENTO', entidadId: result.insertId,
+      descripcion: `Ajuste manual registrado en tarjeta ${id}`,
+      datosNuevos: { tarjeta_id: Number(id), monto_centavos: qToCents(monto), descripcion: descripcion?.trim() || 'Ajuste manual' },
+      metadata: { origen: 'AJUSTE_MANUAL' },
+    });
     res.status(201).json({ success: true, message: 'Ajuste registrado' });
   } catch (error) {
     console.error('Error registrarAjuste:', error);

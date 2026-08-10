@@ -1,6 +1,7 @@
 'use strict';
 
 const db = require('../config/database');
+const auditoriaService = require('../services/auditoriaService');
 
 function sesionError(message, statusCode, code) {
   const e = new Error(message);
@@ -602,7 +603,7 @@ async function obtenerDetalle({
  * Traduce ER_DUP_ENTRY de los UNIQUE generados al código de error de negocio.
  * Devuelve null si la caja no existe/no pertenece; lanza para otros errores.
  */
-async function crear({ empresaId, sucursalId, cajaId, usuarioId, fondoInicial }) {
+async function crear({ empresaId, sucursalId, cajaId, usuarioId, fondoInicial, req }) {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -667,6 +668,21 @@ async function crear({ empresaId, sucursalId, cajaId, usuarioId, fondoInicial })
       `${SELECT_SESION} WHERE cs.id = ?`,
       [ins.insertId]
     );
+
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'branch', sucursalId,
+      accion: 'CAJA_SESION_ABIERTA', entidad: 'CAJA_SESION',
+      entidadId: ins.insertId,
+      descripcion: `Sesión ${ins.insertId} abierta en caja ${cajaId}`,
+      datosNuevos: {
+        caja_id: Number(cajaId), sesion_id: Number(ins.insertId),
+        fondo_inicial_centavos: Number(fondoInicial),
+        fondo_sugerido_centavos: fondoSugerido,
+        diferencia_apertura_centavos: diferenciaApertura,
+      },
+      metadata: { origen: 'CAJA_OPERATIVA' },
+      connection, strict: true,
+    });
 
     await connection.commit();
     return sesion;
@@ -855,6 +871,7 @@ async function cerrar({
   fondoSiguiente = 0,
   cerradoPor,
   notas,
+  req,
 }) {
   const connection = await db.getConnection();
   try {
@@ -931,6 +948,28 @@ async function cerrar({
         sesionId,
       ]
     );
+
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'branch', sucursalId,
+      accion: 'CAJA_SESION_CERRADA', entidad: 'CAJA_SESION',
+      entidadId: sesionId,
+      descripcion: `Sesión ${sesionId} cerrada con diferencia de ${diferencia} centavos`,
+      datosAnteriores: {
+        estado: 'ABIERTA',
+        fondo_inicial_centavos: Number(sesion.fondo_inicial_centavos),
+      },
+      datosNuevos: {
+        estado: 'CERRADA', efectivo_esperado_centavos: esperado,
+        efectivo_contado_centavos: contado, diferencia_centavos: diferencia,
+        fondo_siguiente_centavos: fondoSiguienteNormalizado,
+        retiro_cierre_centavos: retiroCierre,
+      },
+      metadata: {
+        origen: 'CAJA_OPERATIVA',
+        resultado: diferencia === 0 ? 'CUADRADO' : diferencia > 0 ? 'SOBRANTE' : 'FALTANTE',
+      },
+      connection, strict: true,
+    });
 
     await connection.commit();
 

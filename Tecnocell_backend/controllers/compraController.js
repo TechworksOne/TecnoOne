@@ -12,15 +12,23 @@ const purchaseFinanceService =
 const cajaSesionModel =
   require('../models/cajaSesionModel');
 
-async function auditarCompra(req, empresaId, compraId, numeroCompra, total, tipo, body) {
+async function auditarCompra(req, empresaId, compraId, numeroCompra, total, tipo, body, connection) {
   await auditoriaService.registrar({
     req,
     empresaId,
-    accion: 'CREAR',
+    scope: 'branch',
+    sucursalId: Number(req.branchScope.sucursalId),
+    accion: 'COMPRA_CREADA',
     entidad: 'COMPRA',
     entidadId: compraId,
     descripcion: `Compra ${numeroCompra} creada`,
-    datosNuevos: { ...body, id: compraId, numero_compra: numeroCompra, total, tipo },
+    datosNuevos: { ...body, id: compraId, numero_compra: numeroCompra, total, tipo, sucursal_id: Number(req.branchScope.sucursalId) },
+    metadata: {
+      origen_financiero: String(body.fuente_pago || body.origen_financiero || body.metodo_pago || 'NO_ESPECIFICADO').toUpperCase(),
+      tipo_compra: tipo,
+    },
+    connection,
+    strict: true,
   });
 }
 
@@ -1081,9 +1089,8 @@ exports.createCompraProductos = async (req, res) => {
       }
     }
 
+    await auditarCompra(req, empresaId, compraId, numero_compra, total, 'PRODUCTO', req.body, connection);
     await connection.commit();
-
-    await auditarCompra(req, empresaId, compraId, numero_compra, total, 'PRODUCTO', req.body);
     res.status(201).json({
       success: true,
       message: 'Compra de productos registrada exitosamente',
@@ -1256,9 +1263,8 @@ exports.createCompraRepuestos = async (req, res) => {
       }
     }
 
+    await auditarCompra(req, empresaId, compraId, numero_compra, total, 'REPUESTO', req.body, connection);
     await connection.commit();
-
-    await auditarCompra(req, empresaId, compraId, numero_compra, total, 'REPUESTO', req.body);
     res.status(201).json({
       success: true,
       message: 'Compra de repuestos registrada exitosamente',
@@ -1530,9 +1536,8 @@ exports.createCompra = async (req, res) => {
       }
     }
 
+    await auditarCompra(req, empresaId, compraId, numero_compra, total, tipoCompra, req.body, connection);
     await connection.commit();
-
-    await auditarCompra(req, empresaId, compraId, numero_compra, total, tipoCompra, req.body);
     res.status(201).json({
       success: true,
       message: 'Compra registrada exitosamente',
@@ -1813,6 +1818,16 @@ exports.anularCompra = async (req, res) => {
       "UPDATE compras SET estado = 'CANCELADA', notas = CONCAT(COALESCE(notas,''), IF(notas IS NULL OR notas = '', '', ' | '), 'ANULADA: ', ?) WHERE id = ? AND empresa_id = ? AND sucursal_id = ?",
       [motivo || 'Sin motivo', id, empresaId, Number(req.branchScope.sucursalId)]
     );
+
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'branch', sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'COMPRA_ANULADA', entidad: 'COMPRA', entidadId: id,
+      descripcion: `Compra ${compra.numero_compra || id} anulada`,
+      datosAnteriores: compra,
+      datosNuevos: { estado: 'CANCELADA', motivo: motivo || 'Sin motivo' },
+      metadata: { origen_financiero: String(compra.fuente_pago || compra.origen_financiero || compra.metodo_pago || 'NO_ESPECIFICADO').toUpperCase(), reversa_financiera: true },
+      connection, strict: true,
+    });
 
     await connection.commit();
     res.json({ success: true, message: 'Compra anulada; stock y movimiento financiero revertidos correctamente' });
