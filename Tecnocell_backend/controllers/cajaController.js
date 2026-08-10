@@ -1,6 +1,7 @@
 const db = require('../config/database');
 const { randomUUID } = require('crypto');
 const auditoriaService = require('../services/auditoriaService');
+const { safeErrorMessage } = require('../utils/safeControllerError');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -351,7 +352,7 @@ exports.getSaldoCajaChica = async (req, res) => {
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   }
 };
@@ -439,7 +440,7 @@ exports.getMovimientosCajaChica = async (
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   }
 };
@@ -518,7 +519,7 @@ exports.getArqueosCajaChica = async (req, res) => {
     return res.status(error.statusCode || 500).json({
       success: false,
       code: error.code,
-      message: error.message,
+      message: safeErrorMessage(error, 'Error interno de caja'),
     });
   }
 };
@@ -622,7 +623,7 @@ exports.registrarArqueoCajaChica = async (req, res) => {
     return res.status(error.statusCode || 500).json({
       success: false,
       code: error.code,
-      message: error.message,
+      message: safeErrorMessage(error, 'Error interno de caja'),
     });
   } finally {
     conn.release();
@@ -708,7 +709,7 @@ exports.reponerCajaChicaManual = async (req, res) => {
       try { await conn.rollback(); } catch {}
     }
     console.error('Error en reposición manual de Caja Chica:', error);
-    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message });
+    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: safeErrorMessage(error, 'Error interno de caja') });
   } finally {
     conn.release();
   }
@@ -835,7 +836,7 @@ exports.reponerCajaChicaDesdeBanco = async (req, res) => {
       try { await conn.rollback(); } catch {}
     }
     console.error('Error en reposición bancaria de Caja Chica:', error);
-    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message });
+    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: safeErrorMessage(error, 'Error interno de caja') });
   } finally {
     conn.release();
   }
@@ -1011,7 +1012,7 @@ exports.registrarMovimientoCajaChica = async (
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();
@@ -1038,7 +1039,7 @@ exports.getCuentasBancarias = async (req, res) => {
     res.json({ success: true, data });
   } catch (error) {
     console.error('Error getting cuentas bancarias:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -1086,7 +1087,7 @@ exports.getSaldoCuentaBancaria = async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting saldo cuenta bancaria:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -1137,7 +1138,7 @@ exports.getMovimientosPorCuenta = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('[HistorialCuenta] Error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -1191,7 +1192,7 @@ exports.getMovimientosBancarios = async (req, res) => {
     res.json({ success: true, data: movimientos });
   } catch (error) {
     console.error('Error getting movimientos bancarios:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -1264,7 +1265,7 @@ exports.registrarMovimientoBancario = async (req, res) => {
   } catch (error) {
     try { await connection.rollback(); } catch (_) {}
     console.error('Error registrando movimiento bancario:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   } finally {
     if (!committed) try { await connection.rollback(); } catch (_) {}
     connection.release();
@@ -1438,7 +1439,7 @@ exports.confirmarMovimientoCajaChica = async (
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();
@@ -1531,7 +1532,7 @@ exports.confirmarMovimientoBancario = async (req, res) => {
   } catch (error) {
     try { await connection.rollback(); } catch (_) {}
     console.error('Error confirmando movimiento bancario:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   } finally {
     if (!committed) try { await connection.rollback(); } catch (_) {}
     connection.release();
@@ -2342,7 +2343,7 @@ exports.retirarDeBanco = async (req, res) => {
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();
@@ -2553,7 +2554,7 @@ exports.depositarAlBanco = async (req, res) => {
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();
@@ -2626,7 +2627,7 @@ exports.ingresoBanco = async (req, res) => {
     await conn.rollback();
     conn.release();
     console.error('Error en ingresoBanco:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -2726,7 +2727,7 @@ exports.transferenciaBancos = async (req, res) => {
     await conn.rollback();
     conn.release();
     console.error('Error en transferenciaBancos:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -2749,7 +2750,7 @@ exports.crearCuentaBancaria = async (req, res) => {
     res.status(201).json({ success: true, message: 'Cuenta bancaria creada exitosamente' });
   } catch (error) {
     console.error('Error al crear cuenta bancaria:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -2774,7 +2775,7 @@ exports.editarCuentaBancaria = async (req, res) => {
     res.json({ success: true, message: 'Cuenta bancaria actualizada exitosamente' });
   } catch (error) {
     console.error('Error al editar cuenta bancaria:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -2793,7 +2794,7 @@ exports.desactivarCuentaBancaria = async (req, res) => {
     res.json({ success: true, message: 'Cuenta bancaria desactivada exitosamente' });
   } catch (error) {
     console.error('Error al desactivar cuenta bancaria:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -3016,7 +3017,7 @@ exports.transferirCajaABanco = async (req, res) => {
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();

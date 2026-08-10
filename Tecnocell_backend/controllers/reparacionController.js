@@ -11,6 +11,7 @@ const auditoriaService = require('../services/auditoriaService');
 const reparacionInventoryService = require('../services/reparacionInventoryService');
 const { resolveRepairUploadDirectory } = require('../utils/repairUploadPath');
 const { withoutDeviceCredentials } = require('../utils/repairCredentials');
+const { safeErrorMessage, safeErrorDetails } = require('../utils/safeControllerError');
 
 // Métodos de pago válidos (igual que ventas)
 const VALID_METODOS_PAGO_REP = ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA_BAC', 'TARJETA_NEONET', 'TARJETA_OTRA'];
@@ -922,7 +923,7 @@ exports.createReparacion = async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al crear la reparación',
-      error: error.message
+      error: safeErrorDetails(error)
     });
   } finally {
     connection.release();
@@ -1010,7 +1011,7 @@ exports.getAllReparaciones = async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener las reparaciones',
-      error: error.message
+      error: safeErrorDetails(error)
     });
   }
 };
@@ -1108,7 +1109,7 @@ exports.getReparacionById = async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener la reparación',
-      error: error.message
+      error: safeErrorDetails(error)
     });
   }
 };
@@ -1420,7 +1421,7 @@ exports.changeRepairState = async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al cambiar el estado',
-      error: error.message
+      error: safeErrorDetails(error)
     });
   } finally {
     connection.release();
@@ -1492,7 +1493,7 @@ exports.updateEstadoReparacion = async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al actualizar el estado',
-      error: error.message
+      error: safeErrorDetails(error)
     });
   }
 };
@@ -1745,7 +1746,7 @@ exports.getHistorialCompleto = async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error al obtener el historial',
-      error: error.message
+      error: safeErrorDetails(error)
     });
   }
 };
@@ -1819,7 +1820,7 @@ exports.updatePrioridad = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al actualizar prioridad:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: 'Error al actualizar la prioridad', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: safeErrorMessage(error, 'Error al actualizar la prioridad'), error: safeErrorDetails(error) });
   } finally {
     connection.release();
   }
@@ -1991,7 +1992,7 @@ exports.registrarPagoSaldo = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al registrar pago de saldo:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: 'Error al registrar el pago', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: safeErrorMessage(error, 'Error al registrar el pago'), error: safeErrorDetails(error) });
   } finally {
     connection.release();
   }
@@ -2387,7 +2388,7 @@ exports.cancelarReparacion = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al cancelar reparación:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: 'Error al cancelar la reparación', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: safeErrorMessage(error, 'Error al cancelar la reparación'), error: safeErrorDetails(error) });
   } finally {
     connection.release();
   }
@@ -2814,7 +2815,7 @@ exports.completarReparacion = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al completar reparación:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al completar la reparación' });
+    res.status(error.statusCode || 500).json({ success: false, message: safeErrorMessage(error, 'Error al completar la reparación') });
   } finally {
     connection.release();
   }

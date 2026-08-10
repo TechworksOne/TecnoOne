@@ -11,6 +11,7 @@ const {
 const { validatePhone } = require('../utils/phoneValidation');
 const auditoriaService = require('../services/auditoriaService');
 const saleInventoryService = require('../services/saleInventoryService');
+const { safeErrorMessage } = require('../utils/safeControllerError');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -96,7 +97,7 @@ exports.subirComprobante = async (req, res) => {
     console.error('Error al subir comprobante:', error);
 
     return res.status(error.statusCode || 500).json({
-      message: error.message || 'Error al subir el comprobante.',
+      message: safeErrorMessage(error, 'Error al subir el comprobante.'),
     });
   }
 };
@@ -522,7 +523,7 @@ exports.createVenta = async (req, res) => {
 
     return res.status(500).json({
       error: 'Error al crear la venta',
-      details: error.message,
+      details: undefined,
     });
   } finally {
     if (connection) {
@@ -794,7 +795,7 @@ exports.createVentaFromQuote = async (req, res) => {
     }
     res.status(500).json({
       error: 'Error al convertir cotizacion a venta',
-      details: error.message
+      details: undefined
     });
   } finally {
     if (connection) connection.release();
@@ -880,7 +881,7 @@ exports.getAllVentas = async (req, res) => {
     }
     res.status(500).json({ 
       error: 'Error al obtener ventas',
-      details: error.message 
+      details: undefined
     });
   }
 };
@@ -912,7 +913,7 @@ exports.getVentaById = async (req, res) => {
     }
     res.status(500).json({ 
       error: 'Error al obtener venta',
-      details: error.message 
+      details: undefined
     });
   }
 };
@@ -1142,7 +1143,7 @@ exports.registrarPago = async (req, res) => {
     }
     res.status(500).json({ 
       error: 'Error al registrar pago',
-      details: error.message 
+      details: undefined
     });
   } finally {
     if (connection) connection.release();
@@ -1313,7 +1314,7 @@ exports.anularVenta = async (req, res) => {
 
     res.status(500).json({
       error: 'Error al anular venta',
-      details: error.message,
+      details: undefined,
     });
   } finally {
     if (connection) {
@@ -1353,7 +1354,7 @@ exports.getEstadisticas = async (req, res) => {
     }
     res.status(500).json({ 
       error: 'Error al obtener estadísticas',
-      details: error.message 
+      details: undefined
     });
   }
 };

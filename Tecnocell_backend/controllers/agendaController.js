@@ -93,36 +93,6 @@ async function validateEventoForTenant(connectionOrDb, eventoId, req) {
   return evento || null;
 }
 
-async function ensureColumn(tableName, columnName, alterSql) {
-  const [[col]] = await db.query(
-    `SELECT COUNT(*) AS cnt
-       FROM information_schema.COLUMNS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = ?
-        AND COLUMN_NAME = ?`,
-    [tableName, columnName]
-  );
-
-  if (col.cnt === 0) {
-    await db.query(alterSql);
-  }
-}
-
-async function ensureIndex(tableName, indexName, createSql) {
-  const [[idx]] = await db.query(
-    `SELECT COUNT(*) AS cnt
-       FROM information_schema.STATISTICS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = ?
-        AND INDEX_NAME = ?`,
-    [tableName, indexName]
-  );
-
-  if (idx.cnt === 0) {
-    await db.query(createSql);
-  }
-}
-
 async function resolveEventoEmpresaId(req, body) {
   if (!isSuperadminTenant(req)) {
     return requireTenantEmpresaId(req);
@@ -302,47 +272,9 @@ exports.deleteFechaEntrega = async (req, res) => {
   }
 };
 
-// Auto-crear tabla agenda_eventos si no existe.
-const ensureEventosTable = async () => {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS agenda_eventos (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      empresa_id INT(11) NOT NULL,
-      titulo VARCHAR(200) NOT NULL,
-      fecha DATE NOT NULL,
-      hora TIME DEFAULT NULL,
-      descripcion TEXT DEFAULT NULL,
-      tipo ENUM('nota','cita','recordatorio','otro') NOT NULL DEFAULT 'nota',
-      color VARCHAR(20) DEFAULT NULL,
-      creado_por VARCHAR(100) DEFAULT NULL,
-      creado_por_id INT DEFAULT NULL,
-      para_rol VARCHAR(50) DEFAULT NULL,
-      para_usuario_id INT DEFAULT NULL,
-      para_usuario_nombre VARCHAR(150) DEFAULT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX idx_agenda_eventos_empresa_id (empresa_id),
-      INDEX idx_agenda_eventos_empresa_fecha (empresa_id, fecha),
-      INDEX idx_agenda_eventos_empresa_usuario (empresa_id, para_usuario_id),
-      CONSTRAINT fk_agenda_eventos_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `);
-
-  await ensureColumn('agenda_eventos', 'empresa_id', 'ALTER TABLE agenda_eventos ADD COLUMN empresa_id INT(11) NULL AFTER id');
-  await ensureColumn('agenda_eventos', 'creado_por_id', 'ALTER TABLE agenda_eventos ADD COLUMN creado_por_id INT DEFAULT NULL');
-  await ensureColumn('agenda_eventos', 'para_rol', 'ALTER TABLE agenda_eventos ADD COLUMN para_rol VARCHAR(50) DEFAULT NULL');
-  await ensureColumn('agenda_eventos', 'para_usuario_id', 'ALTER TABLE agenda_eventos ADD COLUMN para_usuario_id INT DEFAULT NULL');
-  await ensureColumn('agenda_eventos', 'para_usuario_nombre', 'ALTER TABLE agenda_eventos ADD COLUMN para_usuario_nombre VARCHAR(150) DEFAULT NULL');
-
-  await ensureIndex('agenda_eventos', 'idx_agenda_eventos_empresa_id', 'CREATE INDEX idx_agenda_eventos_empresa_id ON agenda_eventos (empresa_id)');
-  await ensureIndex('agenda_eventos', 'idx_agenda_eventos_empresa_fecha', 'CREATE INDEX idx_agenda_eventos_empresa_fecha ON agenda_eventos (empresa_id, fecha)');
-  await ensureIndex('agenda_eventos', 'idx_agenda_eventos_empresa_usuario', 'CREATE INDEX idx_agenda_eventos_empresa_usuario ON agenda_eventos (empresa_id, para_usuario_id)');
-};
-
 // GET /api/agenda/eventos
 exports.getEventos = async (req, res) => {
   try {
-    await ensureEventosTable();
     const { fecha_inicio, fecha_fin } = req.query;
     const userId = req.user?.id ?? null;
     const userRoles = Array.isArray(req.user?.roles)
@@ -378,7 +310,6 @@ exports.getEventos = async (req, res) => {
 // POST /api/agenda/eventos
 exports.createEvento = async (req, res) => {
   try {
-    await ensureEventosTable();
     const { titulo, fecha, hora, descripcion, tipo, para_rol, para_usuario_id, para_usuario_nombre } = req.body;
     if (!titulo || !fecha) {
       return res.status(400).json({ success: false, message: 'titulo y fecha son obligatorios' });
@@ -420,7 +351,6 @@ exports.createEvento = async (req, res) => {
 // PUT /api/agenda/eventos/:id
 exports.updateEvento = async (req, res) => {
   try {
-    await ensureEventosTable();
     const { id } = req.params;
     const { titulo, fecha, hora, descripcion, tipo } = req.body;
     if (!titulo || !fecha) {
@@ -468,7 +398,6 @@ exports.updateEvento = async (req, res) => {
 // DELETE /api/agenda/eventos/:id
 exports.deleteEvento = async (req, res) => {
   try {
-    await ensureEventosTable();
     const { id } = req.params;
     const evento = await validateEventoForTenant(db, id, req);
     if (!evento) {

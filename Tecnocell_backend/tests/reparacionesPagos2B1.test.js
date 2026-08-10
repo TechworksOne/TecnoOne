@@ -43,10 +43,8 @@ assert.match(
 );
 
 // No debe usar índice financiero fijo.
-assert.doesNotMatch(
-  controller,
-  /pagoIndice:\s*0,/
-);
+// El anticipo inicial y su reverso usan indice cero legitimamente. Solo los
+// pagos posteriores deben usar el indice calculado desde el ledger.
 
 // Debe calcular siguiente índice desde el ledger.
 const maxMatches =
@@ -57,6 +55,12 @@ const maxMatches =
 assert.ok(
   maxMatches.length >= 2,
   'registrarPagoSaldo y completarReparacion deben calcular siguiente índice'
+);
+
+const dynamicIndexMatches = controller.match(/pagoIndice,\s*\n/g) || [];
+assert.ok(
+  dynamicIndexMatches.length >= 2,
+  'registrarPagoSaldo y completarReparacion deben usar el indice dinamico'
 );
 
 // Pago adicional mantiene agregados de la reparación.

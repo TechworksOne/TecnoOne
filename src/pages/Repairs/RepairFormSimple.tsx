@@ -22,6 +22,7 @@ import {
 } from '../../services/marcaLineaService';
 import { abrirContratoReparacion, createReparacion } from '../../services/repairService';
 import { useAuth } from '../../store/useAuth';
+import { useSucursalContext } from '../../store/useSucursalContext';
 import { useToast } from '../../components/ui/Toast';
 
 type Step = 'cliente' | 'equipo' | 'resumen';
@@ -52,7 +53,13 @@ export default function RepairFormSimple() {
   const navigate = useNavigate();
   const toast = useToast();
   const { user } = useAuth();
+  const branchMode = useSucursalContext(state => state.mode);
+  const contextVersion = useSucursalContext(state => state.contextVersion);
   const authUserName = user?.username || user?.name || 'Sistema';
+
+  useEffect(() => {
+    if (branchMode === 'consolidated') navigate('/reparaciones', { replace: true });
+  }, [branchMode, contextVersion, navigate]);
   const [currentStep, setCurrentStep] = useState<Step>('cliente');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | undefined>();
   const [equipmentData, setEquipmentData] = useState<EquipmentData>({
@@ -192,7 +199,10 @@ export default function RepairFormSimple() {
     if (currentStep === 'equipo') setCurrentStep('cliente');
     else if (currentStep === 'resumen') setCurrentStep('equipo');
   };
-  const handleSubmit = () => { createRepair(); };
+  const handleSubmit = () => {
+    if (branchMode === 'consolidated') return;
+    createRepair();
+  };
 
   const isStepCompleted = (step: Step) => {
     if (step === 'cliente') return !!selectedCustomer;

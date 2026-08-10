@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { sendSafeControllerError } = require('../utils/safeControllerError');
 const { parseLimit } = require('../utils/pagination');
 const { validatePhone } = require('../utils/phoneValidation');
 const auditoriaService = require('../services/auditoriaService');
@@ -80,7 +81,7 @@ exports.getDeudores = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error al obtener deudores:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al consultar deudores', { success: false });
   }
 };
 
@@ -110,7 +111,7 @@ exports.getDeudorById = async (req, res) => {
     res.json({ success: true, data: deudor });
   } catch (error) {
     console.error('Error al obtener crédito:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al consultar el deudor', { success: false });
   }
 };
 
@@ -255,7 +256,7 @@ exports.createDeudor = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al crear crédito:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al crear el deudor', { success: false });
   } finally {
     connection.release();
   }
@@ -286,7 +287,7 @@ exports.searchReparaciones = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error búsqueda reparaciones:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al actualizar el deudor', { success: false });
   }
 };
 
@@ -501,7 +502,7 @@ exports.registrarPago = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al registrar pago:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al registrar el pago', { success: false });
   } finally {
     connection.release();
   }
@@ -642,7 +643,7 @@ exports.anularDeudor = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error al anular crédito:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al eliminar el deudor', { success: false });
   } finally {
     connection.release();
   }
@@ -666,6 +667,6 @@ exports.getResumen = async (req, res) => {
     `, tenant.params);
     res.json({ success: true, data: stats });
   } catch (error) {
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al consultar pagos', { success: false });
   }
 };
