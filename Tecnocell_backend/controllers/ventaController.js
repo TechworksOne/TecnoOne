@@ -190,12 +190,6 @@ exports.createVenta = async (req, res) => {
       });
     }
 
-    if (!total || Number(total) <= 0) {
-      return res.status(400).json({
-        error: 'El total debe ser mayor a 0',
-      });
-    }
-
     if (!metodo_pago) {
       return res.status(400).json({
         error: 'El método de pago es requerido',
@@ -277,12 +271,61 @@ exports.createVenta = async (req, res) => {
       }
     }
 
-    const itemsJSON = JSON.stringify(items);
+    const pricedSale = await saleInventoryService.priceSaleItems(connection, {
+      branchScope: req.branchScope,
+      items,
+    });
+    const subtotalAutorizado = pricedSale.subtotal;
+    const impuestosAutorizados = 0;
+    const descuentoAutorizado = 0;
+    const interesAutorizado = 0;
+    const totalAutorizado = subtotalAutorizado;
+
+    if (Number(impuestos || 0) !== 0 || Number(descuento || 0) !== 0 || Number(interes_tarjeta || 0) !== 0) {
+      const error = new Error('No existe una regla empresarial configurada para impuestos, descuentos o recargos en venta directa');
+      error.statusCode = 400;
+      error.code = 'SALE_PRICING_RULE_NOT_CONFIGURED';
+      throw error;
+    }
+    if (!Number.isInteger(Number(total)) || Number(total) !== totalAutorizado) {
+      const error = new Error('El total enviado no coincide con el total calculado por el servidor');
+      error.statusCode = 409;
+      error.code = 'SALE_TOTAL_MISMATCH';
+      throw error;
+    }
+
+    if (pagos && Array.isArray(pagos)) {
+      pagosNormalizados = pagos.map(pago => {
+        const metodo = normalizeMetodoPago(pago.metodo);
+        const montoPago = Number(pago.monto || 0);
+        if (!metodo || !Number.isInteger(montoPago) || montoPago <= 0) {
+          const error = new Error('Pago de venta invalido');
+          error.statusCode = 400;
+          throw error;
+        }
+        return {
+          ...pago,
+          metodo,
+          monto: montoPago,
+          monto_recibido: metodo === 'EFECTIVO' ? Number(pago.monto_recibido ?? montoPago) : null,
+          cambio: metodo === 'EFECTIVO' ? Number(pago.cambio ?? 0) : null,
+        };
+      });
+      const pagosTotal = pagosNormalizados.reduce((sum, pago) => sum + pago.monto, 0);
+      if (pagosTotal > totalAutorizado) {
+        const error = new Error('Los pagos superan el total calculado por el servidor');
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+
+    const itemsAutorizados = pricedSale.items;
+    const itemsJSON = JSON.stringify(itemsAutorizados);
     const pagosJSON = pagosNormalizados
       ? JSON.stringify(pagosNormalizados)
       : null;
 
-    const totalVentaAplicado = Number(total) || 0;
+    const totalVentaAplicado = totalAutorizado;
 
     const montoPagadoNormalizado = pagosNormalizados
       ? Math.min(
@@ -340,11 +383,11 @@ exports.createVenta = async (req, res) => {
       numero_cotizacion || null,
       tipo_venta || 'PRODUCTOS',
       itemsJSON,
-      subtotal || 0,
-      impuestos || 0,
-      descuento || 0,
-      interes_tarjeta || 0,
-      total,
+      subtotalAutorizado,
+      impuestosAutorizados,
+      descuentoAutorizado,
+      interesAutorizado,
+      totalAutorizado,
       metodoPagoNorm,
       pagosJSON,
       montoPagadoNormalizado,
@@ -356,11 +399,11 @@ exports.createVenta = async (req, res) => {
     await saleInventoryService.applySale(connection, {
       branchScope: req.branchScope,
       ventaId: result.insertId,
-      items,
+      items: itemsAutorizados,
       usuarioId: req.user?.id ?? req.user?.userId ?? null,
     });
 
-    if (metodoPagoNorm && Number(total) > 0) {
+    if (metodoPagoNorm && totalAutorizado > 0) {
       if (pagosNormalizados) {
         for (const [pagoIndice, pago] of pagosNormalizados.entries()) {
           const financial = await saleInventoryService.registerFinancialMovement(connection, {
@@ -390,13 +433,13 @@ exports.createVenta = async (req, res) => {
           ventaId: result.insertId,
           pagoIndice: 0,
           metodo: metodoPagoNorm,
-          monto: Number(total),
+          monto: totalAutorizado,
           usuarioId: req.user?.id ?? req.user?.userId ?? null,
         });
         if (financial.requiresLegacyBankMovement) await cajaController.registrarMovimientoVenta(
           result.insertId,
           metodoPagoNorm,
-          total,
+          totalAutorizado,
           created_by || 'Sistema',
           connection,
           null,
@@ -427,7 +470,17 @@ exports.createVenta = async (req, res) => {
       entidad: 'VENTA',
       entidadId: result.insertId,
       descripcion: `Venta ${result.insertId} creada para ${cliente_nombre}`,
-      datosNuevos: { ...req.body, id: result.insertId, sucursal_id: sucursalId },
+      datosNuevos: {
+        id: result.insertId,
+        sucursal_id: sucursalId,
+        cliente_id,
+        items: itemsAutorizados,
+        subtotal: subtotalAutorizado,
+        impuestos: impuestosAutorizados,
+        descuento: descuentoAutorizado,
+        total: totalAutorizado,
+        metodo_pago: metodoPagoNorm,
+      },
       metadata: { origen_financiero: metodoPagoNorm },
       connection,
       strict: true,

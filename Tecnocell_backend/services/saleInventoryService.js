@@ -118,6 +118,58 @@ async function applySale(connection, { branchScope, ventaId, items, usuarioId })
   }
 }
 
+async function priceSaleItems(connection, { branchScope, items }) {
+  requireSpecific(branchScope);
+  const empresaId = Number(branchScope.empresaId);
+  const sucursalId = Number(branchScope.sucursalId);
+  const priced = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    const normalized = normalizeItem(items[index], index);
+    if (!normalized) {
+      throw saleError(`El servicio de la linea ${index + 1} no tiene un precio autorizado en catalogo`, 400, 'SALE_SERVICE_PRICE_NOT_AUTHORIZED');
+    }
+    const isProduct = normalized.source === 'PRODUCTO';
+    const catalog = isProduct ? 'productos' : 'repuestos';
+    const existence = isProduct ? 'producto_existencias' : 'repuesto_existencias';
+    const refColumn = isProduct ? 'producto_id' : 'repuesto_id';
+    const priceExpression = isProduct ? 'ROUND(c.precio_venta * 100)' : 'c.precio_publico';
+    const [[row]] = await connection.query(
+      `SELECT c.id, c.nombre, ${priceExpression} AS precio_centavos,
+              COALESCE(e.existencia, 0) AS existencia
+       FROM ${catalog} c
+       LEFT JOIN ${existence} e
+         ON e.empresa_id = c.empresa_id AND e.${refColumn} = c.id AND e.sucursal_id = ?
+       WHERE c.id = ? AND c.empresa_id = ? LIMIT 1 FOR UPDATE`,
+      [sucursalId, normalized.refId, empresaId]
+    );
+    if (!row) throw saleError('Articulo no encontrado en la empresa', 404, 'SALE_ITEM_NOT_FOUND');
+    if (Number(row.existencia) < normalized.cantidad) {
+      throw saleError(`Stock insuficiente para "${row.nombre}"`, 409, 'INSUFFICIENT_SALE_STOCK');
+    }
+    const unitPrice = Number(row.precio_centavos);
+    if (!Number.isInteger(unitPrice) || unitPrice < 0) {
+      throw saleError(`Precio no valido para "${row.nombre}"`, 409, 'INVALID_AUTHORIZED_SALE_PRICE');
+    }
+    priced.push({
+      ...items[index],
+      source: normalized.source,
+      ref_id: normalized.refId,
+      refId: normalized.refId,
+      nombre: row.nombre,
+      cantidad: normalized.cantidad,
+      precio_unitario: unitPrice,
+      precioUnit: unitPrice,
+      subtotal: unitPrice * normalized.cantidad,
+    });
+  }
+
+  return {
+    items: priced,
+    subtotal: priced.reduce((sum, item) => sum + item.subtotal, 0),
+  };
+}
+
 async function reverseSale(connection, { branchScope, ventaId, usuarioId, items = [] }) {
   requireSpecific(branchScope);
   const empresaId = Number(branchScope.empresaId);
@@ -320,6 +372,7 @@ async function reverseFinancialMovements(connection, {
 
 module.exports = {
   applySale,
+  priceSaleItems,
   registerFinancialMovement,
   requireSpecific,
   reverseFinancialMovements,

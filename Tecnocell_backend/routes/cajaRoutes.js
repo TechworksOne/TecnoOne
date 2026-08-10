@@ -59,8 +59,8 @@ router.get('/bancos', requirePermission('caja.ver'), cajaController.getCuentasBa
 router.get('/bancos/movimientos', requirePermission('caja.ver'), cajaController.getMovimientosBancarios);
 router.get('/bancos/:id/saldo', requirePermission('caja.ver'), cajaController.getSaldoCuentaBancaria);
 router.get('/bancos/:id/movimientos', requirePermission('caja.ver'), cajaController.getMovimientosPorCuenta);
-router.post('/bancos/movimiento', requirePermission('bancos.administrar'), cajaController.registrarMovimientoBancario);
-router.put('/bancos/confirmar/:id', requirePermission('bancos.administrar'), cajaController.confirmarMovimientoBancario);
+router.post('/bancos/movimiento', requirePermission('bancos.administrar'), requireBranchSpecific, cajaController.registrarMovimientoBancario);
+router.put('/bancos/confirmar/:id', requirePermission('bancos.administrar'), requireBranchSpecific, cajaController.confirmarMovimientoBancario);
 // CRUD bancos (solo admin)
 router.post('/bancos', requirePermission('bancos.administrar'), cajaController.crearCuentaBancaria);
 router.put('/bancos/:id', requirePermission('bancos.administrar'), cajaController.editarCuentaBancaria);
