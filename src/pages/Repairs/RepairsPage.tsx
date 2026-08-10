@@ -20,6 +20,7 @@ import {
   updatePrioridad,
   registrarPagoSaldo,
   cancelarReparacion,
+  getCredencialesReparacionById,
 } from '../../services/repairService';
 import { getTecnicos, asignarTecnico } from '../../services/otService';
 import type { Tecnico } from '../../types/ot';
@@ -880,6 +881,17 @@ export default function RepairsPage() {
     }
   };
 
+  const openAuthorizedDetail = async (repair: Repair) => {
+    try {
+      const credentials = await getCredencialesReparacionById(repair.id);
+      setSelectedRepair({ ...repair, recepcion: { ...repair.recepcion, ...credentials } });
+      setShowDetailModal(true);
+      setShowDetailPin(false);
+    } catch {
+      showToast('No fue posible obtener el detalle autorizado', 'error');
+    }
+  };
+
   // ── Optimistic updates ────────────────────────────────────────────────
   const handlePrioritySuccess = (id: string, prioridad: RepairPriority) => {
     setBackendRepairs(prev => prev.map(r => r.id === id ? { ...r, prioridad } : r));
@@ -1333,7 +1345,7 @@ const handleImprimirTicket = (r: Repair) => {
           <RepairCard
             key={r.id}
             repair={r}
-            onViewDetail={rep => { setSelectedRepair(rep); setShowDetailModal(true); setShowDetailPin(false); }}
+            onViewDetail={openAuthorizedDetail}
             onHistory={id => setShowHistoryModal(id)}
             onFlowManage={() => navigate('/flujo-reparaciones')}
             onPrintPDF={handleOpenContrato}

@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const path = require('path');
 
 // Cargar variables de entorno
 dotenv.config();
@@ -19,7 +18,8 @@ app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // Servir archivos estáticos desde /uploads (para desarrollo local)
 // En producción con Nginx, esto no será necesario
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const privateUploadsRoutes = require('./routes/privateUploadsRoutes');
+app.use('/uploads', privateUploadsRoutes);
 
 // Rutas
 const authRoutes = require('./routes/authRoutes');

@@ -9,6 +9,8 @@ const { validatePhone } = require('../utils/phoneValidation');
 const contratoService = require('../services/contratoService');
 const auditoriaService = require('../services/auditoriaService');
 const reparacionInventoryService = require('../services/reparacionInventoryService');
+const { resolveRepairUploadDirectory } = require('../utils/repairUploadPath');
+const { withoutDeviceCredentials } = require('../utils/repairCredentials');
 
 // Métodos de pago válidos (igual que ventas)
 const VALID_METODOS_PAGO_REP = ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA_BAC', 'TARJETA_NEONET', 'TARJETA_OTRA'];
@@ -111,16 +113,18 @@ const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 // Configuración de Multer para almacenamiento de imágenes
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const repairId = req.params.id || req.body.repairId || `REP${Date.now()}`;
-    const tipo = req.body.imageTipo || 'historial';
-
-    // Estructura: /app/uploads/reparaciones/REP123456/historial/
-    const uploadPath = path.join(UPLOADS_BASE, 'reparaciones', repairId, tipo);
-
-    // Crear directorios recursivamente
-    fs.mkdirSync(uploadPath, { recursive: true });
-
-    cb(null, uploadPath);
+    try {
+      const repairId = req.params.id || req.body.repairId || `REP${Date.now()}`;
+      const uploadPath = resolveRepairUploadDirectory(
+        UPLOADS_BASE,
+        repairId,
+        req.body.imageTipo || 'historial'
+      );
+      fs.mkdirSync(uploadPath, { recursive: true });
+      cb(null, uploadPath);
+    } catch (error) {
+      cb(error);
+    }
   },
   filename: (req, file, cb) => {
     const timestamp = Date.now();
@@ -979,19 +983,22 @@ exports.getAllReparaciones = async (req, res) => {
     const [reparaciones] = await db.query(query, params);
     
     // Convertir centavos a quetzales
-    const reparacionesFormateadas = reparaciones.map(rep => ({
-      ...rep,
-      mano_obra: centavosAQuetzales(rep.mano_obra),
-      subtotal: centavosAQuetzales(rep.subtotal),
-      impuestos: centavosAQuetzales(rep.impuestos),
-      total: centavosAQuetzales(rep.total),
-      monto_anticipo: centavosAQuetzales(rep.monto_anticipo),
-      saldo_anticipo: centavosAQuetzales(rep.saldo_anticipo),
-      monto_pagado_adicional: centavosAQuetzales(rep.monto_pagado_adicional || 0),
-      total_invertido: centavosAQuetzales(rep.total_invertido || 0),
-      diferencia_reparacion: centavosAQuetzales(rep.diferencia_reparacion || 0),
-      total_ganancia: centavosAQuetzales(rep.total_ganancia || 0)
-    }));
+    const reparacionesFormateadas = reparaciones.map(rep => {
+      const safeRepair = withoutDeviceCredentials(rep);
+      return ({
+        ...safeRepair,
+        mano_obra: centavosAQuetzales(rep.mano_obra),
+        subtotal: centavosAQuetzales(rep.subtotal),
+        impuestos: centavosAQuetzales(rep.impuestos),
+        total: centavosAQuetzales(rep.total),
+        monto_anticipo: centavosAQuetzales(rep.monto_anticipo),
+        saldo_anticipo: centavosAQuetzales(rep.saldo_anticipo),
+        monto_pagado_adicional: centavosAQuetzales(rep.monto_pagado_adicional || 0),
+        total_invertido: centavosAQuetzales(rep.total_invertido || 0),
+        diferencia_reparacion: centavosAQuetzales(rep.diferencia_reparacion || 0),
+        total_ganancia: centavosAQuetzales(rep.total_ganancia || 0)
+      });
+    });
     
     res.json({
       success: true,

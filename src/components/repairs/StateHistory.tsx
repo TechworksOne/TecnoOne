@@ -1,6 +1,7 @@
 import React from 'react';
 import { StateHistoryEntry, RepairStatus, SubStage } from '../../types/repair';
 import { Calendar, User, Camera, Package, FileText } from 'lucide-react';
+import AuthenticatedImage from '../common/AuthenticatedImage';
 
 interface StateHistoryProps {
   history: StateHistoryEntry[];
@@ -148,14 +149,11 @@ export function StateHistory({ history, className = '' }: StateHistoryProps) {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {entry.fotos.map((foto, fotoIndex) => (
                       <div key={fotoIndex} className="group relative">
-                        <img
+                        <AuthenticatedImage
                           src={foto}
                           alt={`Foto ${fotoIndex + 1}`}
                           className="w-full h-20 object-cover rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-shadow"
-                          onClick={() => {
-                            // En una implementación real, abrir modal de imagen
-                            window.open(foto, '_blank');
-                          }}
+                          onClick={(event) => window.open(event.currentTarget.src, '_blank', 'noopener,noreferrer')}
                         />
                         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 rounded-lg transition-all"></div>
                       </div>

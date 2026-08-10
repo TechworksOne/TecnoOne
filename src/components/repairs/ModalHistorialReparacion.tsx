@@ -5,10 +5,10 @@ import {
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import API_URL from '../../services/config';
-import { getImageUrl } from '../../utils/getImageUrl';
 import axios from 'axios';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
+import AuthenticatedImage from '../common/AuthenticatedImage';
 
 interface ModalHistorialReparacionProps {
   isOpen: boolean;
@@ -300,14 +300,14 @@ export default function ModalHistorialReparacion({
                             {ev.imagenes.length > 0 && (
                               <div className="mt-3 grid grid-cols-3 gap-2">
                                 {ev.imagenes.map((img, i) => (
-                                  <img
+                                  <AuthenticatedImage
                                     key={i}
-                                    src={getImageUrl(img)}
+                                    src={img}
                                     alt={`Evidencia ${i + 1}`}
                                     loading="lazy"
                                     decoding="async"
                                     className="h-20 w-full cursor-pointer rounded-xl border border-slate-200 object-cover shadow-sm transition hover:opacity-80 dark:border-slate-700"
-                                    onClick={() => setImagenAmpliada(getImageUrl(img))}
+                                    onClick={() => setImagenAmpliada(img)}
                                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                   />
                                 ))}
@@ -347,7 +347,7 @@ export default function ModalHistorialReparacion({
           >
             <X size={32} />
           </button>
-          <img
+          <AuthenticatedImage
             src={imagenAmpliada}
             alt="Imagen ampliada"
             className="max-w-full max-h-full object-contain rounded-lg"
