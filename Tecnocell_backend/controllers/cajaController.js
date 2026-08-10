@@ -583,6 +583,7 @@ exports.registrarArqueoCajaChica = async (req, res) => {
     await registrarAuditoriaFinanciera(conn, {
       req,
       empresaId: scope.empresaId,
+      scope: 'branch',
       accion: 'CAJA_CHICA_ARQUEO_REGISTRADO',
       entidad: 'caja_chica_arqueos',
       entidadId: insert.insertId,
@@ -677,6 +678,7 @@ exports.reponerCajaChicaManual = async (req, res) => {
     await registrarAuditoriaFinanciera(conn, {
       req,
       empresaId: scope.empresaId,
+      scope: 'branch',
       accion: 'CAJA_CHICA_REPOSICION_MANUAL',
       entidad: 'caja_chica',
       entidadId: insert.insertId,
@@ -799,6 +801,7 @@ exports.reponerCajaChicaDesdeBanco = async (req, res) => {
     await registrarAuditoriaFinanciera(conn, {
       req,
       empresaId: scope.empresaId,
+      scope: 'branch',
       accion: 'CAJA_CHICA_REPOSICION_BANCO',
       entidad: 'caja_chica',
       entidadId: movimientoCaja.insertId,

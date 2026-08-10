@@ -36,6 +36,49 @@ function optionalText(value, maxLength) {
   return String(value).trim().slice(0, maxLength);
 }
 
+function scopeError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function buildBranchVisibility(req, requestedSucursalId) {
+  const branch = req.branchScope;
+  if (!branch) throw scopeError(400, 'Contexto de sucursal requerido');
+
+  const requested = optionalText(requestedSucursalId, 30);
+  if (requested) {
+    if (requested.toUpperCase() === 'ALL') {
+      throw scopeError(400, 'sucursal_id debe ser un identificador específico');
+    }
+    const sucursalId = Number(requested);
+    if (!Number.isInteger(sucursalId) || sucursalId <= 0) {
+      throw scopeError(400, 'sucursal_id inválido');
+    }
+    if (!branch.allowedSucursalIds.map(Number).includes(sucursalId)) {
+      throw scopeError(403, 'Sucursal fuera del alcance autorizado');
+    }
+    if (branch.mode === 'specific' && Number(branch.sucursalId) !== sucursalId) {
+      throw scopeError(403, 'Sucursal fuera del contexto activo');
+    }
+    return { sql: 'sucursal_id = ?', params: [sucursalId] };
+  }
+
+  if (branch.mode === 'specific') {
+    return {
+      sql: '(sucursal_id IS NULL OR sucursal_id = ?)',
+      params: [Number(branch.sucursalId)],
+    };
+  }
+
+  const allowed = branch.allowedSucursalIds.map(Number);
+  if (!allowed.length) throw scopeError(403, 'Sin sucursales autorizadas');
+  return {
+    sql: `(sucursal_id IS NULL OR sucursal_id IN (${allowed.map(() => '?').join(', ')}))`,
+    params: allowed,
+  };
+}
+
 exports.getLogs = async (req, res) => {
   try {
     const empresaId = req.tenant?.empresa_id;
@@ -61,6 +104,7 @@ exports.getLogs = async (req, res) => {
       accion,
       entidad,
       entidad_id,
+      sucursal_id,
       fecha_desde,
       fecha_hasta,
     } = req.query;
@@ -100,8 +144,10 @@ exports.getLogs = async (req, res) => {
       });
     }
 
-    const conditions = ['empresa_id = ?'];
+    const branchVisibility = buildBranchVisibility(req, sucursal_id);
+    const conditions = ['empresa_id = ?', branchVisibility.sql];
     const params = [empresaId];
+    params.push(...branchVisibility.params);
 
     const searchValue = optionalText(search, 100);
 
@@ -174,6 +220,7 @@ exports.getLogs = async (req, res) => {
       `SELECT
          id,
          empresa_id,
+         sucursal_id,
          usuario_id,
          usuario_nombre,
          accion,
@@ -206,6 +253,10 @@ exports.getLogs = async (req, res) => {
   } catch (error) {
     console.error('getLogs auditoria error:', error);
 
+    if (error.status) {
+      return res.status(error.status).json({ success: false, message: error.message });
+    }
+
     return res.status(500).json({
       success: false,
       message: 'Error al obtener la auditoría',
@@ -232,10 +283,13 @@ exports.getLogById = async (req, res) => {
       });
     }
 
+    const branchVisibility = buildBranchVisibility(req);
+
     const [[row]] = await db.query(
       `SELECT
          id,
          empresa_id,
+         sucursal_id,
          usuario_id,
          usuario_nombre,
          accion,
@@ -244,6 +298,7 @@ exports.getLogById = async (req, res) => {
          descripcion,
          datos_anteriores,
          datos_nuevos,
+         metadata,
          metodo_http,
          ruta,
          ip,
@@ -252,8 +307,9 @@ exports.getLogById = async (req, res) => {
        FROM auditoria_logs
        WHERE id = ?
          AND empresa_id = ?
+         AND ${branchVisibility.sql}
        LIMIT 1`,
-      [id, empresaId]
+      [id, empresaId, ...branchVisibility.params]
     );
 
     if (!row) {
@@ -269,12 +325,18 @@ exports.getLogById = async (req, res) => {
     row.datos_nuevos =
       parseJson(row.datos_nuevos);
 
+    row.metadata = parseJson(row.metadata);
+
     return res.json({
       success: true,
       data: row,
     });
   } catch (error) {
     console.error('getLogById auditoria error:', error);
+
+    if (error.status) {
+      return res.status(error.status).json({ success: false, message: error.message });
+    }
 
     return res.status(500).json({
       success: false,
