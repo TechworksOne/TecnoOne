@@ -1,6 +1,8 @@
 const db = require('../config/database');
+const { sendSafeControllerError } = require('../utils/safeControllerError');
 const { parseLimit } = require('../utils/pagination');
 const { validatePhone } = require('../utils/phoneValidation');
+const auditoriaService = require('../services/auditoriaService');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -20,9 +22,17 @@ function requireTenantEmpresaId(req) {
   return empresaId;
 }
 
-function deudorTenantClause(req, alias = 'd') {
-  if (isSuperadminTenant(req)) return { sql: '', params: [] };
-  return { sql: ` AND ${alias}.empresa_id = ?`, params: [requireTenantEmpresaId(req)] };
+function deudorScopeClause(req, alias = 'd') {
+  const empresaId = requireTenantEmpresaId(req);
+  if (req.branchScope?.mode === 'specific') {
+    return { sql: ` AND ${alias}.empresa_id = ? AND ${alias}.sucursal_id = ?`, params: [empresaId, Number(req.branchScope.sucursalId)] };
+  }
+  const allowed = req.branchScope?.allowedSucursalIds?.map(Number).filter(Number.isInteger) || [];
+  if (!allowed.length) return { sql: ' AND 1 = 0', params: [] };
+  return {
+    sql: ` AND ${alias}.empresa_id = ? AND ${alias}.sucursal_id IN (${allowed.map(() => '?').join(',')})`,
+    params: [empresaId, ...allowed],
+  };
 }
 
 function pagoTenantClause(req, alias = 'p') {
@@ -34,7 +44,7 @@ function pagoTenantClause(req, alias = 'p') {
 exports.getDeudores = async (req, res) => {
   try {
     const { estado, cliente_id, search, tipo_origen } = req.query;
-    const tenant = deudorTenantClause(req, 'd');
+    const tenant = deudorScopeClause(req, 'd');
 
     let query = `
       SELECT 
@@ -71,7 +81,7 @@ exports.getDeudores = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error al obtener deudores:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al consultar deudores', { success: false });
   }
 };
 
@@ -79,7 +89,7 @@ exports.getDeudores = async (req, res) => {
 exports.getDeudorById = async (req, res) => {
   try {
     const { id } = req.params;
-    const deudorTenant = deudorTenantClause(req, 'd');
+    const deudorTenant = deudorScopeClause(req, 'd');
     const [rows] = await db.query(
       `SELECT d.*, TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(c.apellido), ''))) AS cliente_nombre_actual, c.telefono AS cliente_telefono_actual
        FROM deudores d
@@ -101,7 +111,7 @@ exports.getDeudorById = async (req, res) => {
     res.json({ success: true, data: deudor });
   } catch (error) {
     console.error('Error al obtener crédito:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al consultar el deudor', { success: false });
   }
 };
 
@@ -151,6 +161,7 @@ exports.createDeudor = async (req, res) => {
     const cuotaBase = parseFloat((total / cuotas).toFixed(2));
     const cuotaUlt  = parseFloat((total - cuotaBase * (cuotas - 1)).toFixed(2));
     const empresaId = requireTenantEmpresaId(req);
+    const sucursalId = Number(req.branchScope.sucursalId);
 
     if (cliente_id) {
       const [clientes] = await connection.query(
@@ -165,8 +176,8 @@ exports.createDeudor = async (req, res) => {
 
     if (referencia_venta_id) {
       const [ventas] = await connection.query(
-        'SELECT id FROM ventas WHERE id = ? AND empresa_id = ? LIMIT 1',
-        [referencia_venta_id, empresaId]
+        'SELECT id FROM ventas WHERE id = ? AND empresa_id = ? AND sucursal_id = ? LIMIT 1',
+        [referencia_venta_id, empresaId, sucursalId]
       );
       if (!ventas.length) {
         await connection.rollback();
@@ -176,8 +187,8 @@ exports.createDeudor = async (req, res) => {
 
     if (referencia_reparacion_id) {
       const [reparaciones] = await connection.query(
-        'SELECT id FROM reparaciones WHERE id = ? AND empresa_id = ? LIMIT 1',
-        [referencia_reparacion_id, empresaId]
+        'SELECT id FROM reparaciones WHERE id = ? AND empresa_id = ? AND sucursal_id = ? LIMIT 1',
+        [referencia_reparacion_id, empresaId, sucursalId]
       );
       if (!reparaciones.length) {
         await connection.rollback();
@@ -187,14 +198,14 @@ exports.createDeudor = async (req, res) => {
 
     const [result] = await connection.query(
       `INSERT INTO deudores
-         (empresa_id, cliente_id, cliente_nombre, cliente_telefono, descripcion,
+         (empresa_id, sucursal_id, cliente_id, cliente_nombre, cliente_telefono, descripcion,
           monto_total, monto_pagado, saldo_pendiente,
           fecha_vencimiento, referencia_venta_id, referencia_reparacion_id,
           tipo_origen, numero_cuotas, monto_cuota, frecuencia_pago, fecha_primer_pago,
           items_detalle, notas, estado, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDIENTE', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDIENTE', ?)`,
       [
-        empresaId, cliente_id || null, cliente_nombre, clienteTelefonoNormalizado,
+        empresaId, sucursalId, cliente_id || null, cliente_nombre, clienteTelefonoNormalizado,
         descripcion || null, total, total,
         fecha_vencimiento || null,
         referencia_venta_id || null,
@@ -240,12 +251,12 @@ exports.createDeudor = async (req, res) => {
     }
 
     await connection.commit();
-    const [rows] = await db.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ?', [deudorId, empresaId]);
+    const [rows] = await db.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ? AND sucursal_id = ?', [deudorId, empresaId, sucursalId]);
     res.status(201).json({ success: true, data: rows[0] });
   } catch (error) {
     await connection.rollback();
     console.error('Error al crear crédito:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al crear el deudor', { success: false });
   } finally {
     connection.release();
   }
@@ -264,19 +275,19 @@ exports.searchReparaciones = async (req, res) => {
               marca, modelo, estado,
               ROUND(total / 100, 2)          AS total,
               ROUND(monto_anticipo / 100, 2) AS monto_anticipo
-       FROM reparaciones
+       FROM reparaciones r
        WHERE (cliente_nombre LIKE ? OR marca LIKE ? OR modelo LIKE ?
               OR sticker_serie_interna LIKE ?)
-         AND empresa_id = ?
+         ${deudorScopeClause(req, 'r').sql}
          AND estado NOT IN ('CANCELADA')
        ORDER BY created_at DESC
        LIMIT ?`,
-      [like, like, like, like, empresaId, safeLimit]
+      [like, like, like, like, ...deudorScopeClause(req, 'r').params, safeLimit]
     );
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error búsqueda reparaciones:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al actualizar el deudor', { success: false });
   }
 };
 
@@ -317,13 +328,17 @@ exports.registrarPago = async (req, res) => {
       realizado_por, porcentaje_recargo = 0, usuario_id,
     } = req.body;
     const empresaId = requireTenantEmpresaId(req);
+    const sucursalId = Number(req.branchScope.sucursalId);
 
     if (!monto || Number(monto) <= 0) {
       await connection.rollback();
       return res.status(400).json({ error: 'El monto debe ser mayor a 0' });
     }
 
-    const [rows] = await connection.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ? LIMIT 1', [id, empresaId]);
+    const [rows] = await connection.query(
+      'SELECT * FROM deudores WHERE id = ? AND empresa_id = ? AND sucursal_id = ? LIMIT 1 FOR UPDATE',
+      [id, empresaId, sucursalId]
+    );
     if (!rows.length) {
       await connection.rollback();
       return res.status(404).json({ error: 'Crédito no encontrado' });
@@ -371,8 +386,8 @@ exports.registrarPago = async (req, res) => {
     const nuevoEstado      = nuevoSaldo <= 0 ? 'PAGADO' : 'PARCIAL';
 
     await connection.query(
-      'UPDATE deudores SET monto_pagado = ?, saldo_pendiente = ?, estado = ? WHERE id = ? AND empresa_id = ?',
-      [nuevoMontoPagado, nuevoSaldo, nuevoEstado, id, empresaId]
+      'UPDATE deudores SET monto_pagado = ?, saldo_pendiente = ?, estado = ? WHERE id = ? AND empresa_id = ? AND sucursal_id = ?',
+      [nuevoMontoPagado, nuevoSaldo, nuevoEstado, id, empresaId, sucursalId]
     );
 
     // ── Registrar movimiento en caja / banco ──
@@ -382,9 +397,9 @@ exports.registrarPago = async (req, res) => {
     if (metodo_pago === 'EFECTIVO') {
       const [cajaRes] = await connection.query(
         `INSERT INTO caja_chica
-           (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-         VALUES (?, 'INGRESO', ?, ?, 'Cobro Deuda', 'CONFIRMADO', ?, ?)`,
-        [empresaId, montoBase, concepto, agente, notas || null]
+           (empresa_id, sucursal_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+         VALUES (?, ?, 'INGRESO', ?, ?, 'Cobro Deuda', 'CONFIRMADO', ?, ?)`,
+        [empresaId, sucursalId, montoBase, concepto, agente, notas || null]
       );
       cajaMovId = cajaRes.insertId;
 
@@ -464,14 +479,30 @@ exports.registrarPago = async (req, res) => {
       );
     }
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      scope: 'branch',
+      sucursalId,
+      accion: 'DEUDOR_PAGO_REGISTRADO',
+      entidad: 'DEUDOR',
+      entidadId: id,
+      descripcion: `Pago registrado en credito ${deudor.numero_credito}`,
+      datosAnteriores: { monto_pagado: Number(deudor.monto_pagado), saldo_pendiente: Number(deudor.saldo_pendiente), estado: deudor.estado },
+      datosNuevos: { monto_pagado: nuevoMontoPagado, saldo_pendiente: nuevoSaldo, estado: nuevoEstado, metodo_pago },
+      metadata: { sucursal_id: sucursalId, pago_id: pagoId, caja_movimiento_id: cajaMovId, banco_movimiento_id: bancoMovId },
+      connection,
+      strict: true,
+    });
+
     await connection.commit();
 
-    const [updated] = await db.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ?', [id, empresaId]);
+    const [updated] = await db.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ? AND sucursal_id = ?', [id, empresaId, sucursalId]);
     res.json({ success: true, data: updated[0] });
   } catch (error) {
     await connection.rollback();
     console.error('Error al registrar pago:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al registrar el pago', { success: false });
   } finally {
     connection.release();
   }
@@ -486,13 +517,17 @@ exports.anularDeudor = async (req, res) => {
     const { id } = req.params;
     const { motivo, anulado_por } = req.body;
     const empresaId = requireTenantEmpresaId(req);
+    const sucursalId = Number(req.branchScope.sucursalId);
 
     if (!motivo || !String(motivo).trim()) {
       await connection.rollback();
       return res.status(400).json({ error: 'El motivo de anulación es requerido' });
     }
 
-    const [rows] = await connection.query('SELECT * FROM deudores WHERE id = ? AND empresa_id = ? LIMIT 1', [id, empresaId]);
+    const [rows] = await connection.query(
+      'SELECT * FROM deudores WHERE id = ? AND empresa_id = ? AND sucursal_id = ? LIMIT 1 FOR UPDATE',
+      [id, empresaId, sucursalId]
+    );
     if (!rows.length) {
       await connection.rollback();
       return res.status(404).json({ error: 'Crédito no encontrado' });
@@ -510,8 +545,8 @@ exports.anularDeudor = async (req, res) => {
            motivo_anulacion = ?,
            fecha_anulacion  = NOW(),
            anulado_por      = ?
-       WHERE id = ? AND empresa_id = ?`,
-      [String(motivo).trim(), anulado_por || null, id, empresaId]
+       WHERE id = ? AND empresa_id = ? AND sucursal_id = ?`,
+      [String(motivo).trim(), anulado_por || null, id, empresaId, sucursalId]
     );
 
     // ── Anular cuotas PENDIENTES ──
@@ -522,22 +557,8 @@ exports.anularDeudor = async (req, res) => {
       [id, empresaId]
     );
 
-    // ── Restaurar stock si es VENTA con items_detalle ──
-    if (deudor.tipo_origen === 'VENTA' && deudor.items_detalle) {
-      let items = [];
-      try { items = JSON.parse(deudor.items_detalle); } catch { items = []; }
-      for (const item of items) {
-        const itemId  = parseInt(item.id);
-        const itemQty = parseInt(item.cantidad) || 0;
-        if (itemId > 0 && itemQty > 0) {
-          // Update productos (items de venta siempre son productos)
-          await connection.query(
-            'UPDATE productos SET stock = stock + ? WHERE id = ? AND empresa_id = ?',
-            [itemQty, itemId, empresaId]
-          );
-        }
-      }
-    }
+    // Anular la deuda no anula la venta ni la reparación de origen. El inventario
+    // solo se revierte desde esos flujos, que poseen ledger multisucursal e idempotencia.
 
     // ── Reversas de pagos ya realizados ──
     const [pagosRealizados] = await connection.query(
@@ -558,16 +579,16 @@ exports.anularDeudor = async (req, res) => {
       if (pago.caja_movimiento_id) {
         await connection.query(
           `INSERT INTO caja_chica
-             (empresa_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
-           VALUES (?, 'EGRESO', ?, ?, 'Reversa Deuda', 'CONFIRMADO', ?, ?)`,
-          [empresaId, montoPago, concepto, agente, motivoCorto]
+             (empresa_id, sucursal_id, tipo_movimiento, monto, concepto, categoria, estado, realizado_por, observaciones)
+           VALUES (?, ?, 'EGRESO', ?, ?, 'Reversa Deuda', 'CONFIRMADO', ?, ?)`,
+          [empresaId, sucursalId, montoPago, concepto, agente, motivoCorto]
         );
       }
 
       if (pago.banco_movimiento_id) {
         // Fetch the original bank movement with its status
         const [movOrig] = await connection.query(
-          'SELECT id, cuenta_id, estado FROM movimientos_bancarios WHERE id = ? AND empresa_id = ? LIMIT 1',
+          'SELECT id, cuenta_id, estado FROM movimientos_bancarios WHERE id = ? AND empresa_id = ? LIMIT 1 FOR UPDATE',
           [pago.banco_movimiento_id, empresaId]
         );
         if (movOrig.length) {
@@ -579,6 +600,10 @@ exports.anularDeudor = async (req, res) => {
               [pago.banco_movimiento_id, empresaId]
             );
           } else if (movEstado === 'CONFIRMADO' && movOrig[0].cuenta_id) {
+            await connection.query(
+              'SELECT id FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? FOR UPDATE',
+              [movOrig[0].cuenta_id, empresaId]
+            );
             // Movement was confirmed — register a reversal EGRESO and subtract balance
             await connection.query(
               `INSERT INTO movimientos_bancarios
@@ -597,12 +622,28 @@ exports.anularDeudor = async (req, res) => {
       }
     }
 
+    await auditoriaService.registrar({
+      req,
+      empresaId,
+      scope: 'branch',
+      sucursalId,
+      accion: 'DEUDOR_ANULADO',
+      entidad: 'DEUDOR',
+      entidadId: id,
+      descripcion: `Credito ${deudor.numero_credito} anulado`,
+      datosAnteriores: { estado: deudor.estado, monto_pagado: Number(deudor.monto_pagado), saldo_pendiente: Number(deudor.saldo_pendiente) },
+      datosNuevos: { estado: 'ANULADO', motivo_anulacion: String(motivo).trim() },
+      metadata: { sucursal_id: sucursalId, pagos_revertidos: pagosRealizados.length, inventario_revertido: false },
+      connection,
+      strict: true,
+    });
+
     await connection.commit();
     res.json({ success: true, message: 'Crédito anulado correctamente' });
   } catch (error) {
     await connection.rollback();
     console.error('Error al anular crédito:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al eliminar el deudor', { success: false });
   } finally {
     connection.release();
   }
@@ -611,7 +652,7 @@ exports.anularDeudor = async (req, res) => {
 // ── Resumen / estadísticas ────────────────────────────────────────────────
 exports.getResumen = async (req, res) => {
   try {
-    const tenant = deudorTenantClause(req, 'deudores');
+    const tenant = deudorScopeClause(req, 'deudores');
     const [[stats]] = await db.query(`
       SELECT
         COUNT(*) AS total_creditos,
@@ -626,6 +667,6 @@ exports.getResumen = async (req, res) => {
     `, tenant.params);
     res.json({ success: true, data: stats });
   } catch (error) {
-    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    sendSafeControllerError(res, error, 'Error interno al consultar pagos', { success: false });
   }
 };

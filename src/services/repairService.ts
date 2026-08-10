@@ -217,15 +217,10 @@ export const getAllReparaciones = async (filters?: {
     });
 
     const reparaciones: Repair[] = response.data.data.map((rep: any) => {
-      const accesoValor = getAccesoValor(rep);
-
       let accesoTipo = normalizeAccesoTipo(rep.acceso_tipo || rep.accesoTipo);
 
       // Compatibilidad: si el backend dice "ninguno", pero sí trae valor tipo 1-2-3,
       // lo tratamos como patrón; si trae valor normal, lo tratamos como PIN.
-      if (accesoTipo === 'ninguno' && accesoValor) {
-        accesoTipo = looksLikePattern(accesoValor) ? 'patron' : 'pin';
-      }
 
       return {
         id: rep.id,
@@ -245,11 +240,11 @@ export const getAllReparaciones = async (filters?: {
 
           // Acceso del equipo
           accesoTipo,
-          accesoValor,
-          contrasena: accesoValor || '',
-          contraseña: accesoValor || '',
-          patronContrasena: accesoTipo === 'patron' ? (accesoValor || '') : (rep.patron_contrasena || ''),
-          patronContraseña: accesoTipo === 'patron' ? (accesoValor || '') : (rep.patron_contrasena || ''),
+          accesoValor: '',
+          contrasena: '',
+          contraseña: '',
+          patronContrasena: '',
+          patronContraseña: '',
 
           diagnosticoInicial: rep.diagnostico_inicial,
           estadoFisico: rep.estado_fisico,
@@ -332,6 +327,25 @@ export const getReparacionById = async (id: string): Promise<Repair> => {
     console.error('Error al obtener reparación:', error);
     throw error;
   }
+};
+
+// Los secretos del dispositivo se solicitan solo al abrir un detalle autorizado.
+export const getCredencialesReparacionById = async (id: string) => {
+  const response = await api.get(`/reparaciones/${id}`);
+  const rep = response.data.data || {};
+  const accesoValor = getAccesoValor(rep);
+  let accesoTipo = normalizeAccesoTipo(rep.acceso_tipo || rep.accesoTipo);
+  if (accesoTipo === 'ninguno' && accesoValor) {
+    accesoTipo = looksLikePattern(accesoValor) ? 'patron' : 'pin';
+  }
+  return {
+    accesoTipo,
+    accesoValor,
+    contrasena: accesoValor || '',
+    contraseña: accesoValor || '',
+    patronContrasena: accesoTipo === 'patron' ? accesoValor : '',
+    patronContraseña: accesoTipo === 'patron' ? accesoValor : '',
+  };
 };
 
 // ========== CONTRATO ==========

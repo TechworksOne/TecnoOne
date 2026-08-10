@@ -7,6 +7,7 @@ import Select from '../ui/Select';
 import Card from '../ui/Card';
 import Badge from '../ui/Badge';
 import { useToast } from '../ui/Toast';
+import AuthenticatedImage from '../common/AuthenticatedImage';
 
 interface EquipmentReceptionCardProps {
   reception: any;
@@ -599,7 +600,7 @@ export function EquipmentReceptionCard({ reception, onReceptionChange, isConfirm
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
               {reception.fotosRecepcion.map((foto: string, index: number) => (
                 <div key={index} className="relative group">
-                  <img
+                  <AuthenticatedImage
                     src={foto}
                     alt={`Foto ${index + 1}`}
                     className="w-full h-32 object-cover rounded-lg border shadow-sm"

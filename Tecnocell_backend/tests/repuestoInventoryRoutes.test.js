@@ -7,7 +7,7 @@ const controller = fs.readFileSync(path.join(__dirname, '..', 'controllers', 're
 const purchases = fs.readFileSync(path.join(__dirname, '..', 'controllers', 'compraController.js'), 'utf8');
 
 assert.match(routes, /branchScope, repuestoController\.getAllRepuestos/);
-assert.match(routes, /branchScope, repuestoController\.registrarMovimiento/);
+assert.match(routes, /branchScope, requireBranchSpecific, repuestoController\.registrarMovimiento/);
 assert.match(controller, /stockProjection\(req\.branchScope/);
 assert.match(controller, /DIRECT_STOCK_UPDATE_FORBIDDEN/);
 assert.match(controller, /repuestoInventoryService\.adjust/);

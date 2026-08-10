@@ -1,4 +1,6 @@
 const db = require('../config/database');
+const { sendSafeControllerError } = require('../utils/safeControllerError');
+const { calculateProfit } = require('../utils/reportFinancialMetrics');
 const { parsePagination, parseLimit } = require('../utils/pagination');
 const {
   normalizeScope, reportScopeClause, inventoryStockClause, validateDate, validateRange,
@@ -285,7 +287,7 @@ exports.getResumen = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getResumen:', error);
-    res.status(error.statusCode || 500).json({ error: 'Error al obtener resumen', details: error.message });
+    sendSafeControllerError(res, error, 'Error al obtener resumen', { error: 'Error al obtener resumen' });
   }
 };
 
@@ -344,9 +346,12 @@ exports.getDiario = async (req, res) => {
       costoTotal += m.costo;
     }
 
-    const gananciaBruta = totalIngresos - costoTotal;
-    const perdidasTotal = egresos[0].total || 0;
-    const gananciaNeta = gananciaBruta - perdidasTotal - descuentosTotal;
+    // ventas.total ya incluye el descuento; se conserva como dato informativo.
+    const { gananciaBruta, perdidasTotal, gananciaNeta } = calculateProfit({
+      totalIngresos,
+      costoTotal,
+      egresosTotal: egresos[0].total || 0,
+    });
 
     res.json({
       fecha: fechaFiltro,
@@ -367,7 +372,7 @@ exports.getDiario = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getDiario:', error);
-    res.status(error.statusCode || 500).json({ error: 'Error al obtener reporte diario', details: error.message });
+    sendSafeControllerError(res, error, 'Error al obtener reporte diario', { error: 'Error al obtener reporte diario' });
   }
 };
 
@@ -494,7 +499,7 @@ exports.getSemanal = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getSemanal:', error);
-    res.status(error.statusCode || 500).json({ error: 'Error al obtener reporte semanal', details: error.message });
+    sendSafeControllerError(res, error, 'Error al obtener reporte semanal', { error: 'Error al obtener reporte semanal' });
   }
 };
 
@@ -567,7 +572,7 @@ exports.getProductosMasVendidos = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getProductosMasVendidos:', error);
-    res.status(error.statusCode || 500).json({ error: 'Error al obtener productos más vendidos', details: error.message });
+    sendSafeControllerError(res, error, 'Error al obtener productos más vendidos', { error: 'Error al obtener productos más vendidos' });
   }
 };
 
@@ -646,7 +651,7 @@ exports.getHistorialVentas = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getHistorialVentas:', error);
-    res.status(error.statusCode || 500).json({ error: 'Error al obtener historial de ventas', details: error.message });
+    sendSafeControllerError(res, error, 'Error al obtener historial de ventas', { error: 'Error al obtener historial de ventas' });
   }
 };
 
@@ -719,9 +724,12 @@ exports.getMetricasFinancieras = async (req, res) => {
       porDia[fecha].costo += m.costo;
     }
 
-    const gananciaBruta = totalIngresos - costoTotal;
-    const perdidasTotal = (egresos[0].total || 0) + (anuladas[0].monto || 0);
-    const gananciaNeta = gananciaBruta - perdidasTotal - descuentosTotal;
+    // Las anuladas no son ingreso ni una perdida adicional.
+    const { gananciaBruta, perdidasTotal, gananciaNeta } = calculateProfit({
+      totalIngresos,
+      costoTotal,
+      egresosTotal: egresos[0].total || 0,
+    });
     const ticketPromedio = ventas.length > 0 ? totalIngresos / ventas.length : 0;
     const margenPromedio = totalIngresos > 0 ? (gananciaBruta / totalIngresos) * 100 : 0;
 
@@ -764,6 +772,6 @@ exports.getMetricasFinancieras = async (req, res) => {
     });
   } catch (error) {
     console.error('Error en getMetricasFinancieras:', error);
-    res.status(error.statusCode || 500).json({ error: 'Error al obtener métricas financieras', details: error.message });
+    sendSafeControllerError(res, error, 'Error al obtener métricas financieras', { error: 'Error al obtener métricas financieras' });
   }
 };

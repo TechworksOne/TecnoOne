@@ -5,6 +5,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { imageFileFilter, getSafeImageExtension, sanitizeBaseName } = require('../utils/uploadSecurity');
+const { resolveRepairUploadDirectory } = require('../utils/repairUploadPath');
+const { withoutDeviceCredentials } = require('../utils/repairCredentials');
 
 // Ruta base de uploads — siempre absoluta para ser compatible con Docker bind mount
 // Dentro del contenedor es /app/uploads (mapeado a /var/www/Tecnocell_storage/uploads en el host)
@@ -13,13 +15,14 @@ const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 // Configuración de Multer para imágenes de ingreso de equipo
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const repairId = req.params.id || req.body.reparacion_id;
-
-    // Estructura: /app/uploads/reparaciones/REP123456/ingreso/
-    const uploadPath = path.join(UPLOADS_BASE, 'reparaciones', repairId, 'ingreso');
-
-    fs.mkdirSync(uploadPath, { recursive: true });
-    cb(null, uploadPath);
+    try {
+      const repairId = req.params.id || req.body.reparacion_id;
+      const uploadPath = resolveRepairUploadDirectory(UPLOADS_BASE, repairId, 'ingreso');
+      fs.mkdirSync(uploadPath, { recursive: true });
+      cb(null, uploadPath);
+    } catch (error) {
+      cb(error);
+    }
   },
   filename: (req, file, cb) => {
     const timestamp = Date.now();
@@ -365,7 +368,7 @@ exports.getReparacionesFlujoActivo = async (req, res) => {
     const [rows] = await db.query(query, params);
 
     const data = rows.map(r => ({
-      ...r,
+      ...withoutDeviceCredentials(r),
       mano_obra:    r.mano_obra    / 100,
       subtotal:     r.subtotal     / 100,
       impuestos:    r.impuestos    / 100,
@@ -439,7 +442,7 @@ exports.getEntregadas = async (req, res) => {
     const [rows] = await db.query(query, params);
 
     const data = rows.map(r => ({
-      ...r,
+      ...withoutDeviceCredentials(r),
       mano_obra:      r.mano_obra      / 100,
       subtotal:       r.subtotal       / 100,
       impuestos:      r.impuestos      / 100,

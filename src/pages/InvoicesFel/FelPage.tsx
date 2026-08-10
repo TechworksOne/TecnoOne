@@ -12,11 +12,9 @@ import Table from "../../components/ui/Table";
 import { useToast } from "../../components/ui/Toast";
 import { formatDate, formatMoney } from "../../lib/format";
 import { mockInvoices, mockSales } from "../../lib/mock";
-import { useAuth } from "../../store/useAuth";
 import { Invoice } from "../../types/invoice";
 
 export default function FelPage() {
-  const { role } = useAuth();
   const toast = useToast();
 
   const [invoices, setInvoices] = useState(mockInvoices);
@@ -56,16 +54,6 @@ export default function FelPage() {
         <Button variant="ghost" onClick={() => viewXML(inv)} title="Ver XML">
           <Download size={16} />
         </Button>
-        {role === "admin" && inv.status === "certified" && (
-          <Button
-            variant="ghost"
-            onClick={() => openVoidDialog(inv)}
-            title="Anular"
-            className="text-red-600"
-          >
-            <XCircle size={16} />
-          </Button>
-        )}
       </div>
     ),
   }));

@@ -1,6 +1,5 @@
 import React from "react";
 import DashboardPage from "./pages/Dashboard/DashboardPage";
-import FelPage from "./pages/InvoicesFel/FelPage";
 import LoginPage from "./pages/Login/LoginPage";
 import CustomersPage from "./pages/Customers/CustomersPage";
 import SuppliersPage from "./pages/Suppliers/SuppliersPage";
@@ -107,7 +106,6 @@ const routes = [
   { path: "/usuarios",       element: PP(PERMISSIONS.USUARIOS_ADMINISTRAR, <UsersPage />, 'usuarios') },
 
   // ── Sin restricción de rol (solo autenticación) ────────────────────────────
-  { path: "/fel",    element: <FelPage /> },
   { path: "/perfil", element: <ProfilePage /> },
 ];
 

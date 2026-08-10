@@ -1,6 +1,7 @@
 const db = require('../config/database');
 const { randomUUID } = require('crypto');
 const auditoriaService = require('../services/auditoriaService');
+const { safeErrorMessage } = require('../utils/safeControllerError');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -351,7 +352,7 @@ exports.getSaldoCajaChica = async (req, res) => {
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   }
 };
@@ -439,7 +440,7 @@ exports.getMovimientosCajaChica = async (
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   }
 };
@@ -518,7 +519,7 @@ exports.getArqueosCajaChica = async (req, res) => {
     return res.status(error.statusCode || 500).json({
       success: false,
       code: error.code,
-      message: error.message,
+      message: safeErrorMessage(error, 'Error interno de caja'),
     });
   }
 };
@@ -622,7 +623,7 @@ exports.registrarArqueoCajaChica = async (req, res) => {
     return res.status(error.statusCode || 500).json({
       success: false,
       code: error.code,
-      message: error.message,
+      message: safeErrorMessage(error, 'Error interno de caja'),
     });
   } finally {
     conn.release();
@@ -708,7 +709,7 @@ exports.reponerCajaChicaManual = async (req, res) => {
       try { await conn.rollback(); } catch {}
     }
     console.error('Error en reposición manual de Caja Chica:', error);
-    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message });
+    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: safeErrorMessage(error, 'Error interno de caja') });
   } finally {
     conn.release();
   }
@@ -835,7 +836,7 @@ exports.reponerCajaChicaDesdeBanco = async (req, res) => {
       try { await conn.rollback(); } catch {}
     }
     console.error('Error en reposición bancaria de Caja Chica:', error);
-    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message });
+    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: safeErrorMessage(error, 'Error interno de caja') });
   } finally {
     conn.release();
   }
@@ -1011,7 +1012,7 @@ exports.registrarMovimientoCajaChica = async (
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();
@@ -1038,7 +1039,7 @@ exports.getCuentasBancarias = async (req, res) => {
     res.json({ success: true, data });
   } catch (error) {
     console.error('Error getting cuentas bancarias:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -1086,7 +1087,7 @@ exports.getSaldoCuentaBancaria = async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting saldo cuenta bancaria:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -1137,7 +1138,7 @@ exports.getMovimientosPorCuenta = async (req, res) => {
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('[HistorialCuenta] Error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -1191,12 +1192,14 @@ exports.getMovimientosBancarios = async (req, res) => {
     res.json({ success: true, data: movimientos });
   } catch (error) {
     console.error('Error getting movimientos bancarios:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
 // Registrar movimiento bancario (manual)
 exports.registrarMovimientoBancario = async (req, res) => {
+  const connection = await db.getConnection();
+  let committed = false;
   try {
     const {
       cuenta_id,
@@ -1209,9 +1212,20 @@ exports.registrarMovimientoBancario = async (req, res) => {
       realizado_por
     } = req.body;
     const empresaId = getTenantEmpresaId(req);
+    const tipoNormalizado = String(tipo_movimiento || '').trim().toUpperCase();
+    const montoNormalizado = Number(monto);
 
-    const [cuentas] = await db.query(
-      'SELECT id FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1',
+    if (!['INGRESO', 'EGRESO'].includes(tipoNormalizado)) {
+      return res.status(400).json({ success: false, message: 'Tipo de movimiento bancario invalido' });
+    }
+    if (!Number.isFinite(montoNormalizado) || montoNormalizado <= 0) {
+      return res.status(400).json({ success: false, message: 'El monto debe ser numerico y mayor a cero' });
+    }
+
+    await connection.beginTransaction();
+
+    const [cuentas] = await connection.query(
+      'SELECT id FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? AND activa = TRUE LIMIT 1 FOR UPDATE',
       [cuenta_id, empresaId]
     );
 
@@ -1219,25 +1233,29 @@ exports.registrarMovimientoBancario = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Cuenta bancaria no encontrada o inactiva' });
     }
     
-    const [result] = await db.query(
+    const [result] = await connection.query(
       `INSERT INTO movimientos_bancarios 
        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto, categoria, estado, numero_referencia, realizado_por, observaciones)
        VALUES (?, ?, ?, ?, ?, ?, 'CONFIRMADO', ?, ?, ?)`,
-      [empresaId, cuenta_id, tipo_movimiento, monto, concepto, categoria || 'Otro', numero_referencia, realizado_por, observaciones]
+      [empresaId, cuenta_id, tipoNormalizado, montoNormalizado, concepto, categoria || 'Otro', numero_referencia, realizado_por, observaciones]
     );
     
     // Actualizar saldo de la cuenta (movimientos manuales se confirman automáticamente)
-    const operacion = tipo_movimiento === 'INGRESO' ? '+' : '-';
-    await db.query(
+    const operacion = tipoNormalizado === 'INGRESO' ? '+' : '-';
+    await connection.query(
       `UPDATE cuentas_bancarias SET saldo_actual = saldo_actual ${operacion} ? WHERE id = ? AND empresa_id = ?`,
-      [monto, cuenta_id, empresaId]
+      [montoNormalizado, cuenta_id, empresaId]
     );
     await auditoriaService.registrar({
       req, empresaId, scope: 'company', accion: 'BANCO_MOVIMIENTO_REGISTRADO', entidad: 'MOVIMIENTO_BANCARIO', entidadId: result.insertId,
-      descripcion: `Movimiento manual ${tipo_movimiento} registrado en cuenta ${cuenta_id}`,
-      datosNuevos: { cuenta_id: Number(cuenta_id), tipo_movimiento, monto: Number(monto), estado: 'CONFIRMADO' },
+      descripcion: `Movimiento manual ${tipoNormalizado} registrado en cuenta ${cuenta_id}`,
+      datosNuevos: { cuenta_id: Number(cuenta_id), tipo_movimiento: tipoNormalizado, monto: montoNormalizado, estado: 'CONFIRMADO' },
       metadata: { origen: 'MANUAL', categoria: categoria || 'Otro' },
+      connection,
+      strict: true,
     });
+    await connection.commit();
+    committed = true;
     
     res.status(201).json({
       success: true,
@@ -1245,8 +1263,12 @@ exports.registrarMovimientoBancario = async (req, res) => {
       data: { id: result.insertId }
     });
   } catch (error) {
+    try { await connection.rollback(); } catch (_) {}
     console.error('Error registrando movimiento bancario:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
+  } finally {
+    if (!committed) try { await connection.rollback(); } catch (_) {}
+    connection.release();
   }
 };
 
@@ -1417,7 +1439,7 @@ exports.confirmarMovimientoCajaChica = async (
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();
@@ -1426,13 +1448,16 @@ exports.confirmarMovimientoCajaChica = async (
 
 // Confirmar movimiento bancario
 exports.confirmarMovimientoBancario = async (req, res) => {
+  const connection = await db.getConnection();
+  let committed = false;
   try {
     const { id } = req.params;
     const tenant = financialTenantClause(req);
+    await connection.beginTransaction();
     
     // Obtener detalles del movimiento
-    const [movimiento] = await db.query(
-      `SELECT * FROM movimientos_bancarios WHERE id = ?${tenant.sql}`,
+    const [movimiento] = await connection.query(
+      `SELECT * FROM movimientos_bancarios WHERE id = ?${tenant.sql} FOR UPDATE`,
       [id, ...tenant.params]
     );
     
@@ -1460,7 +1485,7 @@ exports.confirmarMovimientoBancario = async (req, res) => {
 
     // No se puede confirmar un anticipo de una reparación cancelada
     if (mov.referencia_tipo === 'REPARACION' && mov.referencia_id) {
-      const [[rep]] = await db.query(
+      const [[rep]] = await connection.query(
         'SELECT estado FROM reparaciones WHERE id = ? AND empresa_id = ?',
         [mov.referencia_id, mov.empresa_id]
       );
@@ -1473,7 +1498,7 @@ exports.confirmarMovimientoBancario = async (req, res) => {
     }
 
     // Actualizar estado a CONFIRMADO con trazabilidad
-    await db.query(
+    const [statusUpdate] = await connection.query(
       `UPDATE movimientos_bancarios SET estado = 'CONFIRMADO', confirmado_en = NOW(), confirmado_por = ? WHERE id = ?${tenant.sql}`,
       [
         req.user?.id ?? req.user?.userId ?? req.user?.usuario_id ?? null,
@@ -1481,10 +1506,11 @@ exports.confirmarMovimientoBancario = async (req, res) => {
         ...tenant.params
       ]
     );
+    if (statusUpdate.affectedRows !== 1) throw new Error('No fue posible confirmar el movimiento bancario');
     
     // Actualizar saldo de la cuenta bancaria
     const operacion = mov.tipo_movimiento === 'INGRESO' ? '+' : '-';
-    await db.query(
+    await connection.query(
       `UPDATE cuentas_bancarias SET saldo_actual = saldo_actual ${operacion} ? WHERE id = ?${tenant.sql}`,
       [mov.monto, mov.cuenta_id, ...tenant.params]
     );
@@ -1493,15 +1519,23 @@ exports.confirmarMovimientoBancario = async (req, res) => {
       descripcion: `Movimiento bancario ${id} confirmado`, datosAnteriores: { estado: mov.estado },
       datosNuevos: { estado: 'CONFIRMADO', cuenta_id: Number(mov.cuenta_id), tipo_movimiento: mov.tipo_movimiento, monto: Number(mov.monto) },
       metadata: { origen: mov.referencia_tipo || 'CONFIRMACION_MANUAL' },
+      connection,
+      strict: true,
     });
+    await connection.commit();
+    committed = true;
     
     res.json({ 
       success: true, 
       message: 'Movimiento confirmado y saldo actualizado' 
     });
   } catch (error) {
+    try { await connection.rollback(); } catch (_) {}
     console.error('Error confirmando movimiento bancario:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
+  } finally {
+    if (!committed) try { await connection.rollback(); } catch (_) {}
+    connection.release();
   }
 };
 
@@ -2309,7 +2343,7 @@ exports.retirarDeBanco = async (req, res) => {
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();
@@ -2520,7 +2554,7 @@ exports.depositarAlBanco = async (req, res) => {
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();
@@ -2593,7 +2627,7 @@ exports.ingresoBanco = async (req, res) => {
     await conn.rollback();
     conn.release();
     console.error('Error en ingresoBanco:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -2693,7 +2727,7 @@ exports.transferenciaBancos = async (req, res) => {
     await conn.rollback();
     conn.release();
     console.error('Error en transferenciaBancos:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -2716,7 +2750,7 @@ exports.crearCuentaBancaria = async (req, res) => {
     res.status(201).json({ success: true, message: 'Cuenta bancaria creada exitosamente' });
   } catch (error) {
     console.error('Error al crear cuenta bancaria:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -2741,7 +2775,7 @@ exports.editarCuentaBancaria = async (req, res) => {
     res.json({ success: true, message: 'Cuenta bancaria actualizada exitosamente' });
   } catch (error) {
     console.error('Error al editar cuenta bancaria:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -2760,7 +2794,7 @@ exports.desactivarCuentaBancaria = async (req, res) => {
     res.json({ success: true, message: 'Cuenta bancaria desactivada exitosamente' });
   } catch (error) {
     console.error('Error al desactivar cuenta bancaria:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error interno de caja' });
   }
 };
 
@@ -2983,7 +3017,7 @@ exports.transferirCajaABanco = async (req, res) => {
       .json({
         success: false,
         code: error.code,
-        message: error.message,
+        message: safeErrorMessage(error, 'Error interno de caja'),
       });
   } finally {
     conn.release();

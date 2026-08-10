@@ -214,6 +214,10 @@ export default function FlujoReparacionDetailPage() {
   }, [id, contextVersion]);
 
   useEffect(() => {
+    if (isConsolidated) navigate('/flujo-reparaciones', { replace: true });
+  }, [isConsolidated, contextVersion, navigate]);
+
+  useEffect(() => {
     if (canAssignTech) {
       getTecnicos().then(setTecnicos).catch(() => {});
     }
@@ -431,6 +435,8 @@ export default function FlujoReparacionDetailPage() {
       ));
     }
   };
+
+  if (isConsolidated) return null;
 
   if (loading) {
     return (

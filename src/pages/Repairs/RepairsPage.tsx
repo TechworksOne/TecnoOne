@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Plus, Search, Eye, EyeOff, Clock, History, Printer, FileSearch,
   User, Smartphone, CalendarDays, Tag, Wrench,
@@ -20,10 +20,12 @@ import {
   updatePrioridad,
   registrarPagoSaldo,
   cancelarReparacion,
+  getCredencialesReparacionById,
 } from '../../services/repairService';
 import { getTecnicos, asignarTecnico } from '../../services/otService';
 import type { Tecnico } from '../../types/ot';
 import { useAuth } from '../../store/useAuth';
+import { useSucursalContext } from '../../store/useSucursalContext';
 
 // ── Style maps ────────────────────────────────────────────────────────────
 const STATUS_PILL: Record<string, string> = {
@@ -626,6 +628,7 @@ function RepairCard({
   onCancel,
   onAssignTech,
   userIsAdmin,
+  readOnly,
 }: {
   repair: Repair;
   onViewDetail: (r: Repair) => void;
@@ -638,6 +641,7 @@ function RepairCard({
   onCancel: (r: Repair) => void;
   onAssignTech: (r: Repair) => void;
   userIsAdmin: boolean;
+  readOnly: boolean;
 }) {
   const isCancelled = repair.estado === 'CANCELADA';
   const isDelivered = repair.estado === 'ENTREGADA';
@@ -792,7 +796,7 @@ function RepairCard({
           <button onClick={() => onHistory(repair.id)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
             <History size={12} /> Ver Historial
           </button>
-          {canEditOperationalData && (
+          {!readOnly && canEditOperationalData && (
             <button onClick={onFlowManage} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800">
               <Clock size={12} /> Flujo
             </button>
@@ -803,22 +807,22 @@ function RepairCard({
           <button onClick={() => onPrintTicket(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800" title="Imprimir ticket térmico">
             <Printer size={12} /> Ticket
           </button>
-          {canEditOperationalData && (
+          {!readOnly && canEditOperationalData && (
             <button onClick={() => onEditPriority(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-800">
               <ChevronDown size={12} /> Prioridad
             </button>
           )}
-          {!isCancelled && hasTotal && !isPaid && (
+          {!readOnly && !isCancelled && hasTotal && !isPaid && (
             <button onClick={() => onPayBalance(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
               <DollarSign size={12} /> Pagar Saldo
             </button>
           )}
-          {!isCancelled && repair.estado !== 'ENTREGADA' && (
+          {!readOnly && !isCancelled && repair.estado !== 'ENTREGADA' && (
             <button onClick={() => onCancel(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-red-50 text-red-700 border-red-200 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800">
               <Ban size={12} /> Cancelar
             </button>
           )}
-          {userIsAdmin && canEditOperationalData && (
+          {!readOnly && userIsAdmin && canEditOperationalData && (
             <button onClick={() => onAssignTech(repair)} className="flex-1 lg:flex-none h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-xl text-xs font-semibold border transition-colors bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800">
               <UserCheck size={12} /> {repair.tecnicoAsignadoId ? 'Técnico' : 'Asignar'}
             </button>
@@ -836,6 +840,10 @@ export default function RepairsPage() {
   const { user, hasPermission } = useAuth();
   const canAssignTech = hasPermission('reparaciones.asignar_tecnico');
   const { empresa, loadEmpresa } = useEmpresa();
+  const branchMode = useSucursalContext(state => state.mode);
+  const contextVersion = useSucursalContext(state => state.contextVersion);
+  const readOnlyConsolidated = branchMode === 'consolidated';
+  const requestSequence = useRef(0);
 
   const [searchQuery,    setSearchQuery]    = useState('');
   const [statusFilter,   setStatusFilter]   = useState('');
@@ -855,7 +863,24 @@ export default function RepairsPage() {
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [grupoFiltro, setGrupoFiltro]       = useState<GrupoFiltro>('proceso');
 
-  useEffect(() => { loadRepairs(); loadEmpresa(); }, [loadEmpresa]);
+  useEffect(() => {
+    requestSequence.current += 1;
+    setBackendRepairs([]);
+    setSelectedRepair(null);
+    setShowDetailModal(false);
+    setShowDetailPin(false);
+    setShowHistoryModal(null);
+    setShowPriorityModal(null);
+    setShowPayModal(null);
+    setShowCancelModal(null);
+    setShowAssignModal(null);
+    setIsCreateModalOpen(false);
+    setSearchQuery('');
+    setStatusFilter('');
+    setPriorityFilter('');
+    loadRepairs();
+    loadEmpresa();
+  }, [contextVersion, loadEmpresa]);
 
   useEffect(() => {
     if (canAssignTech) {
@@ -869,14 +894,27 @@ export default function RepairsPage() {
   };
 
   const loadRepairs = async () => {
+    const sequence = ++requestSequence.current;
     try {
       setLoadingRepairs(true);
-      setBackendRepairs(await getAllReparaciones());
+      const result = await getAllReparaciones();
+      if (sequence === requestSequence.current) setBackendRepairs(result);
     } catch (e) {
       console.error('Error cargando reparaciones:', e);
       showToast('Error al cargar reparaciones', 'error');
     } finally {
-      setLoadingRepairs(false);
+      if (sequence === requestSequence.current) setLoadingRepairs(false);
+    }
+  };
+
+  const openAuthorizedDetail = async (repair: Repair) => {
+    try {
+      const credentials = await getCredencialesReparacionById(repair.id);
+      setSelectedRepair({ ...repair, recepcion: { ...repair.recepcion, ...credentials } });
+      setShowDetailModal(true);
+      setShowDetailPin(false);
+    } catch {
+      showToast('No fue posible obtener el detalle autorizado', 'error');
     }
   };
 
@@ -1228,7 +1266,9 @@ const handleImprimirTicket = (r: Repair) => {
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Gestión de equipos en servicio técnico</p>
         </div>
         <button
-          onClick={() => setIsCreateModalOpen(true)}
+          onClick={() => { if (!readOnlyConsolidated) setIsCreateModalOpen(true); }}
+          disabled={readOnlyConsolidated}
+          title={readOnlyConsolidated ? 'Seleccione una sucursal para crear reparaciones' : undefined}
           className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors whitespace-nowrap self-start sm:self-auto"
         >
           <Plus size={16} /> Nueva Reparación
@@ -1333,7 +1373,7 @@ const handleImprimirTicket = (r: Repair) => {
           <RepairCard
             key={r.id}
             repair={r}
-            onViewDetail={rep => { setSelectedRepair(rep); setShowDetailModal(true); setShowDetailPin(false); }}
+            onViewDetail={openAuthorizedDetail}
             onHistory={id => setShowHistoryModal(id)}
             onFlowManage={() => navigate('/flujo-reparaciones')}
             onPrintPDF={handleOpenContrato}
@@ -1343,6 +1383,7 @@ const handleImprimirTicket = (r: Repair) => {
             onCancel={rep => setShowCancelModal(rep)}
             onAssignTech={rep => setShowAssignModal(rep)}
             userIsAdmin={canAssignTech}
+            readOnly={readOnlyConsolidated}
           />
         ))}
       </div>
@@ -1603,11 +1644,11 @@ const handleImprimirTicket = (r: Repair) => {
       })()}
 
       {/* Nueva Reparación Modal */}
-      <NuevaReparacionModal
+      {!readOnlyConsolidated && <NuevaReparacionModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onCreated={handleRepairCreated}
-      />
+      />}
     </div>
   );
 }
