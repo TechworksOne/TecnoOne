@@ -19,6 +19,26 @@ router.use(branchScope);
 // ========== CAJA CHICA (todos los roles autenticados) ==========
 router.get('/caja-chica/saldo',         requirePermission('caja.ver'), cajaController.getSaldoCajaChica);
 router.get('/caja-chica/movimientos',   requirePermission('caja.ver'), cajaController.getMovimientosCajaChica);
+router.get('/caja-chica/arqueos',       requirePermission('caja.ver'), cajaController.getArqueosCajaChica);
+router.post(
+  '/caja-chica/arqueos',
+  requirePermission('caja.arquear'),
+  requireBranchSpecific,
+  cajaController.registrarArqueoCajaChica
+);
+router.post(
+  '/caja-chica/reposiciones/manual',
+  requirePermission('caja.reponer_manual'),
+  requireBranchSpecific,
+  cajaController.reponerCajaChicaManual
+);
+router.post(
+  '/caja-chica/reposiciones/banco',
+  requirePermission('caja.reponer'),
+  requirePermission('bancos.administrar'),
+  requireBranchSpecific,
+  cajaController.reponerCajaChicaDesdeBanco
+);
 router.post(
   '/caja-chica/movimiento',
   requirePermission('caja.operar'),

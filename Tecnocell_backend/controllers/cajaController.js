@@ -1,4 +1,6 @@
 const db = require('../config/database');
+const { randomUUID } = require('crypto');
+const auditoriaService = require('../services/auditoriaService');
 
 function isSuperadminTenant(req) {
   return req.tenant?.isSuperadmin === true || (req.user?.role === 'superadmin' && req.user?.empresa_id == null);
@@ -141,6 +143,61 @@ function cajaChicaUsuario(req) {
     req.user?.id ||
     'Usuario'
   );
+}
+
+function cajaChicaUsuarioId(req) {
+  const usuarioId = Number(
+    req.user?.id ??
+    req.user?.userId ??
+    req.user?.usuario_id
+  );
+
+  if (!Number.isInteger(usuarioId) || usuarioId <= 0) {
+    throw cajaChicaHttpError(
+      401,
+      'USUARIO_REQUERIDO',
+      'No se pudo determinar el usuario autenticado.'
+    );
+  }
+
+  return usuarioId;
+}
+
+function cajaChicaMonto(value, { allowZero = false } = {}) {
+  const monto = Number(value);
+  const minimoValido = allowZero ? monto >= 0 : monto > 0;
+
+  if (
+    !Number.isFinite(monto) ||
+    !minimoValido ||
+    monto > 99999999.99
+  ) {
+    throw cajaChicaHttpError(
+      400,
+      'MONTO_INVALIDO',
+      allowZero
+        ? 'El monto debe ser mayor o igual a cero'
+        : 'El monto debe ser mayor a cero'
+    );
+  }
+
+  return Math.round(monto * 100) / 100;
+}
+
+async function registrarAuditoriaFinanciera(connection, payload) {
+  const registrado = await auditoriaService.registrar({
+    ...payload,
+    connection,
+    strict: true,
+  });
+
+  if (!registrado) {
+    throw cajaChicaHttpError(
+      500,
+      'AUDITORIA_REQUERIDA',
+      'No fue posible registrar la trazabilidad de la operación.'
+    );
+  }
 }
 
 
@@ -384,6 +441,400 @@ exports.getMovimientosCajaChica = async (
         code: error.code,
         message: error.message,
       });
+  }
+};
+
+// Historial inmutable de arqueos. ALL se permite exclusivamente en lectura.
+exports.getArqueosCajaChica = async (req, res) => {
+  try {
+    const scope = cajaChicaScope(req, 'a');
+    const {
+      fecha_inicio,
+      fecha_fin,
+      resultado,
+      usuario_id,
+    } = req.query;
+
+    const pagina = Math.max(1, Number.parseInt(req.query.pagina, 10) || 1);
+    const limite = Math.min(100, Math.max(1, Number.parseInt(req.query.limite, 10) || 25));
+    const offset = (pagina - 1) * limite;
+    const resultadosValidos = ['CUADRADO', 'SOBRANTE', 'FALTANTE'];
+
+    let where = ` WHERE 1 = 1${scope.sql}`;
+    const params = [...scope.params];
+
+    if (fecha_inicio) {
+      where += ' AND a.fecha_arqueo >= ?';
+      params.push(fecha_inicio);
+    }
+    if (fecha_fin) {
+      where += ' AND a.fecha_arqueo <= ?';
+      params.push(fecha_fin);
+    }
+    if (resultado) {
+      const resultadoNormalizado = String(resultado).trim().toUpperCase();
+      if (!resultadosValidos.includes(resultadoNormalizado)) {
+        throw cajaChicaHttpError(400, 'RESULTADO_INVALIDO', 'Resultado de arqueo inválido');
+      }
+      where += ' AND a.resultado = ?';
+      params.push(resultadoNormalizado);
+    }
+    if (usuario_id) {
+      const usuarioId = Number(usuario_id);
+      if (!Number.isInteger(usuarioId) || usuarioId <= 0) {
+        throw cajaChicaHttpError(400, 'USUARIO_INVALIDO', 'usuario_id inválido');
+      }
+      where += ' AND a.usuario_id = ?';
+      params.push(usuarioId);
+    }
+
+    const [[totalRow]] = await db.query(
+      `SELECT COUNT(*) AS total FROM caja_chica_arqueos a${where}`,
+      params
+    );
+    const [arqueos] = await db.query(
+      `SELECT a.*, s.nombre AS sucursal_nombre
+       FROM caja_chica_arqueos a
+       INNER JOIN sucursales s
+         ON s.id = a.sucursal_id
+        AND s.empresa_id = a.empresa_id
+       ${where}
+       ORDER BY a.fecha_arqueo DESC, a.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limite, offset]
+    );
+
+    return res.json({
+      success: true,
+      data: arqueos,
+      pagination: {
+        pagina,
+        limite,
+        total: Number(totalRow?.total || 0),
+      },
+    });
+  } catch (error) {
+    console.error('Error obteniendo arqueos de Caja Chica:', error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code,
+      message: error.message,
+    });
+  }
+};
+
+// El arqueo registra un snapshot; nunca altera dinero.
+exports.registrarArqueoCajaChica = async (req, res) => {
+  const conn = await db.getConnection();
+  let transactionStarted = false;
+
+  try {
+    const scope = cajaChicaScope(req);
+    if (scope.mode !== 'specific') {
+      throw cajaChicaHttpError(400, 'BRANCH_SPECIFIC_REQUIRED', 'Seleccione una sucursal específica.');
+    }
+
+    const montoContado = cajaChicaMonto(req.body?.monto_contado, { allowZero: true });
+    const observaciones = String(req.body?.observaciones || '').trim() || null;
+    const usuarioId = cajaChicaUsuarioId(req);
+    const usuarioNombre = cajaChicaUsuario(req).slice(0, 255);
+
+    await conn.beginTransaction();
+    transactionStarted = true;
+
+    const saldoTeorico = await bloquearCajaChicaYObtenerSaldo(conn, scope);
+    const saldoCentavos = Math.round(saldoTeorico * 100);
+    const contadoCentavos = Math.round(montoContado * 100);
+    const diferenciaCentavos = contadoCentavos - saldoCentavos;
+    const diferencia = diferenciaCentavos / 100;
+    const resultado = diferenciaCentavos === 0
+      ? 'CUADRADO'
+      : diferenciaCentavos > 0
+        ? 'SOBRANTE'
+        : 'FALTANTE';
+
+    const [[ultimoMovimiento]] = await conn.query(
+      `SELECT MAX(id) AS id
+       FROM caja_chica
+       WHERE empresa_id = ? AND sucursal_id = ?`,
+      [scope.empresaId, scope.sucursalId]
+    );
+
+    const [insert] = await conn.query(
+      `INSERT INTO caja_chica_arqueos (
+         empresa_id, sucursal_id, saldo_teorico, monto_contado,
+         diferencia, resultado, ultimo_movimiento_id, usuario_id,
+         usuario_nombre, observaciones
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        scope.empresaId,
+        scope.sucursalId,
+        saldoCentavos / 100,
+        contadoCentavos / 100,
+        diferencia,
+        resultado,
+        ultimoMovimiento?.id || null,
+        usuarioId,
+        usuarioNombre,
+        observaciones,
+      ]
+    );
+
+    await registrarAuditoriaFinanciera(conn, {
+      req,
+      empresaId: scope.empresaId,
+      accion: 'CAJA_CHICA_ARQUEO_REGISTRADO',
+      entidad: 'caja_chica_arqueos',
+      entidadId: insert.insertId,
+      descripcion: `Arqueo de Caja Chica ${resultado}`,
+      datosNuevos: {
+        sucursal_id: scope.sucursalId,
+        saldo_teorico: saldoCentavos / 100,
+        monto_contado: contadoCentavos / 100,
+        diferencia,
+        resultado,
+      },
+    });
+
+    await conn.commit();
+    transactionStarted = false;
+
+    return res.status(201).json({
+      success: true,
+      message: 'Arqueo registrado sin alterar el saldo de Caja Chica',
+      data: {
+        id: insert.insertId,
+        empresa_id: scope.empresaId,
+        sucursal_id: scope.sucursalId,
+        saldo_teorico: saldoCentavos / 100,
+        monto_contado: contadoCentavos / 100,
+        diferencia,
+        resultado,
+        ultimo_movimiento_id: ultimoMovimiento?.id || null,
+      },
+    });
+  } catch (error) {
+    if (transactionStarted) {
+      try { await conn.rollback(); } catch {}
+    }
+    console.error('Error registrando arqueo de Caja Chica:', error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code,
+      message: error.message,
+    });
+  } finally {
+    conn.release();
+  }
+};
+
+exports.reponerCajaChicaManual = async (req, res) => {
+  const conn = await db.getConnection();
+  let transactionStarted = false;
+
+  try {
+    const scope = cajaChicaScope(req);
+    if (scope.mode !== 'specific') {
+      throw cajaChicaHttpError(400, 'BRANCH_SPECIFIC_REQUIRED', 'Seleccione una sucursal específica.');
+    }
+
+    const monto = cajaChicaMonto(req.body?.monto);
+    const concepto = String(req.body?.concepto || '').trim();
+    const observaciones = String(req.body?.observaciones || '').trim();
+    if (concepto.length < 5) {
+      throw cajaChicaHttpError(400, 'CONCEPTO_INSUFICIENTE', 'El concepto debe contener al menos 5 caracteres');
+    }
+    if (observaciones.length < 10) {
+      throw cajaChicaHttpError(400, 'OBSERVACIONES_INSUFICIENTES', 'La observación debe justificar la reposición manual');
+    }
+
+    const usuarioId = cajaChicaUsuarioId(req);
+    const usuarioNombre = cajaChicaUsuario(req);
+    const operacionId = randomUUID();
+
+    await conn.beginTransaction();
+    transactionStarted = true;
+    const saldoAnterior = await bloquearCajaChicaYObtenerSaldo(conn, scope);
+
+    const [insert] = await conn.query(
+      `INSERT INTO caja_chica (
+         empresa_id, sucursal_id, tipo_movimiento, monto, concepto,
+         categoria, estado, realizado_por, observaciones,
+         confirmado_por, confirmado_en, referencia_tipo, referencia_id
+       ) VALUES (?, ?, 'INGRESO', ?, ?, 'Reposición Manual', 'CONFIRMADO', ?, ?, ?, NOW(), 'REPOSICION_MANUAL', ?)`,
+      [
+        scope.empresaId,
+        scope.sucursalId,
+        monto,
+        concepto,
+        usuarioNombre,
+        observaciones,
+        usuarioId,
+        operacionId,
+      ]
+    );
+
+    await registrarAuditoriaFinanciera(conn, {
+      req,
+      empresaId: scope.empresaId,
+      accion: 'CAJA_CHICA_REPOSICION_MANUAL',
+      entidad: 'caja_chica',
+      entidadId: insert.insertId,
+      descripcion: `Reposición manual de Caja Chica por Q${monto.toFixed(2)}`,
+      datosNuevos: {
+        sucursal_id: scope.sucursalId,
+        monto,
+        concepto,
+        referencia_id: operacionId,
+      },
+    });
+
+    await conn.commit();
+    transactionStarted = false;
+    return res.status(201).json({
+      success: true,
+      message: 'Reposición manual registrada',
+      data: {
+        id: insert.insertId,
+        referencia_id: operacionId,
+        saldo_anterior: saldoAnterior,
+        saldo_actual: Math.round((saldoAnterior + monto) * 100) / 100,
+      },
+    });
+  } catch (error) {
+    if (transactionStarted) {
+      try { await conn.rollback(); } catch {}
+    }
+    console.error('Error en reposición manual de Caja Chica:', error);
+    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message });
+  } finally {
+    conn.release();
+  }
+};
+
+exports.reponerCajaChicaDesdeBanco = async (req, res) => {
+  const conn = await db.getConnection();
+  let transactionStarted = false;
+
+  try {
+    const scope = cajaChicaScope(req);
+    if (scope.mode !== 'specific') {
+      throw cajaChicaHttpError(400, 'BRANCH_SPECIFIC_REQUIRED', 'Seleccione una sucursal específica.');
+    }
+
+    const cuentaId = Number(req.body?.cuenta_id);
+    const monto = cajaChicaMonto(req.body?.monto);
+    const concepto = String(req.body?.concepto || '').trim();
+    const observaciones = String(req.body?.observaciones || '').trim() || null;
+    if (!Number.isInteger(cuentaId) || cuentaId <= 0) {
+      throw cajaChicaHttpError(400, 'CUENTA_BANCARIA_INVALIDA', 'cuenta_id es requerido');
+    }
+    if (concepto.length < 5) {
+      throw cajaChicaHttpError(400, 'CONCEPTO_INSUFICIENTE', 'El concepto debe contener al menos 5 caracteres');
+    }
+
+    const usuarioId = cajaChicaUsuarioId(req);
+    const usuarioNombre = cajaChicaUsuario(req);
+    const operacionId = randomUUID();
+
+    await conn.beginTransaction();
+    transactionStarted = true;
+
+    const saldoCajaAnterior = await bloquearCajaChicaYObtenerSaldo(conn, scope);
+    const [[cuenta]] = await conn.query(
+      `SELECT id, nombre, saldo_actual
+       FROM cuentas_bancarias
+       WHERE id = ? AND empresa_id = ? AND activa = TRUE
+       LIMIT 1 FOR UPDATE`,
+      [cuentaId, scope.empresaId]
+    );
+    if (!cuenta) {
+      throw cajaChicaHttpError(404, 'CUENTA_BANCARIA_NO_ENCONTRADA', 'Cuenta bancaria no encontrada o inactiva');
+    }
+    if (Math.round(Number(cuenta.saldo_actual) * 100) < Math.round(monto * 100)) {
+      throw cajaChicaHttpError(
+        409,
+        'BANCO_SALDO_INSUFICIENTE',
+        `Saldo bancario insuficiente. Disponible: Q${Number(cuenta.saldo_actual).toFixed(2)}`
+      );
+    }
+
+    const [movimientoBanco] = await conn.query(
+      `INSERT INTO movimientos_bancarios (
+         empresa_id, cuenta_id, tipo_movimiento, monto, concepto,
+         categoria, estado, realizado_por, observaciones,
+         confirmado_por, confirmado_en, referencia_tipo, referencia_id
+       ) VALUES (?, ?, 'EGRESO', ?, ?, 'Reposición Caja Chica', 'CONFIRMADO', ?, ?, ?, NOW(), 'REPOSICION_CAJA_CHICA', ?)`,
+      [scope.empresaId, cuentaId, monto, concepto, usuarioNombre, observaciones, usuarioId, operacionId]
+    );
+
+    const [actualizacion] = await conn.query(
+      `UPDATE cuentas_bancarias
+       SET saldo_actual = saldo_actual - ?
+       WHERE id = ? AND empresa_id = ? AND activa = TRUE AND saldo_actual >= ?`,
+      [monto, cuentaId, scope.empresaId, monto]
+    );
+    if (actualizacion.affectedRows !== 1) {
+      throw cajaChicaHttpError(409, 'BANCO_SALDO_INSUFICIENTE', 'Saldo bancario insuficiente');
+    }
+
+    const [movimientoCaja] = await conn.query(
+      `INSERT INTO caja_chica (
+         empresa_id, sucursal_id, tipo_movimiento, monto, concepto,
+         categoria, estado, realizado_por, observaciones,
+         confirmado_por, confirmado_en, referencia_tipo, referencia_id
+       ) VALUES (?, ?, 'INGRESO', ?, ?, 'Reposición desde Banco', 'CONFIRMADO', ?, ?, ?, NOW(), 'REPOSICION_BANCO', ?)`,
+      [
+        scope.empresaId,
+        scope.sucursalId,
+        monto,
+        `Reposición desde ${cuenta.nombre} - ${concepto}`,
+        usuarioNombre,
+        observaciones,
+        usuarioId,
+        operacionId,
+      ]
+    );
+
+    await registrarAuditoriaFinanciera(conn, {
+      req,
+      empresaId: scope.empresaId,
+      accion: 'CAJA_CHICA_REPOSICION_BANCO',
+      entidad: 'caja_chica',
+      entidadId: movimientoCaja.insertId,
+      descripcion: `Reposición bancaria de Caja Chica por Q${monto.toFixed(2)}`,
+      datosNuevos: {
+        sucursal_id: scope.sucursalId,
+        cuenta_id: cuentaId,
+        movimiento_bancario_id: movimientoBanco.insertId,
+        movimiento_caja_chica_id: movimientoCaja.insertId,
+        monto,
+        referencia_id: operacionId,
+      },
+    });
+
+    await conn.commit();
+    transactionStarted = false;
+    return res.status(201).json({
+      success: true,
+      message: 'Reposición desde banco registrada',
+      data: {
+        referencia_id: operacionId,
+        movimiento_bancario_id: movimientoBanco.insertId,
+        movimiento_caja_chica_id: movimientoCaja.insertId,
+        saldo_caja_anterior: saldoCajaAnterior,
+        saldo_caja_actual: Math.round((saldoCajaAnterior + monto) * 100) / 100,
+        saldo_banco_actual: Math.round((Number(cuenta.saldo_actual) - monto) * 100) / 100,
+      },
+    });
+  } catch (error) {
+    if (transactionStarted) {
+      try { await conn.rollback(); } catch {}
+    }
+    console.error('Error en reposición bancaria de Caja Chica:', error);
+    return res.status(error.statusCode || 500).json({ success: false, code: error.code, message: error.message });
+  } finally {
+    conn.release();
   }
 };
 

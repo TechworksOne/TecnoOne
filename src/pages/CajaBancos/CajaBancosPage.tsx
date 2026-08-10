@@ -51,12 +51,27 @@ interface Movimiento {
   confirmado_por_nombre?: string;
 }
 
+interface ArqueoCajaChica {
+  id: number;
+  saldo_teorico: number;
+  monto_contado: number;
+  diferencia: number;
+  resultado: 'CUADRADO' | 'SOBRANTE' | 'FALTANTE';
+  usuario_nombre: string;
+  observaciones?: string | null;
+  fecha_arqueo: string;
+  sucursal_nombre?: string;
+}
+
 export default function CajaBancosPage() {
   const toast = useToast();
   const [saldoCajaChica, setSaldoCajaChica] = useState({ saldo: 0, ingresos: 0, egresos: 0, pendientes: 0 });
   const [cuentasBancarias, setCuentasBancarias] = useState<CuentaBancaria[]>([]);
   const [movimientosCaja, setMovimientosCaja] = useState<Movimiento[]>([]);
   const [movimientosBancos, setMovimientosBancos] = useState<Movimiento[]>([]);
+  const [arqueosCajaChica, setArqueosCajaChica] = useState<ArqueoCajaChica[]>([]);
+  const [loadingArqueos, setLoadingArqueos] = useState(false);
+  const [paginacionArqueos, setPaginacionArqueos] = useState({ pagina: 1, limite: 25, total: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [vistaActual, setVistaActual] = useState<'caja' | 'bancos' | 'tarjetas'>('caja');
@@ -118,8 +133,21 @@ export default function CajaBancosPage() {
   const [movsHistorial, setMovsHistorial] = useState<Movimiento[]>([]);
   const [loadingHistorial, setLoadingHistorial] = useState(false);
 
+  // Arqueo y reposición de Caja Chica 2D.5
+  const [showArqueoModal, setShowArqueoModal] = useState(false);
+  const [montoContado, setMontoContado] = useState('');
+  const [observacionesArqueo, setObservacionesArqueo] = useState('');
+  const [savingArqueo, setSavingArqueo] = useState(false);
+  const [showReposicionModal, setShowReposicionModal] = useState(false);
+  const [origenReposicion, setOrigenReposicion] = useState<'BANCO' | 'MANUAL'>('BANCO');
+  const [cuentaReposicion, setCuentaReposicion] = useState('');
+  const [montoReposicion, setMontoReposicion] = useState('');
+  const [conceptoReposicion, setConceptoReposicion] = useState('');
+  const [observacionesReposicion, setObservacionesReposicion] = useState('');
+  const [savingReposicion, setSavingReposicion] = useState(false);
+
   // Auth – definir antes de loadData para que el closure lo capture
-  const { user, hasModule } = useAuth();
+  const { user, hasModule, hasPermission } = useAuth();
 
   const {
     mode: branchMode,
@@ -151,12 +179,19 @@ export default function CajaBancosPage() {
   });
 
   const hasTarjetasModule = hasModule('tarjetas');
+  const canViewCaja = hasPermission('caja.ver');
+  const canArqueo = hasPermission('caja.arquear');
+  const canReponerBanco =
+    hasPermission('caja.reponer') &&
+    hasPermission('bancos.administrar');
+  const canReponerManual = hasPermission('caja.reponer_manual');
+  const canManageBanks = hasPermission('bancos.administrar');
   const isAdmin = user?.role === 'admin' || user?.rol === 'admin' ||
     user?.role === 'ADMIN' || user?.rol === 'ADMIN' ||
     (Array.isArray((user as any)?.roles) && ((user as any).roles.includes('ADMINISTRADOR') || (user as any).roles.includes('admin') || (user as any).roles.includes('ADMIN')));
 
   useEffect(() => {
-    loadData();
+    loadData(1);
   }, [
     contextVersion,
     branchMode,
@@ -174,7 +209,30 @@ export default function CajaBancosPage() {
     }
   }, [hasTarjetasModule, vistaActual]);
 
-  const loadData = async () => {
+  const cargarArqueos = async (pagina = paginacionArqueos.pagina) => {
+    const token = sessionStorage.getItem('token');
+    setLoadingArqueos(true);
+    try {
+      const config = getFinancialRequestConfig(token);
+      const response = await axios.get(`${API_URL}/caja/caja-chica/arqueos`, {
+        ...config,
+        params: {
+          pagina,
+          limite: paginacionArqueos.limite,
+        },
+      });
+      setArqueosCajaChica(response.data.data || []);
+      setPaginacionArqueos({
+        pagina: Number(response.data.pagination?.pagina || pagina),
+        limite: Number(response.data.pagination?.limite || paginacionArqueos.limite),
+        total: Number(response.data.pagination?.total || 0),
+      });
+    } finally {
+      setLoadingArqueos(false);
+    }
+  };
+
+  const loadData = async (paginaArqueos = paginacionArqueos.pagina) => {
     try {
       setLoading(true);
       setError(null);
@@ -193,13 +251,17 @@ export default function CajaBancosPage() {
       const cajaMovs = await axios.get(`${API_URL}/caja/caja-chica/movimientos`, config);
       setMovimientosCaja(cajaMovs.data.data);
 
+      await cargarArqueos(paginaArqueos);
+
       // Cargar cuentas bancarias para todos los usuarios (no admin recibe datos sin saldo)
       const bancos = await axios.get(`${API_URL}/caja/bancos`, config);
       setCuentasBancarias(bancos.data.data);
 
-      if (isAdmin) {
+      if (canManageBanks) {
         const bancosMovs = await axios.get(`${API_URL}/caja/bancos/movimientos`, config);
         setMovimientosBancos(bancosMovs.data.data);
+      } else {
+        setMovimientosBancos([]);
       }
 
     } catch (err: any) {
@@ -212,6 +274,7 @@ export default function CajaBancosPage() {
         setError('Error al cargar los datos. Intenta actualizar la página.');
       }
     } finally {
+      setLoadingArqueos(false);
       setLoading(false);
     }
   };
@@ -482,6 +545,130 @@ export default function CajaBancosPage() {
     }
   };
 
+  const abrirArqueo = () => {
+    if (!isSpecificBranch) {
+      toast.error('Selecciona una sucursal específica para registrar el arqueo.');
+      return;
+    }
+    setMontoContado('');
+    setObservacionesArqueo('');
+    setShowArqueoModal(true);
+  };
+
+  const registrarArqueo = async () => {
+    const contado = Number(montoContado);
+    if (montoContado.trim() === '' || !Number.isFinite(contado) || contado < 0) {
+      toast.error('Ingresa un monto contado válido.');
+      return;
+    }
+
+    try {
+      setSavingArqueo(true);
+      const token = sessionStorage.getItem('token');
+      await axios.post(
+        `${API_URL}/caja/caja-chica/arqueos`,
+        {
+          monto_contado: contado,
+          observaciones: observacionesArqueo.trim() || null,
+        },
+        getFinancialRequestConfig(token),
+      );
+      toast.success('Arqueo registrado. El saldo de Caja Chica no fue modificado.');
+      setShowArqueoModal(false);
+      await loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'No se pudo registrar el arqueo.');
+    } finally {
+      setSavingArqueo(false);
+    }
+  };
+
+  const abrirReposicion = () => {
+    if (!isSpecificBranch) {
+      toast.error('Selecciona una sucursal específica para reponer Caja Chica.');
+      return;
+    }
+    if (!canReponerBanco && !canReponerManual) {
+      toast.error('No tienes permiso para reponer Caja Chica.');
+      return;
+    }
+    setOrigenReposicion(canReponerBanco ? 'BANCO' : 'MANUAL');
+    setCuentaReposicion('');
+    setMontoReposicion('');
+    setConceptoReposicion('');
+    setObservacionesReposicion('');
+    setShowReposicionModal(true);
+  };
+
+  const registrarReposicion = async () => {
+    const montoNum = Number(montoReposicion);
+    if (!Number.isFinite(montoNum) || montoNum <= 0) {
+      toast.error('Ingresa un monto válido.');
+      return;
+    }
+    if (conceptoReposicion.trim().length < 5) {
+      toast.error('El concepto debe contener al menos 5 caracteres.');
+      return;
+    }
+    if (origenReposicion === 'BANCO' && !cuentaReposicion) {
+      toast.error('Selecciona la cuenta bancaria de origen.');
+      return;
+    }
+    if (origenReposicion === 'MANUAL' && observacionesReposicion.trim().length < 10) {
+      toast.error('La observación debe justificar la reposición manual.');
+      return;
+    }
+
+    try {
+      setSavingReposicion(true);
+      const token = sessionStorage.getItem('token');
+      const config = getFinancialRequestConfig(token);
+      const payload = {
+        monto: montoNum,
+        concepto: conceptoReposicion.trim(),
+        observaciones: observacionesReposicion.trim() || null,
+      };
+
+      if (origenReposicion === 'BANCO') {
+        await axios.post(
+          `${API_URL}/caja/caja-chica/reposiciones/banco`,
+          { ...payload, cuenta_id: Number(cuentaReposicion) },
+          config,
+        );
+      } else {
+        await axios.post(
+          `${API_URL}/caja/caja-chica/reposiciones/manual`,
+          payload,
+          config,
+        );
+      }
+
+      toast.success('Reposición de Caja Chica registrada.');
+      setShowReposicionModal(false);
+      await loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'No se pudo registrar la reposición.');
+    } finally {
+      setSavingReposicion(false);
+    }
+  };
+
+  const saldoTeoricoArqueo = Number(saldoCajaChica.saldo || 0);
+  const contadoArqueo = montoContado.trim() === '' ? null : Number(montoContado);
+  const diferenciaArqueo = contadoArqueo !== null && Number.isFinite(contadoArqueo)
+    ? Math.round((contadoArqueo - saldoTeoricoArqueo) * 100) / 100
+    : null;
+  const resultadoArqueo = diferenciaArqueo === null
+    ? null
+    : diferenciaArqueo === 0
+      ? 'CUADRADO'
+      : diferenciaArqueo > 0
+        ? 'SOBRANTE'
+        : 'FALTANTE';
+  const cuentaOrigenReposicion = cuentasBancarias.find(
+    cuenta => String(cuenta.id) === cuentaReposicion,
+  );
+
   const totalBancos = cuentasBancarias.reduce((sum, c) => sum + Number(c.saldo_actual || 0), 0);
 
   const pendientesCaja = movimientosCaja.filter(m => m.estado === 'PENDIENTE').length;
@@ -699,7 +886,6 @@ export default function CajaBancosPage() {
               { label: 'Retiro de banco', icon: <Building2 size={18} />, color: 'hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700 dark:hover:bg-rose-950/40 dark:hover:border-rose-800 dark:hover:text-rose-300', tipo: 'RETIRO_BANCO' as const },
               { label: 'Depósito a banco', icon: <ArrowUpCircle size={18} />, color: 'hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 dark:hover:bg-blue-950/40 dark:hover:border-blue-800 dark:hover:text-blue-300', tipo: 'DEPOSITO' as const },
               { label: 'Transferencia', icon: <ArrowRightLeft size={18} />, color: 'hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 dark:hover:bg-violet-950/40 dark:hover:border-violet-800 dark:hover:text-violet-300', tipo: 'TRANSFERENCIA' as const },
-              { label: 'Reponer fondo', icon: <Banknote size={18} />, color: 'hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 dark:hover:bg-emerald-950/40 dark:hover:border-emerald-800 dark:hover:text-emerald-300', tipo: 'INGRESO_MANUAL' as const },
             ].filter(item => !['RETIRO_BANCO', 'TRANSFERENCIA'].includes(item.tipo) || isAdmin).map(({ label, icon, color, tipo }) => (
               <button
                 key={tipo}
@@ -818,11 +1004,46 @@ export default function CajaBancosPage() {
 
           {/* ── VISTA CAJA CHICA ─────────────────────────────────────── */}
           {vistaActual === 'caja' && (
-            <MovimientosPanel
-              movimientos={movsCajaFiltrados}
-              estadoFiltro={estadoFiltro}
-              onConfirmar={(mov) => solicitarConfirmacion(mov.id, 'caja', mov)}
-            />
+            <div>
+              {canViewCaja && (
+                <div className="border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-900 dark:text-slate-100">Control de Caja Chica</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {isSpecificBranch
+                          ? 'Registra conteos y reposiciones para la sucursal seleccionada.'
+                          : 'Consolidado · historial de solo lectura.'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {canArqueo && (
+                        <Button variant="outline" onClick={abrirArqueo} disabled={!isSpecificBranch} className="text-sm disabled:cursor-not-allowed disabled:opacity-50">
+                          <ShieldCheck size={15} className="mr-1.5" />Registrar arqueo
+                        </Button>
+                      )}
+                      {(canReponerBanco || canReponerManual) && (
+                        <Button onClick={abrirReposicion} disabled={!isSpecificBranch} className="bg-emerald-600 text-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+                          <Banknote size={15} className="mr-1.5" />Reponer Caja Chica
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <ArqueosCajaChicaPanel
+                    arqueos={arqueosCajaChica}
+                    loading={loadingArqueos}
+                    sucursalNombre={sucursalActiva?.nombre}
+                    paginacion={paginacionArqueos}
+                    onPagina={cargarArqueos}
+                  />
+                </div>
+              )}
+              <MovimientosPanel
+                movimientos={movsCajaFiltrados}
+                estadoFiltro={estadoFiltro}
+                onConfirmar={(mov) => solicitarConfirmacion(mov.id, 'caja', mov)}
+              />
+            </div>
           )}
 
           {/* ── VISTA TARJETAS DE CRÉDITO ────────────────────────────── */}
@@ -1157,6 +1378,59 @@ export default function CajaBancosPage() {
             </div>
           )}
         </div>
+
+      <Modal isOpen={showArqueoModal} onClose={() => !savingArqueo && setShowArqueoModal(false)} title="Registrar arqueo de Caja Chica" size="lg">
+        <div className="space-y-4">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
+            El arqueo registra una comparación de control. <strong>No ajusta ni mueve dinero.</strong>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+              <p className="text-xs text-slate-500">Saldo teórico actual</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-slate-100">Q{saldoTeoricoArqueo.toFixed(2)}</p>
+              <p className="mt-1 text-[11px] text-slate-400">El servidor lo recalculará al guardar.</p>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Monto contado (Q)</label>
+              <Input type="number" min="0" step="0.01" value={montoContado} onChange={event => setMontoContado(event.target.value)} placeholder="0.00" className="w-full" />
+            </div>
+          </div>
+          {resultadoArqueo && diferenciaArqueo !== null && (
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+              <div><p className="text-xs text-slate-500">Diferencia estimada</p><p className={`text-lg font-bold ${diferenciaArqueo < 0 ? 'text-red-600' : diferenciaArqueo > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{diferenciaArqueo > 0 ? '+' : ''}Q{diferenciaArqueo.toFixed(2)}</p></div>
+              <ResultadoArqueo resultado={resultadoArqueo} />
+            </div>
+          )}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Observaciones</label>
+            <textarea value={observacionesArqueo} onChange={event => setObservacionesArqueo(event.target.value)} rows={3} placeholder="Notas del conteo físico (opcional)" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
+          </div>
+          <div className="flex gap-3"><Button variant="outline" onClick={() => setShowArqueoModal(false)} disabled={savingArqueo} className="flex-1">Cancelar</Button><Button onClick={registrarArqueo} disabled={savingArqueo} className="flex-1 bg-blue-600 hover:bg-blue-700">{savingArqueo ? 'Registrando...' : 'Registrar arqueo'}</Button></div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showReposicionModal} onClose={() => !savingReposicion && setShowReposicionModal(false)} title="Reponer Caja Chica" size="lg">
+        <div className="space-y-4">
+          {canReponerBanco && canReponerManual && (
+            <div><label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Origen de los fondos</label><div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setOrigenReposicion('BANCO')} className={`rounded-lg border px-3 py-2 text-sm font-medium ${origenReposicion === 'BANCO' ? 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300' : 'border-slate-200 text-slate-500 dark:border-slate-700'}`}><Landmark size={15} className="mr-1 inline" />Banco</button>
+              <button type="button" onClick={() => setOrigenReposicion('MANUAL')} className={`rounded-lg border px-3 py-2 text-sm font-medium ${origenReposicion === 'MANUAL' ? 'border-emerald-400 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300' : 'border-slate-200 text-slate-500 dark:border-slate-700'}`}><Banknote size={15} className="mr-1 inline" />Manual autorizado</button>
+            </div></div>
+          )}
+          {origenReposicion === 'BANCO' && canReponerBanco && (
+            <div><label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Cuenta bancaria de origen</label><Select value={cuentaReposicion} onChange={event => setCuentaReposicion(event.target.value)} className="w-full"><option value="">Selecciona una cuenta...</option>{cuentasBancarias.filter(cuenta => cuenta.activa).map(cuenta => <option key={cuenta.id} value={cuenta.id}>{cuenta.nombre} — Q{Number(cuenta.saldo_actual || 0).toFixed(2)}</option>)}</Select>{cuentaOrigenReposicion && <p className="mt-1 text-xs text-slate-500">Saldo disponible: Q{Number(cuentaOrigenReposicion.saldo_actual || 0).toFixed(2)}</p>}</div>
+          )}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div><label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Monto (Q)</label><Input type="number" min="0.01" step="0.01" value={montoReposicion} onChange={event => setMontoReposicion(event.target.value)} placeholder="0.00" className="w-full" /></div>
+            <div><label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Concepto</label><Input value={conceptoReposicion} onChange={event => setConceptoReposicion(event.target.value)} placeholder="Motivo de la reposición" className="w-full" /></div>
+          </div>
+          <div><label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Observaciones {origenReposicion === 'MANUAL' ? '(obligatorias)' : '(opcionales)'}</label><textarea value={observacionesReposicion} onChange={event => setObservacionesReposicion(event.target.value)} rows={3} placeholder={origenReposicion === 'MANUAL' ? 'Justifica la reposición manual' : 'Notas adicionales'} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" /></div>
+          {Number(montoReposicion) > 0 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900 dark:bg-emerald-950/20"><p className="mb-2 text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">Impacto de la operación</p>{origenReposicion === 'BANCO' && <div className="flex justify-between text-red-600"><span>Banco</span><strong>-Q{Number(montoReposicion).toFixed(2)}</strong></div>}<div className="flex justify-between text-emerald-700 dark:text-emerald-300"><span>Caja Chica</span><strong>+Q{Number(montoReposicion).toFixed(2)}</strong></div></div>
+          )}
+          <div className="flex gap-3"><Button variant="outline" onClick={() => setShowReposicionModal(false)} disabled={savingReposicion} className="flex-1">Cancelar</Button><Button onClick={registrarReposicion} disabled={savingReposicion} className="flex-1 bg-emerald-600 hover:bg-emerald-700">{savingReposicion ? 'Registrando...' : 'Confirmar reposición'}</Button></div>
+        </div>
+      </Modal>
 
       {/* ── MODAL REGISTRAR MOVIMIENTO ──────────────────────────────────────── */}
       <Modal
@@ -1839,6 +2113,52 @@ function TarjetasCreditoPanel({
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+function ResultadoArqueo({ resultado }: { resultado: ArqueoCajaChica['resultado'] }) {
+  const styles = resultado === 'CUADRADO'
+    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+    : resultado === 'SOBRANTE'
+      ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+      : 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300';
+  return <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-bold ${styles}`}>{resultado}</span>;
+}
+
+function ArqueosCajaChicaPanel({
+  arqueos,
+  loading,
+  sucursalNombre,
+  paginacion,
+  onPagina,
+}: {
+  arqueos: ArqueoCajaChica[];
+  loading: boolean;
+  sucursalNombre?: string;
+  paginacion: { pagina: number; limite: number; total: number };
+  onPagina: (pagina: number) => Promise<void>;
+}) {
+  const totalPaginas = Math.max(1, Math.ceil(paginacion.total / paginacion.limite));
+  return (
+    <div className="border-t border-slate-100 dark:border-slate-800">
+      <div className="flex items-center justify-between px-4 py-3">
+        <div><p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Historial de arqueos</p><p className="text-xs text-slate-400">Los arqueos son informativos y no ajustan dinero.</p></div>
+        <span className="text-xs text-slate-400">{paginacion.total} registro{paginacion.total === 1 ? '' : 's'}</span>
+      </div>
+      {loading ? <div className="py-8 text-center text-sm text-slate-400">Cargando arqueos...</div> : arqueos.length === 0 ? <div className="px-4 pb-5 text-sm text-slate-400">No hay arqueos registrados en este contexto.</div> : (
+        <>
+          <div className="hidden overflow-x-auto md:block"><table className="w-full text-sm"><thead className="border-y border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"><tr>{['Fecha', 'Sucursal', 'Saldo teórico', 'Contado', 'Diferencia', 'Resultado', 'Usuario', 'Observaciones'].map(label => <th key={label} className="px-3 py-2 text-left text-[11px] font-semibold uppercase text-slate-500">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-800">{arqueos.map(arqueo => <tr key={arqueo.id}>
+            <td className="whitespace-nowrap px-3 py-3 text-xs text-slate-500">{new Date(arqueo.fecha_arqueo).toLocaleString('es-GT')}</td><td className="px-3 py-3 text-xs text-slate-600 dark:text-slate-300">{arqueo.sucursal_nombre || sucursalNombre || '—'}</td><td className="px-3 py-3 font-medium">Q{Number(arqueo.saldo_teorico).toFixed(2)}</td><td className="px-3 py-3 font-medium">Q{Number(arqueo.monto_contado).toFixed(2)}</td><td className={`px-3 py-3 font-semibold ${Number(arqueo.diferencia) < 0 ? 'text-red-600' : Number(arqueo.diferencia) > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{Number(arqueo.diferencia) > 0 ? '+' : ''}Q{Number(arqueo.diferencia).toFixed(2)}</td><td className="px-3 py-3"><ResultadoArqueo resultado={arqueo.resultado} /></td><td className="px-3 py-3 text-xs text-slate-600 dark:text-slate-300">{arqueo.usuario_nombre}</td><td className="max-w-[220px] px-3 py-3 text-xs text-slate-500">{arqueo.observaciones || '—'}</td>
+          </tr>)}</tbody></table></div>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800 md:hidden">{arqueos.map(arqueo => <div key={arqueo.id} className="space-y-2 p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-xs text-slate-400">{new Date(arqueo.fecha_arqueo).toLocaleString('es-GT')}</p><p className="text-sm font-medium text-slate-800 dark:text-slate-200">{arqueo.sucursal_nombre || sucursalNombre || 'Sucursal'}</p></div><ResultadoArqueo resultado={arqueo.resultado} /></div><div className="grid grid-cols-3 gap-2 text-xs"><div><p className="text-slate-400">Teórico</p><p className="font-semibold">Q{Number(arqueo.saldo_teorico).toFixed(2)}</p></div><div><p className="text-slate-400">Contado</p><p className="font-semibold">Q{Number(arqueo.monto_contado).toFixed(2)}</p></div><div><p className="text-slate-400">Diferencia</p><p className="font-semibold">Q{Number(arqueo.diferencia).toFixed(2)}</p></div></div><p className="text-xs text-slate-500">Por: {arqueo.usuario_nombre}</p>{arqueo.observaciones && <p className="text-xs text-slate-500">{arqueo.observaciones}</p>}</div>)}</div>
+          <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+            <Button variant="outline" onClick={() => onPagina(paginacion.pagina - 1)} disabled={loading || paginacion.pagina <= 1} className="text-xs">Anterior</Button>
+            <span className="text-xs text-slate-500">Página {paginacion.pagina} de {totalPaginas}</span>
+            <Button variant="outline" onClick={() => onPagina(paginacion.pagina + 1)} disabled={loading || paginacion.pagina >= totalPaginas} className="text-xs">Siguiente</Button>
+          </div>
+        </>
       )}
     </div>
   );

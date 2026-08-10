@@ -109,6 +109,8 @@ async function registrar({
   descripcion,
   datosAnteriores = null,
   datosNuevos = null,
+  connection = db,
+  strict = false,
 }) {
   try {
     const tenantEmpresaId = req?.tenant?.empresa_id;
@@ -143,7 +145,7 @@ async function registrar({
       return false;
     }
 
-    await db.query(
+    await connection.query(
       `INSERT INTO auditoria_logs (
         empresa_id,
         usuario_id,
@@ -190,6 +192,7 @@ async function registrar({
       '[Auditoria] No se pudo registrar la acción:',
       error.message
     );
+    if (strict) throw error;
     return false;
   }
 }
