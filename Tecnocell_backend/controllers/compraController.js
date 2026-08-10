@@ -7,6 +7,10 @@ const { validatePhone } = require('../utils/phoneValidation');
 const tarjetaCtrl = require('./tarjetaCreditoController');
 const auditoriaService = require('../services/auditoriaService');
 const planAccess = require('../services/planAccessService');
+const purchaseFinanceService =
+  require('../services/purchaseFinanceService');
+const cajaSesionModel =
+  require('../models/cajaSesionModel');
 
 async function auditarCompra(req, empresaId, compraId, numeroCompra, total, tipo, body) {
   await auditoriaService.registrar({
@@ -90,7 +94,9 @@ function compraUsuario(req) {
 
 async function aplicarPagoCompra(connection, {
   empresaId,
+  sucursalId,
   metodoPago,
+  fuenteFinanciera,
   tarjetaId,
   cuentaId,
   total,
@@ -98,89 +104,94 @@ async function aplicarPagoCompra(connection, {
   numeroCompra,
   req
 }) {
-  const monto = Math.round(Number(total) * 100) / 100;
+  const metodo =
+    String(metodoPago || '')
+      .trim()
+      .toLowerCase();
+
+  const monto =
+    purchaseFinanceService
+      .montoQuetzales(total);
+
+  const fuente =
+    purchaseFinanceService
+      .normalizarFuenteFinanciera(
+        metodo,
+        fuenteFinanciera
+      );
+
   const usuario = compraUsuario(req);
 
-  if (!Number.isFinite(monto) || monto <= 0) {
-    throw compraHttpError('El total de la compra debe ser mayor que cero');
+  if (metodo === 'efectivo') {
+    if (
+      fuente === 'CAJA_OPERATIVA'
+    ) {
+      await purchaseFinanceService
+        .aplicarCajaOperativa(
+          connection,
+          {
+            empresaId,
+            sucursalId,
+            total,
+            compraId,
+            numeroCompra,
+            req,
+          }
+        );
+    } else {
+      await purchaseFinanceService
+        .aplicarCajaChica(
+          connection,
+          {
+            empresaId,
+            sucursalId,
+            total,
+            compraId,
+            numeroCompra,
+            req,
+          }
+        );
+    }
   }
 
-  if (!['efectivo', 'transferencia', 'tarjeta_credito'].includes(metodoPago)) {
-    throw compraHttpError('Método de pago inválido');
-  }
-
-  if (metodoPago === 'efectivo') {
-    // Bloquea los movimientos de caja de la empresa durante la validación.
-    await connection.query(
-      'SELECT id FROM caja_chica WHERE empresa_id = ? FOR UPDATE',
-      [empresaId]
-    );
-
-    const [[saldoRow]] = await connection.query(
-      `SELECT COALESCE(
-         SUM(
-           CASE
-             WHEN tipo_movimiento = 'INGRESO' THEN monto
-             WHEN tipo_movimiento = 'EGRESO' THEN -monto
-             ELSE 0
-           END
-         ),
-         0
-       ) AS saldo
-       FROM caja_chica
-       WHERE empresa_id = ?
-         AND estado = 'CONFIRMADO'`,
-      [empresaId]
-    );
-
-    const saldo = Number(saldoRow.saldo || 0);
-
-    if (monto > saldo) {
+  if (metodo === 'transferencia') {
+    if (!cuentaId) {
       throw compraHttpError(
-        `Saldo insuficiente en caja. Disponible: Q${saldo.toFixed(2)}`,
-        409
+        'Debes seleccionar una cuenta bancaria'
       );
     }
 
-    await connection.query(
-      `INSERT INTO caja_chica
-        (empresa_id, tipo_movimiento, monto, concepto, categoria,
-         estado, realizado_por, observaciones, referencia_tipo, referencia_id)
-       VALUES (?, 'EGRESO', ?, ?, 'Compra a proveedor',
-               'CONFIRMADO', ?, ?, 'compra', ?)`,
-      [
-        empresaId,
-        monto,
-        `Pago en efectivo de compra ${numeroCompra}`,
-        usuario,
-        `Egreso automático generado por la compra ${numeroCompra}`,
-        compraId
-      ]
-    );
-  }
-
-  if (metodoPago === 'transferencia') {
-    if (!cuentaId) {
-      throw compraHttpError('Debes seleccionar una cuenta bancaria');
-    }
-
-    const [cuentas] = await connection.query(
-      `SELECT id, nombre, saldo_actual
-       FROM cuentas_bancarias
-       WHERE id = ?
-         AND empresa_id = ?
-         AND activa = TRUE
-       LIMIT 1
-       FOR UPDATE`,
-      [cuentaId, empresaId]
-    );
+    const [cuentas] =
+      await connection.query(
+        `SELECT
+           id,
+           nombre,
+           saldo_actual
+         FROM cuentas_bancarias
+         WHERE id = ?
+           AND empresa_id = ?
+           AND activa = TRUE
+         LIMIT 1
+         FOR UPDATE`,
+        [
+          cuentaId,
+          empresaId,
+        ]
+      );
 
     if (!cuentas.length) {
-      throw compraHttpError('Cuenta bancaria no encontrada o inactiva', 404);
+      throw compraHttpError(
+        'Cuenta bancaria no encontrada o inactiva',
+        404
+      );
     }
 
     const cuenta = cuentas[0];
-    const saldo = Number(cuenta.saldo_actual || 0);
+
+    const saldo =
+      Number(
+        cuenta.saldo_actual || 0
+      );
 
     if (monto > saldo) {
       throw compraHttpError(
@@ -191,11 +202,33 @@ async function aplicarPagoCompra(connection, {
 
     await connection.query(
       `INSERT INTO movimientos_bancarios
-        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto,
-         categoria, estado, numero_referencia, realizado_por,
-         observaciones, referencia_tipo, referencia_id)
-       VALUES (?, ?, 'EGRESO', ?, ?, 'Compra a proveedor',
-               'CONFIRMADO', ?, ?, ?, 'compra', ?)`,
+        (
+          empresa_id,
+          cuenta_id,
+          tipo_movimiento,
+          monto,
+          concepto,
+          categoria,
+          estado,
+          numero_referencia,
+          realizado_por,
+          observaciones,
+          referencia_tipo,
+          referencia_id
+        )
+       VALUES (
+         ?, ?,
+         'EGRESO',
+         ?,
+         ?,
+         'Compra a proveedor',
+         'CONFIRMADO',
+         ?,
+         ?,
+         ?,
+         'compra',
+         ?
+       )`,
       [
         empresaId,
         cuentaId,
@@ -204,21 +237,30 @@ async function aplicarPagoCompra(connection, {
         numeroCompra,
         usuario,
         `Egreso automático generado por la compra ${numeroCompra}`,
-        compraId
+        compraId,
       ]
     );
 
-    const [updateResult] = await connection.query(
-      `UPDATE cuentas_bancarias
-       SET saldo_actual = saldo_actual - ?
-       WHERE id = ?
-         AND empresa_id = ?
-         AND activa = TRUE
-         AND saldo_actual >= ?`,
-      [monto, cuentaId, empresaId, monto]
-    );
+    const [updateResult] =
+      await connection.query(
+        `UPDATE cuentas_bancarias
+         SET saldo_actual =
+           saldo_actual - ?
+         WHERE id = ?
+           AND empresa_id = ?
+           AND activa = TRUE
+           AND saldo_actual >= ?`,
+        [
+          monto,
+          cuentaId,
+          empresaId,
+          monto,
+        ]
+      );
 
-    if (updateResult.affectedRows !== 1) {
+    if (
+      updateResult.affectedRows !== 1
+    ) {
       throw compraHttpError(
         'El saldo de la cuenta cambió durante la operación. Intenta nuevamente.',
         409
@@ -226,30 +268,42 @@ async function aplicarPagoCompra(connection, {
     }
   }
 
-  if (metodoPago === 'tarjeta_credito') {
-    const tarjetasIncluidas = await planAccess.tieneModuloEmpresa(
-      empresaId,
-      'tarjetas',
-      connection
-    );
+  if (
+    metodo === 'tarjeta_credito'
+  ) {
+    const tarjetasIncluidas =
+      await planAccess
+        .tieneModuloEmpresa(
+          empresaId,
+          'tarjetas',
+          connection
+        );
 
     if (!tarjetasIncluidas) {
-      throw compraModuleError('tarjetas');
+      throw compraModuleError(
+        'tarjetas'
+      );
     }
 
     if (!tarjetaId) {
-      throw compraHttpError('Debes seleccionar una tarjeta de crédito');
+      throw compraHttpError(
+        'Debes seleccionar una tarjeta de crédito'
+      );
     }
 
-    const montoCentavos = Math.round(monto * 100);
+    const centavos =
+      purchaseFinanceService
+        .montoCentavos(total);
 
     await tarjetaCtrl.registrarCompra(
       connection,
       tarjetaId,
-      montoCentavos,
+      centavos,
       compraId,
       `Compra ${numeroCompra} pagada con tarjeta de crédito`,
-      req.user?.id,
+      req.user?.id ??
+        req.user?.userId ??
+        null,
       empresaId
     );
   }
@@ -257,49 +311,167 @@ async function aplicarPagoCompra(connection, {
   await connection.query(
     `UPDATE compras
      SET metodo_pago = ?,
+         fuente_financiera = ?,
          tarjeta_id = ?,
          cuenta_id = ?,
-         estado_financiero = 'APLICADO'
+         estado_financiero =
+           'APLICADO'
      WHERE id = ?
-       AND empresa_id = ?`,
+       AND empresa_id = ?
+       AND sucursal_id = ?`,
     [
-      metodoPago,
-      metodoPago === 'tarjeta_credito' ? tarjetaId : null,
-      metodoPago === 'transferencia' ? cuentaId : null,
+      metodo,
+      fuente,
+
+      metodo ===
+      'tarjeta_credito'
+        ? tarjetaId
+        : null,
+
+      metodo ===
+      'transferencia'
+        ? cuentaId
+        : null,
+
       compraId,
-      empresaId
+      empresaId,
+      sucursalId,
     ]
   );
 }
 
-async function revertirPagoCompra(connection, compra, req) {
-  if (compra.estado_financiero !== 'APLICADO' || !compra.metodo_pago) {
+async function revertirPagoCompra(
+  connection,
+  compra,
+  req
+) {
+  if (
+    compra.estado_financiero !==
+      'APLICADO' ||
+    !compra.metodo_pago
+  ) {
     return;
   }
 
-  const empresaId = Number(compra.empresa_id);
-  const monto = Math.round(Number(compra.total) * 100) / 100;
-  const usuario = compraUsuario(req);
+  const empresaId =
+    Number(compra.empresa_id);
 
-  if (compra.metodo_pago === 'efectivo') {
-    await connection.query(
-      `INSERT INTO caja_chica
-        (empresa_id, tipo_movimiento, monto, concepto, categoria,
-         estado, realizado_por, observaciones, referencia_tipo, referencia_id)
-       VALUES (?, 'INGRESO', ?, ?, 'Anulación de compra',
-               'CONFIRMADO', ?, ?, 'compra_anulacion', ?)`,
-      [
-        empresaId,
-        monto,
-        `Reintegro por anulación de compra ${compra.numero_compra}`,
-        usuario,
-        `Reversa financiera automática de ${compra.numero_compra}`,
-        compra.id
-      ]
+  const sucursalId =
+    Number(compra.sucursal_id);
+
+  const metodo =
+    String(compra.metodo_pago)
+      .trim()
+      .toLowerCase();
+
+  /*
+   * Compras históricas anteriores a 2D.4 pueden
+   * no tener fuente_financiera.
+   *
+   * En efectivo no es seguro inferir si el dinero
+   * salió de Caja Operativa, Caja Chica u otro
+   * mecanismo legado. Una reversa automática
+   * acreditaría dinero a una fuente que podría no
+   * corresponder, por lo que requiere revisión manual.
+   *
+   * Transferencia y tarjeta conservan compatibilidad
+   * histórica porque el método identifica el
+   * instrumento financiero correspondiente.
+   */
+  const fuenteRegistrada =
+    compra.fuente_financiera
+      ? String(
+          compra.fuente_financiera
+        ).toUpperCase()
+      : null;
+
+  if (
+    metodo === 'efectivo' &&
+    !fuenteRegistrada
+  ) {
+    throw compraHttpError(
+      'La compra histórica en efectivo no tiene un origen financiero verificable y requiere revisión manual.',
+      409
     );
   }
 
-  if (compra.metodo_pago === 'transferencia') {
+  const fuente =
+    fuenteRegistrada ||
+    (
+      metodo === 'transferencia'
+        ? 'CUENTA_BANCARIA'
+        : metodo ===
+            'tarjeta_credito'
+          ? 'TARJETA_CREDITO'
+          : null
+    );
+
+  const monto =
+    purchaseFinanceService
+      .montoQuetzales(
+        compra.total
+      );
+
+  const usuario =
+    compraUsuario(req);
+
+  if (metodo === 'efectivo') {
+    if (
+      fuente === 'CAJA_OPERATIVA'
+    ) {
+      await purchaseFinanceService
+        .revertirCajaOperativa(
+          connection,
+          {
+            empresaId,
+            sucursalId,
+            total:
+              compra.total,
+            compraId:
+              compra.id,
+            numeroCompra:
+              compra.numero_compra,
+            req,
+          }
+        );
+    } else if (
+      fuente === 'CAJA_CHICA'
+    ) {
+      await purchaseFinanceService
+        .revertirCajaChica(
+          connection,
+          {
+            empresaId,
+            sucursalId,
+            total:
+              compra.total,
+            compraId:
+              compra.id,
+            numeroCompra:
+              compra.numero_compra,
+            req,
+          }
+        );
+    } else {
+      throw compraHttpError(
+        'La fuente financiera de la compra en efectivo no es válida.',
+        409
+      );
+    }
+  }
+
+  if (
+    metodo === 'transferencia'
+  ) {
+    if (
+      fuente !== 'CUENTA_BANCARIA'
+    ) {
+      throw compraHttpError(
+        'La fuente financiera bancaria de la compra es inconsistente.',
+        409
+      );
+    }
+
     if (!compra.cuenta_id) {
       throw compraHttpError(
         'La compra no tiene una cuenta bancaria asociada para realizar la reversa',
@@ -307,15 +479,19 @@ async function revertirPagoCompra(connection, compra, req) {
       );
     }
 
-    const [cuentas] = await connection.query(
-      `SELECT id
-       FROM cuentas_bancarias
-       WHERE id = ?
-         AND empresa_id = ?
-       LIMIT 1
-       FOR UPDATE`,
-      [compra.cuenta_id, empresaId]
-    );
+    const [cuentas] =
+      await connection.query(
+        `SELECT id
+         FROM cuentas_bancarias
+         WHERE id = ?
+           AND empresa_id = ?
+         LIMIT 1
+         FOR UPDATE`,
+        [
+          compra.cuenta_id,
+          empresaId,
+        ]
+      );
 
     if (!cuentas.length) {
       throw compraHttpError(
@@ -326,33 +502,75 @@ async function revertirPagoCompra(connection, compra, req) {
 
     await connection.query(
       `INSERT INTO movimientos_bancarios
-        (empresa_id, cuenta_id, tipo_movimiento, monto, concepto,
-         categoria, estado, numero_referencia, realizado_por,
-         observaciones, referencia_tipo, referencia_id)
-       VALUES (?, ?, 'INGRESO', ?, ?, 'Anulación de compra',
-               'CONFIRMADO', ?, ?, ?, 'compra_anulacion', ?)`,
+        (
+          empresa_id,
+          cuenta_id,
+          tipo_movimiento,
+          monto,
+          concepto,
+          categoria,
+          estado,
+          numero_referencia,
+          realizado_por,
+          observaciones,
+          referencia_tipo,
+          referencia_id
+        )
+       VALUES (
+         ?, ?,
+         'INGRESO',
+         ?,
+         ?,
+         'Anulación de compra',
+         'CONFIRMADO',
+         ?,
+         ?,
+         ?,
+         'compra_anulacion',
+         ?
+       )`,
       [
         empresaId,
         compra.cuenta_id,
         monto,
+
         `Reintegro por anulación de compra ${compra.numero_compra}`,
+
         compra.numero_compra,
         usuario,
+
         `Reversa financiera automática de ${compra.numero_compra}`,
-        compra.id
+
+        compra.id,
       ]
     );
 
     await connection.query(
       `UPDATE cuentas_bancarias
-       SET saldo_actual = saldo_actual + ?
+       SET saldo_actual =
+         saldo_actual + ?
        WHERE id = ?
          AND empresa_id = ?`,
-      [monto, compra.cuenta_id, empresaId]
+      [
+        monto,
+        compra.cuenta_id,
+        empresaId,
+      ]
     );
   }
 
-  if (compra.metodo_pago === 'tarjeta_credito') {
+  if (
+    metodo === 'tarjeta_credito'
+  ) {
+    if (
+      fuente !== 'TARJETA_CREDITO'
+    ) {
+      throw compraHttpError(
+        'La fuente financiera de tarjeta de la compra es inconsistente.',
+        409
+      );
+    }
+
     if (!compra.tarjeta_id) {
       throw compraHttpError(
         'La compra no tiene una tarjeta asociada para liberar el crédito',
@@ -362,136 +580,348 @@ async function revertirPagoCompra(connection, compra, req) {
 
     await connection.query(
       `INSERT INTO tarjeta_credito_movimientos
-        (empresa_id, tarjeta_id, tipo, monto, descripcion,
-         referencia_tipo, referencia_id, fecha_movimiento, created_by)
-       VALUES (?, ?, 'anulacion', ?, ?, 'compra', ?, NOW(), ?)`,
+        (
+          empresa_id,
+          tarjeta_id,
+          tipo,
+          monto,
+          descripcion,
+          referencia_tipo,
+          referencia_id,
+          fecha_movimiento,
+          created_by
+        )
+       VALUES (
+         ?, ?,
+         'anulacion',
+         ?,
+         ?,
+         'compra',
+         ?,
+         NOW(),
+         ?
+       )`,
       [
         empresaId,
         compra.tarjeta_id,
-        Math.round(monto * 100),
+
+        purchaseFinanceService
+          .montoCentavos(
+            compra.total
+          ),
+
         `Liberación de crédito por anulación de compra ${compra.numero_compra}`,
+
         compra.id,
-        req.user?.id || null
+
+        req.user?.id ??
+          req.user?.userId ??
+          null,
       ]
     );
   }
 
   await connection.query(
     `UPDATE compras
-     SET estado_financiero = 'REVERTIDO'
+     SET estado_financiero =
+       'REVERTIDO'
      WHERE id = ?
-       AND empresa_id = ?`,
-    [compra.id, empresaId]
+       AND empresa_id = ?
+       AND sucursal_id = ?`,
+    [
+      compra.id,
+      empresaId,
+      sucursalId,
+    ]
   );
 }
 
 
 // ========== FUENTES DE PAGO DISPONIBLES PARA COMPRAS ==========
-exports.getFuentesPago = async (req, res) => {
+exports.getFuentesPago = async (
+  req,
+  res
+) => {
   try {
-    const empresaId = requireCompraEmpresaId(req);
-    const tarjetasIncluidas = await planAccess.tieneModuloEmpresa(
-      empresaId,
-      'tarjetas'
-    );
+    purchaseInventoryService
+      .requireSpecific(
+        req.branchScope
+      );
 
-    const [[cajaRow]] = await db.query(
-      `SELECT COALESCE(
-         SUM(
-           CASE
-             WHEN tipo_movimiento = 'INGRESO' THEN monto
-             WHEN tipo_movimiento = 'EGRESO' THEN -monto
-             ELSE 0
-           END
-         ),
-         0
-       ) AS saldo_caja
-       FROM caja_chica
-       WHERE empresa_id = ?
-         AND estado = 'CONFIRMADO'`,
-      [empresaId]
-    );
+    const empresaId =
+      requireCompraEmpresaId(req);
 
-    const [cuentas] = await db.query(
-      `SELECT
-         id,
-         nombre,
-         tipo_cuenta,
-         saldo_actual,
-         activa
-       FROM cuentas_bancarias
-       WHERE empresa_id = ?
-         AND activa = TRUE
-       ORDER BY nombre`,
-      [empresaId]
-    );
+    const sucursalId =
+      Number(
+        req.branchScope.sucursalId
+      );
 
-    const [tarjetas] = tarjetasIncluidas
-      ? await db.query(
-          `SELECT
-         t.id,
-         t.banco,
-         t.alias,
-         t.ultimos4,
-         t.limite_credito,
-         COALESCE(
+    const actorId =
+      Number(
+        req.user?.id ??
+        req.user?.userId ??
+        0
+      );
+
+    const tarjetasIncluidas =
+      await planAccess
+        .tieneModuloEmpresa(
+          empresaId,
+          'tarjetas'
+        );
+
+    const [[cajaChicaRow]] =
+      await db.query(
+        `SELECT COALESCE(
            SUM(
              CASE
-               WHEN m.tipo IN ('compra', 'interes') THEN m.monto
-               WHEN m.tipo IN ('pago', 'anulacion') THEN -m.monto
-               WHEN m.tipo = 'ajuste' THEN m.monto
+               WHEN estado =
+                    'CONFIRMADO'
+                AND tipo_movimiento =
+                    'INGRESO'
+               THEN monto
+
+               WHEN estado =
+                    'CONFIRMADO'
+                AND tipo_movimiento =
+                    'EGRESO'
+               THEN -monto
+
                ELSE 0
              END
            ),
            0
-         ) AS saldo_centavos
-       FROM tarjetas_credito t
-       LEFT JOIN tarjeta_credito_movimientos m
-         ON m.tarjeta_id = t.id
-        AND m.empresa_id = t.empresa_id
-       WHERE t.empresa_id = ?
-         AND t.activo = 1
-       GROUP BY
-         t.id,
-         t.banco,
-         t.alias,
-         t.ultimos4,
-         t.limite_credito
-       ORDER BY t.banco, t.alias, t.ultimos4`,
-          [empresaId]
-        )
-      : [[]];
+         ) AS saldo
+         FROM caja_chica
+         WHERE empresa_id = ?
+           AND sucursal_id = ?`,
+        [
+          empresaId,
+          sucursalId,
+        ]
+      );
+
+    let cajaOperativa = null;
+
+    if (
+      Number.isInteger(actorId) &&
+      actorId > 0
+    ) {
+      const resumen =
+        await cajaSesionModel
+          .obtenerResumenActiva({
+            empresaId,
+            sucursalId,
+            usuarioId:
+              actorId,
+          });
+
+      if (resumen) {
+        cajaOperativa = {
+          sesion_id:
+            Number(resumen.id),
+
+          caja_id:
+            Number(
+              resumen.caja_id
+            ),
+
+          caja_nombre:
+            resumen.caja_nombre,
+
+          caja_codigo:
+            resumen.caja_codigo,
+
+          saldo_disponible_centavos:
+            Number(
+              resumen
+                .efectivo_esperado_actual_centavos ||
+              0
+            ),
+
+          saldo_disponible:
+            Number(
+              resumen
+                .efectivo_esperado_actual_centavos ||
+              0
+            ) / 100,
+        };
+      }
+    }
+
+    const [cuentas] =
+      await db.query(
+        `SELECT
+           id,
+           nombre,
+           tipo_cuenta,
+           saldo_actual,
+           activa
+         FROM cuentas_bancarias
+         WHERE empresa_id = ?
+           AND activa = TRUE
+         ORDER BY nombre`,
+        [
+          empresaId,
+        ]
+      );
+
+    const [tarjetas] =
+      tarjetasIncluidas
+        ? await db.query(
+            `SELECT
+               t.id,
+               t.banco,
+               t.alias,
+               t.ultimos4,
+               t.limite_credito,
+
+               COALESCE(
+                 SUM(
+                   CASE
+                     WHEN m.tipo IN (
+                       'compra',
+                       'interes'
+                     )
+                     THEN m.monto
+
+                     WHEN m.tipo IN (
+                       'pago',
+                       'anulacion'
+                     )
+                     THEN -m.monto
+
+                     WHEN m.tipo =
+                       'ajuste'
+                     THEN m.monto
+
+                     ELSE 0
+                   END
+                 ),
+                 0
+               ) AS saldo_centavos
+
+             FROM tarjetas_credito t
+
+             LEFT JOIN
+               tarjeta_credito_movimientos m
+               ON m.tarjeta_id = t.id
+              AND m.empresa_id =
+                  t.empresa_id
+
+             WHERE t.empresa_id = ?
+               AND t.activo = 1
+
+             GROUP BY
+               t.id,
+               t.banco,
+               t.alias,
+               t.ultimos4,
+               t.limite_credito
+
+             ORDER BY
+               t.banco,
+               t.alias,
+               t.ultimos4`,
+            [
+              empresaId,
+            ]
+          )
+        : [[]];
+
+    const saldoCajaChica =
+      Number(
+        cajaChicaRow?.saldo || 0
+      );
 
     res.json({
       success: true,
+
       data: {
-        saldo_caja: Number(cajaRow.saldo_caja || 0),
-        cuentas: cuentas.map((cuenta) => ({
-          ...cuenta,
-          saldo_actual: Number(cuenta.saldo_actual || 0)
-        })),
-        tarjetas: tarjetas.map((tarjeta) => ({
-          ...tarjeta,
-          limite_credito: Number(tarjeta.limite_credito || 0),
-          saldo_centavos: Number(tarjeta.saldo_centavos || 0)
-        }))
-      }
+        /*
+         * Compatibilidad temporal con
+         * frontend previo a 2D.4.
+         */
+        saldo_caja:
+          saldoCajaChica,
+
+        saldo_caja_chica:
+          saldoCajaChica,
+
+        caja_operativa:
+          cajaOperativa,
+
+        cuentas:
+          cuentas.map(
+            cuenta => ({
+              ...cuenta,
+
+              id:
+                Number(
+                  cuenta.id
+                ),
+
+              saldo_actual:
+                Number(
+                  cuenta.saldo_actual ||
+                  0
+                ),
+
+              activa:
+                Boolean(
+                  cuenta.activa
+                ),
+            })
+          ),
+
+        tarjetas:
+          tarjetas.map(
+            tarjeta => ({
+              ...tarjeta,
+
+              id:
+                Number(
+                  tarjeta.id
+                ),
+
+              limite_credito:
+                Number(
+                  tarjeta.limite_credito ||
+                  0
+                ),
+
+              saldo_centavos:
+                Number(
+                  tarjeta.saldo_centavos ||
+                  0
+                ),
+            })
+          ),
+      },
     });
   } catch (error) {
-    console.error('❌ Error obteniendo fuentes de pago:', error);
+    console.error(
+      '❌ Error al obtener fuentes de pago:',
+      error
+    );
 
     if (error.statusCode) {
-      return res.status(error.statusCode).json({
-        success: false,
-        code: error.code,
-        module: error.module,
-        message: error.message
-      });
+      return res
+        .status(error.statusCode)
+        .json({
+          success: false,
+          message:
+            error.message,
+          code:
+            error.code ||
+            null,
+        });
     }
 
     res.status(500).json({
       success: false,
-      message: 'Error al obtener las fuentes de pago'
+      message:
+        'Error al obtener las fuentes de pago',
     });
   }
 };
@@ -515,6 +945,7 @@ exports.createCompraProductos = async (req, res) => {
       notas,
       estado = 'CONFIRMADA',
       metodo_pago = 'efectivo',
+      fuente_financiera,
       tarjeta_id,
       cuenta_id
     } = req.body;
@@ -580,10 +1011,13 @@ exports.createCompraProductos = async (req, res) => {
     // Validar fondos y registrar el movimiento financiero dentro
     // de la misma transacción de la compra.
     await aplicarPagoCompra(connection, {
-      empresaId,
-      metodoPago: metodo_pago,
-      tarjetaId: tarjeta_id,
-      cuentaId: cuenta_id,
+        empresaId,
+        sucursalId,
+        metodoPago: metodo_pago,
+        fuenteFinanciera:
+          fuente_financiera,
+        tarjetaId: tarjeta_id,
+        cuentaId: cuenta_id,
       total,
       compraId,
       numeroCompra: numero_compra,
@@ -695,6 +1129,7 @@ exports.createCompraRepuestos = async (req, res) => {
       notas,
       estado = 'CONFIRMADA',
       metodo_pago = 'efectivo',
+      fuente_financiera,
       tarjeta_id,
       cuenta_id
     } = req.body;
@@ -760,10 +1195,13 @@ exports.createCompraRepuestos = async (req, res) => {
     // Validar fondos y registrar el movimiento financiero dentro
     // de la misma transacción de la compra.
     await aplicarPagoCompra(connection, {
-      empresaId,
-      metodoPago: metodo_pago,
-      tarjetaId: tarjeta_id,
-      cuentaId: cuenta_id,
+        empresaId,
+        sucursalId,
+        metodoPago: metodo_pago,
+        fuenteFinanciera:
+          fuente_financiera,
+        tarjetaId: tarjeta_id,
+        cuentaId: cuenta_id,
       total,
       compraId,
       numeroCompra: numero_compra,
@@ -866,6 +1304,7 @@ exports.createCompra = async (req, res) => {
       notas,
       estado = 'CONFIRMADA',
       metodo_pago = 'efectivo',
+      fuente_financiera,
       tarjeta_id,
       cuenta_id
     } = req.body;
@@ -966,7 +1405,10 @@ exports.createCompra = async (req, res) => {
     if (estado === 'CONFIRMADA' || estado === 'RECIBIDA') {
       await aplicarPagoCompra(connection, {
         empresaId,
+        sucursalId,
         metodoPago: metodo_pago,
+        fuenteFinanciera:
+          fuente_financiera,
         tarjetaId: tarjeta_id,
         cuentaId: cuenta_id,
         total,

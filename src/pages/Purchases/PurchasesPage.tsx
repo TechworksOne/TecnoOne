@@ -176,7 +176,18 @@ export default function PurchasesPage() {
   }).length;
 
   const totalCompras = compras.length;
-  const totalInvertido = compras.reduce((s, c) => s + toNum(c.total), 0);
+
+  const totalInvertido = compras
+    .filter(
+      (compra) =>
+        String(compra.estado || '')
+          .toUpperCase() !== 'CANCELADA'
+    )
+    .reduce(
+      (suma, compra) =>
+        suma + toNum(compra.total),
+      0
+    );
 
   // ── Badge helpers ─────────────────────────────────────────────────────────
   const stockBadge = (stock: number, threshold: number) => {

@@ -66,6 +66,16 @@ function horaMovimiento(
   );
 }
 
+function movimientoEsEntradaCaja(
+  movimiento: CajaSesionMovimientoDetalle,
+) {
+  if (movimiento.fuente === 'COMPRA') {
+    return movimiento.accion === 'REVERSA';
+  }
+
+  return String(movimiento.accion) === 'INGRESO';
+}
+
 function tituloMovimientoCaja(
   movimiento: CajaSesionMovimientoDetalle,
 ) {
@@ -77,6 +87,16 @@ function tituloMovimientoCaja(
     return movimiento.accion === 'REVERSA'
       ? `Reversa venta ${documento}`
       : `Venta ${documento}`;
+  }
+
+  if (movimiento.fuente === 'COMPRA') {
+    const documento =
+      movimiento.documento ||
+      `#${movimiento.entidad_id}`;
+
+    return movimiento.accion === 'REVERSA'
+      ? `Anulación compra ${documento}`
+      : `Compra ${documento}`;
   }
 
   if (movimiento.accion === 'REVERSA') {
@@ -746,17 +766,51 @@ export default function CajaSesionPanel() {
                 )}
               </p>
 
-              <p className="mt-1 text-xs text-slate-500">
-                Ventas Q
-                {qDesdeCentavos(
-                  resumen.ventas_efectivo_centavos,
-                )}
-                {' · '}
-                Reparaciones Q
-                {qDesdeCentavos(
-                  resumen.reparaciones_efectivo_centavos,
-                )}
-              </p>
+              <div className="mt-1 space-y-0.5 text-xs text-slate-500">
+                <p>
+                  Ventas +Q
+                  {qDesdeCentavos(
+                    Math.abs(
+                      Number(
+                        resumen.ventas_efectivo_centavos ||
+                        0
+                      )
+                    ),
+                  )}
+                  {' · '}
+                  Reparaciones +Q
+                  {qDesdeCentavos(
+                    Math.abs(
+                      Number(
+                        resumen.reparaciones_efectivo_centavos ||
+                        0
+                      )
+                    ),
+                  )}
+                </p>
+
+                <p>
+                  Compras -Q
+                  {qDesdeCentavos(
+                    Math.abs(
+                      Number(
+                        resumen.compras_egresos_centavos ||
+                        0
+                      )
+                    ),
+                  )}
+                  {' · '}
+                  Anulaciones +Q
+                  {qDesdeCentavos(
+                    Math.abs(
+                      Number(
+                        resumen.compras_reversas_centavos ||
+                        0
+                      )
+                    ),
+                  )}
+                </p>
+              </div>
             </div>
 
             <div>

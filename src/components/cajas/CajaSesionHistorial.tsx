@@ -79,6 +79,16 @@ function hora(value?: string | null) {
   );
 }
 
+function movimientoEsEntradaCaja(
+  movimiento: CajaSesionMovimientoDetalle,
+) {
+  if (movimiento.fuente === 'COMPRA') {
+    return movimiento.accion === 'REVERSA';
+  }
+
+  return String(movimiento.accion) === 'INGRESO';
+}
+
 function movimientoTitulo(
   movimiento: CajaSesionMovimientoDetalle,
 ) {
@@ -90,6 +100,16 @@ function movimientoTitulo(
     return movimiento.accion === 'REVERSA'
       ? `Reversa venta ${documento}`
       : `Venta ${documento}`;
+  }
+
+  if (movimiento.fuente === 'COMPRA') {
+    const documento =
+      movimiento.documento ||
+      `#${movimiento.entidad_id}`;
+
+    return movimiento.accion === 'REVERSA'
+      ? `Anulación compra ${documento}`
+      : `Compra ${documento}`;
   }
 
   if (movimiento.accion === 'REVERSA') {
@@ -347,6 +367,18 @@ export default function CajaSesionHistorial() {
                       0,
                   );
 
+                const comprasEgresos =
+                  Number(
+                    row.compras_egresos_centavos ||
+                      0,
+                  );
+
+                const comprasReversas =
+                  Number(
+                    row.compras_reversas_centavos ||
+                      0,
+                  );
+
                 const reversas =
                   ventasReversas +
                   reparacionesReversas;
@@ -358,7 +390,9 @@ export default function CajaSesionHistorial() {
                         ventasIngresos -
                         ventasReversas +
                         reparacionesIngresos -
-                        reparacionesReversas
+                        reparacionesReversas -
+                        comprasEgresos +
+                        comprasReversas
                       ),
                   );
 
@@ -432,7 +466,7 @@ export default function CajaSesionHistorial() {
                         </Button>
                       </div>
 
-                      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-950/40">
                           <p className="text-xs text-slate-500">
                             Fondo inicial
@@ -471,7 +505,32 @@ export default function CajaSesionHistorial() {
 
                         <div className="rounded-xl bg-red-50 p-3 dark:bg-red-950/20">
                           <p className="text-xs text-slate-500">
-                            Reversas / devoluciones
+                            Compras efectivo
+                          </p>
+
+                          <p className="mt-1 font-bold text-red-600 dark:text-red-400">
+                            {signedMoney(
+                              comprasEgresos,
+                              true,
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-950/20">
+                          <p className="text-xs text-slate-500">
+                            Anulaciones de compras
+                          </p>
+
+                          <p className="mt-1 font-bold text-emerald-600 dark:text-emerald-400">
+                            {signedMoney(
+                              comprasReversas,
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl bg-red-50 p-3 dark:bg-red-950/20">
+                          <p className="text-xs text-slate-500">
+                            Reversas ventas / reparaciones
                           </p>
 
                           <p className="mt-1 font-bold text-red-600 dark:text-red-400">

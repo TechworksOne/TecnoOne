@@ -142,7 +142,7 @@ assert.match(
 
 assert.match(
   component,
-  /Reversas \/ devoluciones/,
+  /Reversas ventas \/ reparaciones/,
 );
 
 assert.match(
@@ -183,6 +183,22 @@ assert.match(
 assert.match(
   panel,
   /detalle_principal/,
+);
+
+
+assert.match(
+  component,
+  /Compras efectivo/
+);
+
+assert.match(
+  component,
+  /Anulaciones de compras/
+);
+
+assert.match(
+  component,
+  /Reversas ventas \/ reparaciones/
 );
 
 console.log(

@@ -87,6 +87,19 @@ export default function NuevaCompraModal({
   const [cuentaId, setCuentaId] = useState<number | ''>('');
   const [cuentas, setCuentas] = useState<purchaseService.CuentaPago[]>([]);
   const [saldoCaja, setSaldoCaja] = useState(0);
+
+  const [
+    cajaOperativa,
+    setCajaOperativa,
+  ] = useState<purchaseService.CajaOperativaPago | null>(null);
+
+  const [
+    fuenteEfectivo,
+    setFuenteEfectivo,
+  ] = useState<'CAJA_OPERATIVA' | 'CAJA_CHICA'>(
+    'CAJA_OPERATIVA'
+  );
+
   const [loadingFuentes, setLoadingFuentes] = useState(false);
   const [fuentesError, setFuentesError] = useState("");
 
@@ -107,12 +120,35 @@ export default function NuevaCompraModal({
     purchaseService
       .getFuentesPago()
       .then((fuentes) => {
-        setSaldoCaja(Number(fuentes.saldo_caja || 0));
+        setSaldoCaja(
+          Number(
+            fuentes.saldo_caja_chica ??
+            fuentes.saldo_caja ??
+            0
+          )
+        );
+
+        setCajaOperativa(
+          fuentes.caja_operativa || null
+        );
+
+        setFuenteEfectivo(
+          fuentes.caja_operativa
+            ? 'CAJA_OPERATIVA'
+            : 'CAJA_CHICA'
+        );
+
         setCuentas(fuentes.cuentas || []);
-        setTarjetas(hasTarjetasModule ? fuentes.tarjetas || [] : []);
+        setTarjetas(
+          hasTarjetasModule
+            ? fuentes.tarjetas || []
+            : []
+        );
       })
       .catch((error) => {
         setSaldoCaja(0);
+        setCajaOperativa(null);
+        setFuenteEfectivo('CAJA_CHICA');
         setCuentas([]);
         setTarjetas([]);
         setFuentesError(
@@ -259,12 +295,19 @@ export default function NuevaCompraModal({
 
   const saldoFuente =
     metodoPago === 'efectivo'
-      ? saldoCaja
+      ? fuenteEfectivo === 'CAJA_OPERATIVA'
+        ? cajaOperativa?.saldo_disponible ?? null
+        : saldoCaja
       : metodoPago === 'transferencia'
         ? cuentaSeleccionada?.saldo_actual ?? null
         : creditoDisponible;
 
   const fuenteSinSeleccionar =
+    (
+      metodoPago === 'efectivo' &&
+      fuenteEfectivo === 'CAJA_OPERATIVA' &&
+      !cajaOperativa
+    ) ||
     (metodoPago === 'transferencia' && !cuentaId) ||
     (metodoPago === 'tarjeta_credito' && !tarjetaId);
 
@@ -331,6 +374,18 @@ export default function NuevaCompraModal({
       return;
     }
 
+    if (
+      metodoPago === 'efectivo' &&
+      fuenteEfectivo === 'CAJA_OPERATIVA' &&
+      !cajaOperativa
+    ) {
+      toast.add(
+        "Debes abrir una Caja Operativa antes de pagar la compra desde esa fuente",
+        "error"
+      );
+      return;
+    }
+
     if (metodoPago === 'transferencia' && !cuentaId) {
       toast.add("Selecciona una cuenta bancaria", "error");
       return;
@@ -368,6 +423,14 @@ export default function NuevaCompraModal({
               : [],
         })),
         metodo_pago: metodoPago,
+
+        fuente_financiera:
+          metodoPago === 'efectivo'
+            ? fuenteEfectivo
+            : metodoPago === 'transferencia'
+              ? 'CUENTA_BANCARIA'
+              : 'TARJETA_CREDITO',
+
         tarjeta_id:
           metodoPago === 'tarjeta_credito'
             ? Number(tarjetaId)
@@ -921,42 +984,158 @@ export default function NuevaCompraModal({
             )}
 
             {!loadingFuentes && !fuentesError && metodoPago === 'efectivo' && (
-              <div
-                className={`rounded-xl border px-4 py-3 ${
-                  fondosInsuficientes
-                    ? 'border-red-400/30 bg-red-500/10'
-                    : 'border-[rgba(72,185,230,0.18)] bg-[#0D1526]'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Wallet size={16} className="text-[#48B9E6]" />
-                    <div>
-                      <p className="text-[10px] uppercase tracking-widest text-[#7F8A99]">
-                        Saldo disponible en caja
-                      </p>
-                      <p className="text-sm font-bold text-[#F8FAFC]">
-                        {formatMoney(saldoCaja)}
-                      </p>
-                    </div>
-                  </div>
+              <div className="space-y-3">
+                <div>
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-[#7F8A99]">
+                    ¿De dónde saldrá el efectivo?
+                  </p>
 
-                  {saldoCaja <= 0 && (
+                  <div className="grid gap-2 sm:grid-cols-2">
                     <button
                       type="button"
-                      onClick={() => navigate("/caja-bancos")}
-                      className="text-xs font-semibold text-[#48B9E6] hover:text-[#7DD3FC]"
+                      disabled={!cajaOperativa}
+                      onClick={() =>
+                        setFuenteEfectivo(
+                          'CAJA_OPERATIVA'
+                        )
+                      }
+                      className={`rounded-xl border px-4 py-3 text-left transition-all ${
+                        fuenteEfectivo ===
+                          'CAJA_OPERATIVA'
+                          ? 'border-[#48B9E6] bg-[#48B9E6]/15'
+                          : 'border-[rgba(72,185,230,0.18)] bg-[#0D1526]'
+                      } ${
+                        !cajaOperativa
+                          ? 'cursor-not-allowed opacity-50'
+                          : 'hover:border-[#48B9E6]/60'
+                      }`}
                     >
-                      Registrar ingreso
+                      <p className="text-sm font-semibold text-[#F8FAFC]">
+                        Caja Operativa
+                      </p>
+
+                      <p className="mt-1 text-xs text-[#7F8A99]">
+                        {cajaOperativa
+                          ? `${cajaOperativa.caja_nombre} (${cajaOperativa.caja_codigo})`
+                          : 'No hay una sesión de caja abierta'}
+                      </p>
                     </button>
-                  )}
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFuenteEfectivo(
+                          'CAJA_CHICA'
+                        )
+                      }
+                      className={`rounded-xl border px-4 py-3 text-left transition-all ${
+                        fuenteEfectivo ===
+                          'CAJA_CHICA'
+                          ? 'border-[#48B9E6] bg-[#48B9E6]/15'
+                          : 'border-[rgba(72,185,230,0.18)] bg-[#0D1526] hover:border-[#48B9E6]/60'
+                      }`}
+                    >
+                      <p className="text-sm font-semibold text-[#F8FAFC]">
+                        Caja Chica
+                      </p>
+
+                      <p className="mt-1 text-xs text-[#7F8A99]">
+                        Gastos menores de la sucursal
+                      </p>
+                    </button>
+                  </div>
                 </div>
 
-                {fondosInsuficientes && (
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-red-200">
-                    <AlertTriangle size={13} />
-                    La caja no tiene saldo suficiente para esta compra.
-                  </p>
+                {fuenteEfectivo ===
+                'CAJA_OPERATIVA' ? (
+                  cajaOperativa ? (
+                    <div
+                      className={`rounded-xl border px-4 py-3 ${
+                        fondosInsuficientes
+                          ? 'border-red-400/30 bg-red-500/10'
+                          : 'border-[rgba(72,185,230,0.18)] bg-[#0D1526]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <Wallet
+                            size={16}
+                            className="text-[#48B9E6]"
+                          />
+
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest text-[#7F8A99]">
+                              Efectivo esperado disponible
+                            </p>
+
+                            <p className="text-sm font-bold text-[#F8FAFC]">
+                              {formatMoney(
+                                cajaOperativa.saldo_disponible
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        {fondosInsuficientes && (
+                          <span className="text-xs font-semibold text-red-200">
+                            Efectivo insuficiente
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="mt-2 text-xs text-[#7F8A99]">
+                        El egreso quedará vinculado a la
+                        sesión operativa actual y formará
+                        parte del cuadre.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3">
+                      <p className="text-xs text-amber-100">
+                        No hay una Caja Operativa abierta
+                        para este usuario en la sucursal
+                        activa.
+                      </p>
+                    </div>
+                  )
+                ) : (
+                  <div
+                    className={`rounded-xl border px-4 py-3 ${
+                      fondosInsuficientes
+                        ? 'border-red-400/30 bg-red-500/10'
+                        : 'border-[rgba(72,185,230,0.18)] bg-[#0D1526]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Wallet
+                          size={16}
+                          className="text-[#48B9E6]"
+                        />
+
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-[#7F8A99]">
+                            Saldo disponible en Caja Chica
+                          </p>
+
+                          <p className="text-sm font-bold text-[#F8FAFC]">
+                            {formatMoney(saldoCaja)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {fondosInsuficientes && (
+                        <span className="text-xs font-semibold text-red-200">
+                          Saldo insuficiente
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="mt-2 text-xs text-[#7F8A99]">
+                      Este egreso afecta únicamente la
+                      Caja Chica de la sucursal activa.
+                    </p>
+                  </div>
                 )}
               </div>
             )}

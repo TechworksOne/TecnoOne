@@ -40,6 +40,11 @@ export interface CompraData {
   notas?: string;
   estado?: 'BORRADOR' | 'CONFIRMADA' | 'RECIBIDA' | 'CANCELADA';
   metodo_pago?: 'efectivo' | 'transferencia' | 'tarjeta_credito';
+  fuente_financiera?:
+    | 'CAJA_OPERATIVA'
+    | 'CAJA_CHICA'
+    | 'CUENTA_BANCARIA'
+    | 'TARJETA_CREDITO';
   tarjeta_id?: number;
   cuenta_id?: number;
 }
@@ -52,8 +57,22 @@ export interface CuentaPago {
   activa: boolean;
 }
 
+export interface CajaOperativaPago {
+  sesion_id: number;
+  caja_id: number;
+  caja_nombre: string;
+  caja_codigo: string;
+  saldo_disponible_centavos: number;
+  saldo_disponible: number;
+}
+
 export interface FuentesPago {
+  // Compatibilidad temporal.
   saldo_caja: number;
+
+  saldo_caja_chica: number;
+  caja_operativa: CajaOperativaPago | null;
+
   cuentas: CuentaPago[];
   tarjetas: TarjetaCredito[];
 }

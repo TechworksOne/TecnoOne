@@ -237,7 +237,25 @@ async function listar({ empresaId, sucursalIds, cajaId, limit = 20, offset = 0 }
            THEN monto_centavos
            ELSE 0
          END
-       ), 0) AS reparaciones_reversas_centavos
+       ), 0) AS reparaciones_reversas_centavos,
+
+       COALESCE(SUM(
+         CASE
+           WHEN fuente = 'COMPRA'
+            AND accion = 'EGRESO'
+           THEN monto_centavos
+           ELSE 0
+         END
+       ), 0) AS compras_egresos_centavos,
+
+       COALESCE(SUM(
+         CASE
+           WHEN fuente = 'COMPRA'
+            AND accion = 'REVERSA'
+           THEN monto_centavos
+           ELSE 0
+         END
+       ), 0) AS compras_reversas_centavos
 
      FROM (
        SELECT
@@ -259,10 +277,22 @@ async function listar({ empresaId, sucursalIds, cajaId, limit = 20, offset = 0 }
        FROM reparacion_movimientos_financieros
        WHERE metodo = 'EFECTIVO'
          AND caja_sesion_id IN (${placeholders})
+
+       UNION ALL
+
+       SELECT
+         caja_sesion_id,
+         'COMPRA' AS fuente,
+         accion,
+         monto_centavos
+       FROM compra_movimientos_financieros
+       WHERE metodo = 'EFECTIVO'
+         AND caja_sesion_id IN (${placeholders})
      ) movimientos
 
      GROUP BY caja_sesion_id`,
     [
+      ...sesionIds,
       ...sesionIds,
       ...sesionIds,
     ]
@@ -306,6 +336,18 @@ async function listar({ empresaId, sucursalIds, cajaId, limit = 20, offset = 0 }
         0
       );
 
+    const comprasEgresos =
+      Number(
+        resumen.compras_egresos_centavos ||
+        0
+      );
+
+    const comprasReversas =
+      Number(
+        resumen.compras_reversas_centavos ||
+        0
+      );
+
     return {
       ...row,
 
@@ -321,11 +363,19 @@ async function listar({ empresaId, sucursalIds, cajaId, limit = 20, offset = 0 }
       reparaciones_reversas_centavos:
         reparacionesReversas,
 
+      compras_egresos_centavos:
+        comprasEgresos,
+
+      compras_reversas_centavos:
+        comprasReversas,
+
       movimientos_efectivo_centavos:
         ventasIngresos -
         ventasReversas +
         reparacionesIngresos -
-        reparacionesReversas,
+        reparacionesReversas -
+        comprasEgresos +
+        comprasReversas,
     };
   });
 }
@@ -462,9 +512,53 @@ async function obtenerDetalle({
        AND rmf.caja_sesion_id = ?
        AND rmf.metodo = 'EFECTIVO'
 
+     UNION ALL
+
+     SELECT
+       'COMPRA' AS fuente,
+       cmf.id AS movimiento_id,
+       CAST(cmf.compra_id AS CHAR) AS entidad_id,
+
+       COALESCE(
+         c.numero_compra,
+         CONCAT('#', cmf.compra_id)
+       ) AS documento,
+
+       c.proveedor_nombre AS cliente_nombre,
+
+       c.tipo AS detalle_principal,
+
+       NULL AS pago_indice,
+       cmf.accion,
+       cmf.metodo,
+       cmf.monto_centavos,
+       cmf.referencia,
+       cmf.usuario_id,
+       u.username AS usuario_username,
+       cmf.created_at
+
+     FROM compra_movimientos_financieros cmf
+
+     LEFT JOIN compras c
+       ON c.id = cmf.compra_id
+      AND c.empresa_id = cmf.empresa_id
+      AND c.sucursal_id = cmf.sucursal_id
+
+     LEFT JOIN users u
+       ON u.id = cmf.usuario_id
+
+     WHERE cmf.empresa_id = ?
+       AND cmf.sucursal_id = ?
+       AND cmf.caja_sesion_id = ?
+       AND cmf.metodo = 'EFECTIVO'
+
      ORDER BY created_at ASC,
               movimiento_id ASC`,
     [
+      empresaIdNormalizado,
+      sucursalId,
+      sesionIdNormalizado,
+
       empresaIdNormalizado,
       sucursalId,
       sesionIdNormalizado,
@@ -486,7 +580,10 @@ async function obtenerDetalle({
           Number(mov.movimiento_id),
 
         pago_indice:
-          Number(mov.pago_indice),
+          mov.pago_indice === null ||
+          mov.pago_indice === undefined
+            ? null
+            : Number(mov.pago_indice),
 
         monto_centavos:
           Number(mov.monto_centavos),
@@ -591,7 +688,7 @@ async function crear({ empresaId, sucursalId, cajaId, usuarioId, fondoInicial })
 
 /**
  * Calcula el efectivo operativo de una sesión usando exactamente
- * los mismos ledgers de ventas y reparaciones que utiliza el cierre.
+ * los mismos ledgers de ventas, reparaciones y compras que utiliza el cierre.
  */
 async function calcularEfectivoEsperado(
   executor,
@@ -625,14 +722,50 @@ async function calcularEfectivoEsperado(
     [sesionId]
   );
 
+  const [[compraCash]] = await executor.query(
+    `SELECT
+       COALESCE(SUM(
+         CASE
+           WHEN accion = 'EGRESO'
+           THEN monto_centavos
+           ELSE 0
+         END
+       ), 0) AS egresos,
+
+       COALESCE(SUM(
+         CASE
+           WHEN accion = 'REVERSA'
+           THEN monto_centavos
+           ELSE 0
+         END
+       ), 0) AS reversas
+
+     FROM compra_movimientos_financieros
+     WHERE caja_sesion_id = ?
+       AND metodo = 'EFECTIVO'`,
+    [sesionId]
+  );
+
   const ventasEfectivo =
     Number(ventaCash?.neto || 0);
 
   const reparacionesEfectivo =
     Number(reparacionCash?.neto || 0);
 
+  const comprasEgresos =
+    Number(compraCash?.egresos || 0);
+
+  const comprasReversas =
+    Number(compraCash?.reversas || 0);
+
+  const comprasEfectivo =
+    -comprasEgresos +
+    comprasReversas;
+
   const movimientosEfectivo =
-    ventasEfectivo + reparacionesEfectivo;
+    ventasEfectivo +
+    reparacionesEfectivo +
+    comprasEfectivo;
 
   const esperado =
     Number(fondoInicial) +
@@ -643,6 +776,9 @@ async function calcularEfectivoEsperado(
     movimientosEfectivo,
     ventasEfectivo,
     reparacionesEfectivo,
+    comprasEfectivo,
+    comprasEgresos,
+    comprasReversas,
   };
 }
 
@@ -691,6 +827,15 @@ async function obtenerResumenActiva({
       calculo.ventasEfectivo,
     reparaciones_efectivo_centavos:
       calculo.reparacionesEfectivo,
+    compras_efectivo_centavos:
+      calculo.comprasEfectivo,
+
+    compras_egresos_centavos:
+      calculo.comprasEgresos,
+
+    compras_reversas_centavos:
+      calculo.comprasReversas,
+
     efectivo_esperado_actual_centavos:
       calculo.esperado,
   };

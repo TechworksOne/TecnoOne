@@ -60,6 +60,8 @@ export interface CajaSesion {
 
   reparaciones_ingresos_centavos?: number;
   reparaciones_reversas_centavos?: number;
+  compras_egresos_centavos?: number;
+  compras_reversas_centavos?: number;
 
   movimientos_efectivo_centavos?: number;
 }
@@ -80,15 +82,15 @@ export interface CajaSesionSugerenciaApertura {
 }
 
 export interface CajaSesionMovimientoDetalle {
-  fuente: 'VENTA' | 'REPARACION';
+  fuente: 'VENTA' | 'REPARACION' | 'COMPRA' | 'COMPRA';
   movimiento_id: number;
   entidad_id: string;
 
   documento?: string | null;
   cliente_nombre?: string | null;
   detalle_principal?: string | null;
-  pago_indice: number;
-  accion: 'INGRESO' | 'REVERSA';
+  pago_indice: number | null;
+  accion: 'INGRESO' | 'REVERSA' | 'EGRESO' | 'EGRESO';
   metodo: string;
   monto_centavos: number;
   referencia?: string | null;
