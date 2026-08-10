@@ -188,18 +188,20 @@ exports.updateRolPermisos = async (req, res) => {
         [empresaId, role.id, permission.id]
       );
     }
-    await connection.commit();
-
     await auditoriaService.registrar({
       req,
       empresaId,
-      accion: 'CAMBIAR_PERMISOS',
+      scope: 'company',
+      accion: 'ROL_PERMISOS_CAMBIADOS',
       entidad: 'ROL',
       entidadId: role.id,
       descripcion: `Permisos del rol ${role.nombre} actualizados`,
       datosAnteriores: { permisos: previousRows.map(item => item.codigo) },
       datosNuevos: { permisos: codigos },
+      connection,
+      strict: true,
     });
+    await connection.commit();
     res.json({ success: true, message: 'Permisos actualizados correctamente' });
   } catch (error) {
     if (connection) try { await connection.rollback(); } catch (_) {}

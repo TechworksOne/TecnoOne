@@ -319,7 +319,7 @@ exports.asignarTecnico = async (req, res) => {
 
     // Verificar que la reparación existe
     const tenant = repairTenantClause(req);
-    const [[rep]] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`, [id, ...tenant.params]);
+    const [[rep]] = await db.query(`SELECT id, tecnico_asignado_id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`, [id, ...tenant.params]);
     if (!rep) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
     }
@@ -376,11 +376,14 @@ exports.asignarTecnico = async (req, res) => {
     await auditoriaService.registrar({
       req,
       empresaId: req.tenant?.empresa_id,
-      accion: 'ASIGNAR_TECNICO',
+      scope: 'branch', sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'REPARACION_TECNICO_ASIGNADO',
       entidad: 'REPARACION',
       entidadId: id,
       descripcion: `Técnico ${tecnico.name || tecnico.username || tecnico.id} asignado`,
+      datosAnteriores: { tecnico_id: rep.tecnico_asignado_id || null },
       datosNuevos: { tecnico_id: tecnico.id, tecnico_nombre: tecnico.name || tecnico.nombre_completo },
+      metadata: { sucursal_id: Number(req.branchScope.sucursalId) },
     });
     res.json({
       success: true,
@@ -400,7 +403,7 @@ exports.quitarAsignacion = async (req, res) => {
     const { id } = req.params;
 
     const tenant = repairTenantClause(req);
-    const [[rep]] = await db.query(`SELECT id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`, [id, ...tenant.params]);
+    const [[rep]] = await db.query(`SELECT id, tecnico_asignado_id FROM reparaciones WHERE id = ?${tenant.sql.replaceAll('r.', '')}`, [id, ...tenant.params]);
     if (!rep) {
       return res.status(404).json({ success: false, message: 'Reparación no encontrada' });
     }
@@ -414,6 +417,14 @@ exports.quitarAsignacion = async (req, res) => {
        WHERE id = ?${tenant.sql.replaceAll('r.', '')}`,
       [id, ...tenant.params]
     );
+
+    await auditoriaService.registrar({
+      req, empresaId: req.tenant?.empresa_id, scope: 'branch', sucursalId: Number(req.branchScope.sucursalId),
+      accion: 'REPARACION_TECNICO_ASIGNADO', entidad: 'REPARACION', entidadId: id,
+      descripcion: `Asignación técnica retirada de reparación ${id}`,
+      datosAnteriores: { tecnico_id: rep.tecnico_asignado_id }, datosNuevos: { tecnico_id: null },
+      metadata: { sucursal_id: Number(req.branchScope.sucursalId), reasignacion: true },
+    });
 
     res.json({ success: true, message: 'Asignación eliminada correctamente' });
   } catch (error) {

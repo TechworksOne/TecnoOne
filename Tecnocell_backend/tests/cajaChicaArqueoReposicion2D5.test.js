@@ -86,6 +86,7 @@ function loadController(connection, auditCalls) {
         auditCalls.push(payload);
         assert.strictEqual(payload.connection, connection);
         assert.strictEqual(payload.strict, true);
+        assert.strictEqual(payload.scope, 'branch');
         return true;
       },
     },

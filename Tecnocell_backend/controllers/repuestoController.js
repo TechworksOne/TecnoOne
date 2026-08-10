@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { imageFileFilter, getSafeImageExtension, sanitizeBaseName } = require('../utils/uploadSecurity');
 const repuestoInventoryService = require('../services/repuestoInventoryService');
+const auditoriaService = require('../services/auditoriaService');
 
 const UPLOADS_BASE = path.join(__dirname, '..', 'uploads');
 const REPUESTOS_UPLOAD_DIR = path.join(UPLOADS_BASE, 'repuestos');
@@ -710,6 +711,23 @@ exports.registrarMovimiento = async (req, res) => {
       tipo: tipoMovimiento.toLowerCase(),
       nota: notas || null,
       usuarioId: req.user?.id ?? req.user?.userId ?? null,
+      audit: async (connection, stock) => auditoriaService.registrar({
+        req,
+        empresaId: Number(req.branchScope.empresaId),
+        scope: 'branch',
+        sucursalId: Number(req.branchScope.sucursalId),
+        accion: tipoMovimiento === 'ENTRADA' || tipoMovimiento === 'DEVOLUCION'
+          ? 'INVENTARIO_ENTRADA'
+          : tipoMovimiento === 'AJUSTE' ? 'INVENTARIO_AJUSTE' : 'INVENTARIO_SALIDA',
+        entidad: 'REPUESTO',
+        entidadId: id,
+        descripcion: `Movimiento ${tipoMovimiento} de repuesto ${id}`,
+        datosAnteriores: { cantidad: stock.stock_anterior },
+        datosNuevos: { cantidad: stock.stock_nuevo, diferencia: stock.diferencia },
+        metadata: { motivo: notas || null, tipo_movimiento: tipoMovimiento },
+        connection,
+        strict: true,
+      }),
     });
 
     res.json({

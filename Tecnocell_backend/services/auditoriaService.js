@@ -103,12 +103,15 @@ function getRequestPath(req) {
 async function registrar({
   req,
   empresaId,
+  scope,
+  sucursalId,
   accion,
   entidad,
   entidadId = null,
   descripcion,
   datosAnteriores = null,
   datosNuevos = null,
+  metadata = null,
   connection = db,
   strict = false,
 }) {
@@ -120,6 +123,9 @@ async function registrar({
       tenantEmpresaId === undefined ||
       tenantEmpresaId === ''
     ) {
+      if (strict) {
+        throw new Error('empresa_id del tenant requerido para auditoría estricta');
+      }
       console.warn(
         '[Auditoria] Registro omitido: empresa_id del tenant no disponible'
       );
@@ -132,6 +138,9 @@ async function registrar({
       empresaId !== '' &&
       String(empresaId) !== String(tenantEmpresaId)
     ) {
+      if (strict) {
+        throw new Error('empresa_id no coincide con el tenant');
+      }
       console.warn(
         '[Auditoria] Registro omitido: empresa_id no coincide con el tenant'
       );
@@ -139,15 +148,45 @@ async function registrar({
     }
 
     if (!accion || !entidad || !descripcion) {
+      if (strict) {
+        throw new Error('faltan datos obligatorios de auditoría');
+      }
       console.warn(
         '[Auditoria] Registro omitido: faltan datos obligatorios'
       );
       return false;
     }
 
+    let auditSucursalId = null;
+    if (scope !== undefined && scope !== 'company' && scope !== 'branch') {
+      throw new Error('scope de auditoría inválido');
+    }
+
+    if (scope === 'branch') {
+      const branch = req?.branchScope;
+      const candidate = sucursalId ?? branch?.sucursalId;
+
+      if (
+        !branch ||
+        branch.mode !== 'specific' ||
+        !Number.isInteger(Number(candidate)) ||
+        Number(candidate) <= 0 ||
+        String(candidate).toUpperCase() === 'ALL' ||
+        Number(candidate) !== Number(branch.sucursalId) ||
+        Number(branch.empresaId) !== Number(tenantEmpresaId) ||
+        !Array.isArray(branch.allowedSucursalIds) ||
+        !branch.allowedSucursalIds.map(Number).includes(Number(candidate))
+      ) {
+        throw new Error('sucursal específica no autorizada para auditoría');
+      }
+
+      auditSucursalId = Number(candidate);
+    }
+
     await connection.query(
       `INSERT INTO auditoria_logs (
         empresa_id,
+        sucursal_id,
         usuario_id,
         usuario_nombre,
         accion,
@@ -156,13 +195,15 @@ async function registrar({
         descripcion,
         datos_anteriores,
         datos_nuevos,
+        metadata,
         metodo_http,
         ruta,
         ip,
         user_agent
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         tenantEmpresaId,
+        auditSucursalId,
         req?.user?.id ?? req?.user?.userId ?? null,
         getUsuarioNombre(req),
         String(accion).slice(0, 80),
@@ -177,6 +218,9 @@ async function registrar({
         datosNuevos == null
           ? null
           : stringifySanitized(datosNuevos),
+        metadata == null
+          ? null
+          : stringifySanitized(metadata),
         req?.method ? String(req.method).slice(0, 10) : null,
         getRequestPath(req),
         req?.ip ? String(req.ip).slice(0, 64) : null,

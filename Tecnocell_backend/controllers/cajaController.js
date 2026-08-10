@@ -583,6 +583,7 @@ exports.registrarArqueoCajaChica = async (req, res) => {
     await registrarAuditoriaFinanciera(conn, {
       req,
       empresaId: scope.empresaId,
+      scope: 'branch',
       accion: 'CAJA_CHICA_ARQUEO_REGISTRADO',
       entidad: 'caja_chica_arqueos',
       entidadId: insert.insertId,
@@ -677,6 +678,7 @@ exports.reponerCajaChicaManual = async (req, res) => {
     await registrarAuditoriaFinanciera(conn, {
       req,
       empresaId: scope.empresaId,
+      scope: 'branch',
       accion: 'CAJA_CHICA_REPOSICION_MANUAL',
       entidad: 'caja_chica',
       entidadId: insert.insertId,
@@ -799,6 +801,7 @@ exports.reponerCajaChicaDesdeBanco = async (req, res) => {
     await registrarAuditoriaFinanciera(conn, {
       req,
       empresaId: scope.empresaId,
+      scope: 'branch',
       accion: 'CAJA_CHICA_REPOSICION_BANCO',
       entidad: 'caja_chica',
       entidadId: movimientoCaja.insertId,
@@ -963,6 +966,17 @@ exports.registrarMovimientoCajaChica = async (
       ]
     );
 
+    const saldoActual = tipo === 'INGRESO' ? saldo + montoNum : saldo - montoNum;
+    await registrarAuditoriaFinanciera(conn, {
+      req, empresaId: scope.empresaId, scope: 'branch', sucursalId: scope.sucursalId,
+      accion: 'CAJA_CHICA_MOVIMIENTO_REGISTRADO', entidad: 'CAJA_CHICA_MOVIMIENTO',
+      entidadId: result.insertId,
+      descripcion: `Movimiento manual ${tipo} de Caja Chica registrado`,
+      datosAnteriores: { saldo: saldo },
+      datosNuevos: { tipo_movimiento: tipo, monto: montoNum, saldo: saldoActual, categoria: categoria || 'Otro' },
+      metadata: { origen: 'MANUAL', concepto: conceptoLimpio },
+    });
+
     await conn.commit();
     transactionStarted = false;
 
@@ -977,10 +991,7 @@ exports.registrarMovimientoCajaChica = async (
         empresa_id: scope.empresaId,
         sucursal_id: scope.sucursalId,
         saldo_anterior: saldo,
-        saldo_actual:
-          tipo === 'INGRESO'
-            ? saldo + montoNum
-            : saldo - montoNum,
+        saldo_actual: saldoActual,
       },
     });
   } catch (error) {
@@ -1221,6 +1232,12 @@ exports.registrarMovimientoBancario = async (req, res) => {
       `UPDATE cuentas_bancarias SET saldo_actual = saldo_actual ${operacion} ? WHERE id = ? AND empresa_id = ?`,
       [monto, cuenta_id, empresaId]
     );
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'company', accion: 'BANCO_MOVIMIENTO_REGISTRADO', entidad: 'MOVIMIENTO_BANCARIO', entidadId: result.insertId,
+      descripcion: `Movimiento manual ${tipo_movimiento} registrado en cuenta ${cuenta_id}`,
+      datosNuevos: { cuenta_id: Number(cuenta_id), tipo_movimiento, monto: Number(monto), estado: 'CONFIRMADO' },
+      metadata: { origen: 'MANUAL', categoria: categoria || 'Otro' },
+    });
     
     res.status(201).json({
       success: true,
@@ -1366,6 +1383,15 @@ exports.confirmarMovimientoCajaChica = async (
       ]
     );
 
+    await registrarAuditoriaFinanciera(conn, {
+      req, empresaId: scope.empresaId, scope: 'branch', sucursalId: scope.sucursalId,
+      accion: 'CAJA_CHICA_MOVIMIENTO_CONFIRMADO', entidad: 'CAJA_CHICA_MOVIMIENTO', entidadId: id,
+      descripcion: `Movimiento ${id} de Caja Chica confirmado`,
+      datosAnteriores: { estado: mov.estado },
+      datosNuevos: { estado: 'CONFIRMADO', tipo_movimiento: mov.tipo_movimiento, monto: Number(mov.monto) },
+      metadata: { origen: 'ADMINISTRATIVO' },
+    });
+
     await conn.commit();
     transactionStarted = false;
 
@@ -1462,6 +1488,12 @@ exports.confirmarMovimientoBancario = async (req, res) => {
       `UPDATE cuentas_bancarias SET saldo_actual = saldo_actual ${operacion} ? WHERE id = ?${tenant.sql}`,
       [mov.monto, mov.cuenta_id, ...tenant.params]
     );
+    await auditoriaService.registrar({
+      req, empresaId: mov.empresa_id, scope: 'company', accion: 'BANCO_MOVIMIENTO_CONFIRMADO', entidad: 'MOVIMIENTO_BANCARIO', entidadId: id,
+      descripcion: `Movimiento bancario ${id} confirmado`, datosAnteriores: { estado: mov.estado },
+      datosNuevos: { estado: 'CONFIRMADO', cuenta_id: Number(mov.cuenta_id), tipo_movimiento: mov.tipo_movimiento, monto: Number(mov.monto) },
+      metadata: { origen: mov.referencia_tipo || 'CONFIRMACION_MANUAL' },
+    });
     
     res.json({ 
       success: true, 
@@ -2242,6 +2274,15 @@ exports.retirarDeBanco = async (req, res) => {
       );
     }
 
+    await registrarAuditoriaFinanciera(conn, {
+      req, empresaId, scope: 'branch', sucursalId: scope.sucursalId,
+      accion: 'BANCO_MOVIMIENTO_REGISTRADO', entidad: 'MOVIMIENTO_BANCARIO',
+      descripcion: `Retiro bancario de Q${montoNum.toFixed(2)} registrado`,
+      datosAnteriores: { cuenta_id: Number(cuenta_id), saldo_actual: Number(cuenta.saldo_actual) },
+      datosNuevos: { tipo_movimiento: 'EGRESO', monto: montoNum, saldo_actual: Number(cuenta.saldo_actual) - montoNum, destino_caja_chica: Boolean(a_caja_chica) },
+      metadata: { origen: 'RETIRO_BANCO' },
+    });
+
     await conn.commit();
     transactionStarted = false;
 
@@ -2445,6 +2486,15 @@ exports.depositarAlBanco = async (req, res) => {
       ]
     );
 
+    await registrarAuditoriaFinanciera(conn, {
+      req, empresaId, scope: 'branch', sucursalId: scope.sucursalId,
+      accion: 'BANCO_MOVIMIENTO_REGISTRADO', entidad: 'MOVIMIENTO_BANCARIO',
+      descripcion: `Depósito desde Caja Chica de Q${montoNum.toFixed(2)} registrado`,
+      datosAnteriores: { cuenta_id: Number(cuenta_id), saldo_actual: Number(cuenta.saldo_actual), saldo_caja_chica: saldoCaja },
+      datosNuevos: { tipo_movimiento: 'INGRESO', monto: montoNum, saldo_actual: Number(cuenta.saldo_actual) + montoNum, saldo_caja_chica: saldoCaja - montoNum },
+      metadata: { origen: 'CAJA_CHICA' },
+    });
+
     await conn.commit();
     transactionStarted = false;
 
@@ -2523,6 +2573,14 @@ exports.ingresoBanco = async (req, res) => {
       'UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ? AND empresa_id = ?',
       [montoNum, cuenta_id, empresaId]
     );
+
+    await registrarAuditoriaFinanciera(conn, {
+      req, empresaId, scope: 'company', accion: 'BANCO_MOVIMIENTO_REGISTRADO', entidad: 'MOVIMIENTO_BANCARIO',
+      descripcion: `Ingreso manual de Q${montoNum.toFixed(2)} registrado en cuenta ${cuenta_id}`,
+      datosAnteriores: { saldo_actual: Number(cuenta.saldo_actual) },
+      datosNuevos: { cuenta_id: Number(cuenta_id), tipo_movimiento: 'INGRESO', monto: montoNum, saldo_actual: Number(cuenta.saldo_actual) + montoNum },
+      metadata: { origen: 'INGRESO_MANUAL' },
+    });
 
     await conn.commit();
     conn.release();
@@ -2615,6 +2673,15 @@ exports.transferenciaBancos = async (req, res) => {
       [montoNum, cuenta_destino_id, empresaId]
     );
 
+    await registrarAuditoriaFinanciera(conn, {
+      req, empresaId, scope: 'company', accion: 'BANCO_TRANSFERENCIA_REGISTRADA', entidad: 'TRANSFERENCIA_BANCARIA',
+      entidadId: `${cuenta_origen_id}:${cuenta_destino_id}`,
+      descripcion: `Transferencia bancaria de Q${montoNum.toFixed(2)} registrada`,
+      datosAnteriores: { origen: { id: Number(cuenta_origen_id), saldo_actual: Number(origen.saldo_actual) }, destino: { id: Number(cuenta_destino_id), saldo_actual: Number(destino.saldo_actual) } },
+      datosNuevos: { monto: montoNum, origen_saldo_actual: Number(origen.saldo_actual) - montoNum, destino_saldo_actual: Number(destino.saldo_actual) + montoNum },
+      metadata: { origen: 'TRANSFERENCIA_INTERNA' },
+    });
+
     await conn.commit();
     conn.release();
 
@@ -2637,10 +2704,15 @@ exports.crearCuentaBancaria = async (req, res) => {
     const { nombre, numero_cuenta, tipo_cuenta, pos_asociado } = req.body;
     const empresaId = getTenantEmpresaId(req);
     if (!nombre?.trim()) return res.status(400).json({ success: false, message: 'El nombre es requerido' });
-    await db.query(
+    const [result] = await db.query(
       'INSERT INTO cuentas_bancarias (empresa_id, nombre, numero_cuenta, tipo_cuenta, pos_asociado, saldo_actual, activa) VALUES (?, ?, ?, ?, ?, 0, 1)',
       [empresaId, nombre.trim(), numero_cuenta || null, tipo_cuenta || 'Corriente', pos_asociado || null]
     );
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'company', accion: 'BANCO_CREADO', entidad: 'CUENTA_BANCARIA', entidadId: result.insertId,
+      descripcion: `Cuenta bancaria ${nombre.trim()} creada`,
+      datosNuevos: { nombre: nombre.trim(), numero_cuenta: numero_cuenta || null, tipo_cuenta: tipo_cuenta || 'Corriente', pos_asociado: pos_asociado || null, saldo_actual: 0, activa: 1 },
+    });
     res.status(201).json({ success: true, message: 'Cuenta bancaria creada exitosamente' });
   } catch (error) {
     console.error('Error al crear cuenta bancaria:', error);
@@ -2654,11 +2726,18 @@ exports.editarCuentaBancaria = async (req, res) => {
     const { nombre, numero_cuenta, tipo_cuenta, pos_asociado } = req.body;
     const empresaId = getTenantEmpresaId(req);
     if (!nombre?.trim()) return res.status(400).json({ success: false, message: 'El nombre es requerido' });
+    const [[anterior]] = await db.query('SELECT * FROM cuentas_bancarias WHERE id = ? AND empresa_id = ? LIMIT 1', [id, empresaId]);
+    if (!anterior) return res.status(404).json({ success: false, message: 'Cuenta no encontrada' });
     const [result] = await db.query(
       'UPDATE cuentas_bancarias SET nombre = ?, numero_cuenta = ?, tipo_cuenta = ?, pos_asociado = ? WHERE id = ? AND empresa_id = ?',
       [nombre.trim(), numero_cuenta || null, tipo_cuenta || 'Corriente', pos_asociado || null, id, empresaId]
     );
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Cuenta no encontrada' });
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'company', accion: 'BANCO_EDITADO', entidad: 'CUENTA_BANCARIA', entidadId: id,
+      descripcion: `Cuenta bancaria ${id} actualizada`, datosAnteriores: anterior,
+      datosNuevos: { nombre: nombre.trim(), numero_cuenta: numero_cuenta || null, tipo_cuenta: tipo_cuenta || 'Corriente', pos_asociado: pos_asociado || null },
+    });
     res.json({ success: true, message: 'Cuenta bancaria actualizada exitosamente' });
   } catch (error) {
     console.error('Error al editar cuenta bancaria:', error);
@@ -2674,6 +2753,10 @@ exports.desactivarCuentaBancaria = async (req, res) => {
       'UPDATE cuentas_bancarias SET activa = 0 WHERE id = ? AND empresa_id = ?', [id, empresaId]
     );
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Cuenta no encontrada' });
+    await auditoriaService.registrar({
+      req, empresaId, scope: 'company', accion: 'BANCO_DESACTIVADO', entidad: 'CUENTA_BANCARIA', entidadId: id,
+      descripcion: `Cuenta bancaria ${id} desactivada`, datosAnteriores: { activa: 1 }, datosNuevos: { activa: 0 },
+    });
     res.json({ success: true, message: 'Cuenta bancaria desactivada exitosamente' });
   } catch (error) {
     console.error('Error al desactivar cuenta bancaria:', error);
@@ -2866,6 +2949,14 @@ exports.transferirCajaABanco = async (req, res) => {
         fechaMov,
       ]
     );
+
+    await registrarAuditoriaFinanciera(conn, {
+      req, empresaId, scope: 'branch', sucursalId,
+      accion: 'BANCO_MOVIMIENTO_REGISTRADO', entidad: 'MOVIMIENTO_BANCARIO',
+      descripcion: `Traslado de Caja Chica a banco por Q${montoNum.toFixed(2)} registrado`,
+      datosNuevos: { cuenta_id: Number(banco_id), tipo_movimiento: 'INGRESO', monto: montoNum, estado: 'PENDIENTE' },
+      metadata: { origen: 'CAJA_CHICA', referencia_tipo: 'TRASLADO_CAJA' },
+    });
 
     await conn.commit();
     transactionStarted = false;
