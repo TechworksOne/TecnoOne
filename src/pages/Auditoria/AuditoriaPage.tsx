@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Eye, RefreshCw, Search } from 'lucide-react';
 import Modal from '../../components/ui/Modal';
 import { auditoriaService, type AuditoriaFilters, type AuditoriaLog } from '../../services/auditoriaService';
+import { useSucursalContext } from '../../store/useSucursalContext';
 
 const inputClass =
   'h-10 rounded-xl border border-[var(--color-border)] bg-[var(--color-input-bg)] px-3 text-sm text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[rgba(var(--tenant-primary-rgb),0.18)]';
@@ -14,7 +15,8 @@ function formatDate(value: string) {
 }
 
 function JsonBlock({ label, value }: { label: string; value: unknown }) {
-  if (value === null || value === undefined) return null;
+  if (value === null || value === undefined ||
+      (typeof value === 'object' && Object.keys(value as object).length === 0)) return null;
   return (
     <div>
       <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">{label}</p>
@@ -26,6 +28,10 @@ function JsonBlock({ label, value }: { label: string; value: unknown }) {
 }
 
 export default function AuditoriaPage() {
+  const mode = useSucursalContext(state => state.mode);
+  const sucursalActiva = useSucursalContext(state => state.sucursalActiva);
+  const sucursales = useSucursalContext(state => state.sucursales);
+  const contextVersion = useSucursalContext(state => state.contextVersion);
   const [logs, setLogs] = useState<AuditoriaLog[]>([]);
   const [filters, setFilters] = useState<AuditoriaFilters>({ page: 1, limit: 25 });
   const [draft, setDraft] = useState<AuditoriaFilters>({});
@@ -57,7 +63,29 @@ export default function AuditoriaPage() {
     }
   }
 
-  useEffect(() => { loadLogs(filters); }, [filters]);
+  useEffect(() => { loadLogs(filters); }, [filters, contextVersion]);
+
+  useEffect(() => {
+    setDraft({});
+    setFilters({ page: 1, limit: 25 });
+    setDetail(null);
+    setError('');
+  }, [contextVersion]);
+
+  const allowedSucursalIds = new Set(sucursales.map(item => Number(item.id)));
+  const sucursalNombre = (sucursalId: number | null) => {
+    if (sucursalId === null) return 'Empresa';
+    return sucursales.find(item => Number(item.id) === Number(sucursalId))?.nombre
+      || `Sucursal #${sucursalId}`;
+  };
+
+  const updateSucursalFilter = (value: string) => {
+    if (!value) return setDraft({ ...draft, sucursal_id: undefined });
+    const selected = Number(value);
+    if (!allowedSucursalIds.has(selected)) return;
+    if (mode === 'specific' && selected !== Number(sucursalActiva?.id)) return;
+    setDraft({ ...draft, sucursal_id: String(selected) });
+  };
 
   const applyFilters = () => setFilters({ ...draft, page: 1, limit: 25 });
   const clearFilters = () => {
@@ -99,7 +127,7 @@ export default function AuditoriaPage() {
       )}
 
       <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-7">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-8">
           <div className="relative sm:col-span-2">
             <Search className="absolute left-3 top-3 text-[var(--color-text-muted)]" size={16} />
             <input
@@ -135,11 +163,21 @@ export default function AuditoriaPage() {
           />
           <select className={inputClass} value={draft.accion || ''} onChange={e => setDraft({ ...draft, accion: e.target.value })}>
             <option value="">Todas las acciones</option>
-            {['CREAR', 'EDITAR', 'ACTIVAR', 'DESACTIVAR', 'ELIMINAR', 'CAMBIAR_ROLES', 'CANCELAR', 'ASIGNAR_TECNICO', 'ANULAR', 'REGISTRAR_PAGO'].map(item => <option key={item}>{item}</option>)}
+            {['CREAR', 'EDITAR', 'ACTIVAR', 'DESACTIVAR', 'ELIMINAR', 'VENTA_CREADA', 'VENTA_PAGO_REGISTRADO', 'VENTA_ANULADA', 'COMPRA_CREADA', 'COMPRA_ANULADA', 'REPARACION_CREADA', 'REPARACION_ESTADO_CAMBIADO', 'REPARACION_TECNICO_ASIGNADO', 'REPARACION_FECHA_ENTREGA_CAMBIADA', 'REPARACION_FINALIZADA', 'REPARACION_CANCELADA', 'INVENTARIO_ENTRADA', 'INVENTARIO_SALIDA', 'INVENTARIO_AJUSTE', 'USUARIO_CREADO', 'USUARIO_EDITADO', 'USUARIO_ESTADO_CAMBIADO', 'USUARIO_ROL_CAMBIADO', 'USUARIO_SUCURSAL_ASIGNADA', 'USUARIO_SUCURSAL_RETIRADA', 'USUARIO_SUCURSAL_DEFAULT_CAMBIADA', 'ROL_CREADO', 'ROL_EDITADO', 'ROL_PERMISOS_CAMBIADOS', 'ROL_ESTADO_CAMBIADO', 'SUCURSAL_CREADA', 'SUCURSAL_EDITADA', 'SUCURSAL_ESTADO_CAMBIADO', 'EMPRESA_CONFIGURACION_EDITADA'].map(item => <option key={item}>{item}</option>)}
           </select>
           <select className={inputClass} value={draft.entidad || ''} onChange={e => setDraft({ ...draft, entidad: e.target.value })}>
             <option value="">Todas las entidades</option>
-            {['USUARIO', 'EMPRESA', 'REPARACION', 'VENTA', 'COMPRA'].map(item => <option key={item}>{item}</option>)}
+            {['USUARIO', 'EMPRESA', 'SUCURSAL', 'ROL', 'REPARACION', 'REPUESTO', 'PRODUCTO', 'VENTA', 'COMPRA', 'CUENTA_BANCARIA', 'TARJETA_CREDITO'].map(item => <option key={item}>{item}</option>)}
+          </select>
+          <select
+            aria-label="Filtrar por sucursal"
+            className={inputClass}
+            value={draft.sucursal_id || ''}
+            onChange={e => updateSucursalFilter(e.target.value)}
+          >
+            <option value="">{mode === 'consolidated' ? 'Todas las sucursales permitidas' : 'Sucursal activa + Empresa'}</option>
+            {(mode === 'specific' ? sucursales.filter(item => item.id === sucursalActiva?.id) : sucursales)
+              .map(item => <option key={item.id} value={item.id}>{item.nombre}</option>)}
           </select>
           <div className="flex gap-2">
             <button onClick={applyFilters} className="flex h-10 flex-1 items-center justify-center rounded-xl bg-[var(--color-primary)] px-3 text-sm font-semibold text-white hover:bg-[var(--color-primary-dark)]">
@@ -162,21 +200,22 @@ export default function AuditoriaPage() {
 
       <section className="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="overflow-x-auto">
-          <table className="min-w-[900px] w-full">
+          <table className="min-w-[1040px] w-full">
             <thead className="bg-[var(--color-surface-soft)]">
               <tr className="text-left text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
-                {['Fecha', 'Usuario', 'Acción', 'Entidad', 'Identificador', 'Descripción', ''].map(label => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}
+                {['Fecha', 'Usuario', 'Sucursal', 'Acción', 'Entidad', 'Identificador', 'Descripción', ''].map(label => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--color-border)]">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-[var(--color-text-muted)]">Cargando auditoría…</td></tr>
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-[var(--color-text-muted)]">Cargando auditoría…</td></tr>
               ) : logs.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-[var(--color-text-muted)]">No hay registros para los filtros seleccionados.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-[var(--color-text-muted)]">No hay registros para los filtros seleccionados.</td></tr>
               ) : logs.map(log => (
                 <tr key={log.id} className="text-sm hover:bg-[var(--color-row-hover)]">
                   <td className="whitespace-nowrap px-4 py-3 text-[var(--color-text-sec)]">{formatDate(log.created_at)}</td>
                   <td className="px-4 py-3 font-medium text-[var(--color-text)]">{log.usuario_nombre}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[var(--color-text-sec)]">{sucursalNombre(log.sucursal_id)}</td>
                   <td className="px-4 py-3"><span className="rounded-full bg-[var(--color-active-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--color-primary)]">{log.accion}</span></td>
                   <td className="px-4 py-3 text-[var(--color-text-sec)]">{log.entidad}</td>
                   <td className="px-4 py-3 font-mono text-xs text-[var(--color-text-sec)]">{log.entidad_id || '—'}</td>
@@ -209,6 +248,7 @@ export default function AuditoriaPage() {
               {[
                 ['Fecha', formatDate(detail.created_at)],
                 ['Usuario', detail.usuario_nombre],
+                ['Sucursal', sucursalNombre(detail.sucursal_id)],
                 ['Acción', detail.accion],
                 ['Entidad', `${detail.entidad}${detail.entidad_id ? ` · ${detail.entidad_id}` : ''}`],
                 ['Solicitud', `${detail.metodo_http || '—'} ${detail.ruta || ''}`],
@@ -218,6 +258,7 @@ export default function AuditoriaPage() {
             <div><p className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">Descripción</p><p className="mt-2 text-sm text-[var(--color-text-sec)]">{detail.descripcion}</p></div>
             <JsonBlock label="Datos anteriores" value={detail.datos_anteriores} />
             <JsonBlock label="Datos nuevos" value={detail.datos_nuevos} />
+            <JsonBlock label="Metadata" value={detail.metadata} />
             {detail.user_agent && <div><p className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">User agent</p><p className="mt-2 break-all text-xs text-[var(--color-text-sec)]">{detail.user_agent}</p></div>}
           </div>
         )}

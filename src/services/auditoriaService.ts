@@ -1,16 +1,20 @@
 import axios from 'axios';
 import API_URL from './config';
+import { ACTIVE_BRANCH_STORAGE_KEY } from '../lib/branchContext';
 
 const api = axios.create({ baseURL: API_URL });
 api.interceptors.request.use(config => {
   const token = sessionStorage.getItem('token') || localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  const sucursalId = localStorage.getItem(ACTIVE_BRANCH_STORAGE_KEY);
+  if (sucursalId) config.headers['X-Sucursal-Id'] = sucursalId;
   return config;
 });
 
 export interface AuditoriaLog {
   id: number;
   empresa_id: number;
+  sucursal_id: number | null;
   usuario_id: number | null;
   usuario_nombre: string;
   accion: string;
@@ -19,6 +23,7 @@ export interface AuditoriaLog {
   descripcion: string;
   datos_anteriores?: unknown;
   datos_nuevos?: unknown;
+  metadata?: unknown;
   metodo_http: string | null;
   ruta: string | null;
   ip: string | null;
@@ -34,6 +39,7 @@ export interface AuditoriaFilters {
   accion?: string;
   entidad?: string;
   entidad_id?: string;
+  sucursal_id?: string;
   fecha_desde?: string;
   fecha_hasta?: string;
 }
