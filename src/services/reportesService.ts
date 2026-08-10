@@ -1,8 +1,14 @@
 import axios from 'axios';
 import API_URL from './config';
+import { ACTIVE_BRANCH_STORAGE_KEY } from '../lib/branchContext';
 
-const headers = () => ({
-  Authorization: `Bearer ${sessionStorage.getItem('token')}`,
+const api = axios.create({ baseURL: API_URL });
+api.interceptors.request.use(config => {
+  const token = sessionStorage.getItem('token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  const sucursalId = localStorage.getItem(ACTIVE_BRANCH_STORAGE_KEY);
+  if (sucursalId) config.headers['X-Sucursal-Id'] = sucursalId;
+  return config;
 });
 
 // ===== TYPES =====
@@ -22,6 +28,17 @@ export interface ResumenData {
   ventas_anuladas: number;
   monto_anulado: number;
   advertencia_costos: string | null;
+  por_sucursal?: PorSucursal[];
+}
+
+export interface PorSucursal {
+  sucursal_id: number;
+  sucursal_nombre: string;
+  ventas?: number;
+  ingresos?: number;
+  compras_cantidad?: number;
+  compras_total?: number;
+  reparaciones_creadas?: number;
 }
 
 export interface MetodoPago {
@@ -43,6 +60,7 @@ export interface DiarioData {
   monto_anulado: number;
   metodos_pago: MetodoPago[];
   advertencia_costos: string | null;
+  por_sucursal?: PorSucursal[];
 }
 
 export interface PorDia {
@@ -84,16 +102,20 @@ export interface SemanalData {
   por_dia: PorDia[];
   productos_mas_vendidos: ProductoVendido[];
   advertencia_costos: string | null;
+  por_sucursal?: PorSucursal[];
 }
 
 export interface ProductosMasVendidosData {
   data: ProductoVendido[];
   total: number;
   advertencia_costos: string | null;
+  por_sucursal?: PorSucursal[];
 }
 
 export interface HistorialVenta {
   id: number;
+  sucursal_id?: number;
+  sucursal_nombre?: string;
   codigo: string;
   fecha: string;
   cliente: string;
@@ -113,6 +135,7 @@ export interface HistorialVentasData {
   total: number;
   page: number;
   limit: number;
+  totalPages: number;
   advertencia_costos: string | null;
 }
 
@@ -133,6 +156,15 @@ export interface MetricasFinancieras {
   metodos_pago: MetodoPago[];
   por_dia: PorDia[];
   advertencia_costos: string | null;
+  compras?: { cantidad: number; total: number };
+  caja_operativa?: {
+    sesiones_abiertas: number; sesiones_cerradas: number;
+    monto_apertura: number; monto_cierre: number; diferencia: number;
+    sobrantes: number; faltantes: number;
+  };
+  reparaciones?: { creadas: number; finalizadas: number; canceladas: number; pendientes: number };
+  inventario?: { entradas: number; salidas: number; ajustes: number; stock_productos: number; stock_repuestos: number; stock_consolidado: number };
+  por_sucursal?: PorSucursal[];
 }
 
 export interface HistorialFiltros {
@@ -149,13 +181,13 @@ export interface HistorialFiltros {
 // ===== API CALLS =====
 
 export async function getResumen(): Promise<ResumenData> {
-  const { data } = await axios.get(`${API_URL}/reportes/resumen`, { headers: headers() });
+  const { data } = await api.get('/reportes/resumen');
   return data;
 }
 
 export async function getDiario(fecha?: string): Promise<DiarioData> {
   const params = fecha ? { fecha } : {};
-  const { data } = await axios.get(`${API_URL}/reportes/diario`, { headers: headers(), params });
+  const { data } = await api.get('/reportes/diario', { params });
   return data;
 }
 
@@ -163,7 +195,7 @@ export async function getSemanal(fechaInicio?: string, fechaFin?: string): Promi
   const params: Record<string, string> = {};
   if (fechaInicio) params.fechaInicio = fechaInicio;
   if (fechaFin) params.fechaFin = fechaFin;
-  const { data } = await axios.get(`${API_URL}/reportes/semanal`, { headers: headers(), params });
+  const { data } = await api.get('/reportes/semanal', { params });
   return data;
 }
 
@@ -175,20 +207,14 @@ export async function getProductosMasVendidos(
   const params: Record<string, string | number> = { limit };
   if (desde) params.desde = desde;
   if (hasta) params.hasta = hasta;
-  const { data } = await axios.get(`${API_URL}/reportes/productos-mas-vendidos`, {
-    headers: headers(),
-    params,
-  });
+  const { data } = await api.get('/reportes/productos-mas-vendidos', { params });
   return data;
 }
 
 export async function getHistorialVentas(
   filtros: HistorialFiltros = {}
 ): Promise<HistorialVentasData> {
-  const { data } = await axios.get(`${API_URL}/reportes/historial-ventas`, {
-    headers: headers(),
-    params: filtros,
-  });
+  const { data } = await api.get('/reportes/historial-ventas', { params: filtros });
   return data;
 }
 
@@ -199,9 +225,6 @@ export async function getMetricasFinancieras(
   const params: Record<string, string> = {};
   if (desde) params.desde = desde;
   if (hasta) params.hasta = hasta;
-  const { data } = await axios.get(`${API_URL}/reportes/metricas-financieras`, {
-    headers: headers(),
-    params,
-  });
+  const { data } = await api.get('/reportes/metricas-financieras', { params });
   return data;
 }

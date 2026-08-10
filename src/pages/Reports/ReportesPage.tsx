@@ -16,6 +16,8 @@ import {
   ProductosMasVendidosData, HistorialVentasData, MetricasFinancieras, HistorialFiltros
 } from '../../services/reportesService';
 import { formatMoney, formatDate } from '../../lib/format';
+import { useSucursalContext } from '../../store/useSucursalContext';
+import type { PorSucursal } from '../../services/reportesService';
 
 // ===== HELPERS =====
 
@@ -181,20 +183,45 @@ function EmptyState({ msg = 'Sin datos para el periodo seleccionado' }) {
   );
 }
 
+function BranchBreakdown({ rows }: { rows?: PorSucursal[] }) {
+  const mode = useSucursalContext(state => state.mode);
+  if (mode !== 'consolidated' || !rows?.length) return null;
+  return (
+    <SectionCard title="Desglose por sucursal">
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        {rows.map(row => (
+          <div key={row.sucursal_id} className="rounded-xl border p-3"
+            style={{ background: 'var(--color-surface-soft)', borderColor: 'var(--color-border)' }}>
+            <p className="text-sm font-semibold text-[var(--color-text)]">{row.sucursal_nombre}</p>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-sec)]">
+              {row.ventas !== undefined && <span>Ventas: <b>{safeNumber(row.ventas)}</b></span>}
+              {row.ingresos !== undefined && <span>Ingresos: <b>{fmt(safeNumber(row.ingresos))}</b></span>}
+              {row.compras_cantidad !== undefined && <span>Compras: <b>{safeNumber(row.compras_cantidad)}</b></span>}
+              {row.compras_total !== undefined && <span>Total compras: <b>{fmt(safeNumber(row.compras_total))}</b></span>}
+              {row.reparaciones_creadas !== undefined && <span>Reparaciones: <b>{safeNumber(row.reparaciones_creadas)}</b></span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
+
 // ===== CSV EXPORT =====
 
-function exportarCSV(data: HistorialVentasData['data']) {
+function exportarCSV(data: HistorialVentasData['data'], sucursalNombre: (id?: number) => string) {
   if (!data.length) return;
   const headers = [
-    'Codigo','Fecha','Cliente','Telefono','Vendedor','Estado',
+    'Codigo','Fecha','Sucursal','Cliente','Telefono','Vendedor','Estado',
     'Metodo de Pago','Subtotal','Descuento','Total','Costo','Ganancia'
   ];
   const rows = data.map(v => [
-    v.codigo, new Date(v.fecha).toLocaleDateString('es-GT'),
+    v.codigo, new Date(v.fecha).toLocaleDateString('es-GT'), v.sucursal_nombre || sucursalNombre(v.sucursal_id),
     v.cliente, v.cliente_telefono || '', v.vendedor, v.estado,
     v.metodo_pago || '', v.subtotal, v.descuento, v.total, v.costo_total, v.ganancia_estimada
   ]);
-  const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+  const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const csv = [headers, ...rows].map(r => r.map(csvCell).join(',')).join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -234,6 +261,7 @@ function ResumenTab() {
   return (
     <div className="space-y-4">
       {data.advertencia_costos && <WarningBanner msg={data.advertencia_costos} />}
+      <BranchBreakdown rows={data.por_sucursal} />
 
       {/* Hoy */}
       <SectionLabel>Hoy</SectionLabel>
@@ -363,6 +391,7 @@ function DiarioTab() {
       {!loading && !error && data && (
         <>
           {data.advertencia_costos && <WarningBanner msg={data.advertencia_costos} />}
+          <BranchBreakdown rows={data.por_sucursal} />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <KpiCard label="Ventas realizadas" value={String(safeNumber(data.total_ventas))}
               icon={<ShoppingCart size={18} className="text-cyan-600 dark:text-cyan-400" />}    color="bg-cyan-50 dark:bg-cyan-900/25" />
@@ -443,6 +472,7 @@ function SemanalTab() {
       {data && (
         <>
           {data.advertencia_costos && <WarningBanner msg={data.advertencia_costos} />}
+          <BranchBreakdown rows={data.por_sucursal} />
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <KpiCard label="Ventas"   value={String(safeNumber(data.total_ventas))}
@@ -589,6 +619,7 @@ function ProductosTab() {
       {!loading && !error && data && (
         <>
           {data.advertencia_costos && <WarningBanner msg={data.advertencia_costos} />}
+          <BranchBreakdown rows={data.por_sucursal} />
 
           {data.data.length === 0 ? (
             <SectionCard><EmptyState /></SectionCard>
@@ -653,6 +684,7 @@ function ProductosTab() {
 // ===== TAB: HISTORIAL =====
 
 function HistorialTab() {
+  const sucursales = useSucursalContext(state => state.sucursales);
   const [filtros, setFiltros] = useState<HistorialFiltros>({
     desde: primerDiaMes(),
     hasta: hoy(),
@@ -660,7 +692,8 @@ function HistorialTab() {
     metodo_pago: '',
     vendedor: '',
     cliente: '',
-    limit: 200,
+    page: 1,
+    limit: 20,
   });
   const [data, setData] = useState<HistorialVentasData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -678,10 +711,17 @@ function HistorialTab() {
     finally { setLoading(false); }
   }, [filtros]);
 
-  useEffect(() => { cargar(); }, []); // eslint-disable-line
+  useEffect(() => { cargar(); }, [filtros.page]); // eslint-disable-line
 
   const set = (k: keyof HistorialFiltros, v: string) =>
-    setFiltros(f => ({ ...f, [k]: v }));
+    setFiltros(f => ({ ...f, [k]: v, page: 1 }));
+
+  const aplicarFiltros = () => {
+    if (filtros.page === 1) cargar();
+    else setFiltros(f => ({ ...f, page: 1 }));
+  };
+  const sucursalNombre = (id?: number) =>
+    sucursales.find(s => Number(s.id) === Number(id))?.nombre || (id ? `Sucursal ${id}` : '—');
 
   return (
     <div className="space-y-4">
@@ -725,12 +765,13 @@ function HistorialTab() {
               onChange={e => set('vendedor', e.target.value)}
               className={inputCls} style={{ ...inputStyle, width: '9rem' }} />
           </div>
-          <button onClick={cargar} className={btnPrimary}>
+          <button onClick={aplicarFiltros} className={btnPrimary}>
             <Filter size={14} /> Filtrar
           </button>
           {data && data.data.length > 0 && (
-            <button onClick={() => exportarCSV(data.data)} className={btnSuccess}>
-              <Download size={14} /> Exportar CSV
+            <button onClick={() => exportarCSV(data.data, sucursalNombre)} className={btnSuccess}
+              title="Exporta únicamente la página actual autorizada">
+              <Download size={14} /> CSV (página actual)
             </button>
           )}
         </div>
@@ -750,7 +791,7 @@ function HistorialTab() {
                 <table className="w-full text-sm">
                   <thead style={{ background: 'var(--color-surface-soft)', borderBottom: '1px solid var(--color-border)' }}>
                     <tr>
-                      {['Codigo','Fecha','Cliente','Vendedor','Estado','Metodo','Subtotal','Desc.','Total','Costo','Ganancia'].map(h => (
+                      {['Codigo','Fecha','Sucursal','Cliente','Vendedor','Estado','Metodo','Subtotal','Desc.','Total','Costo','Ganancia'].map(h => (
                         <th key={h} className={thCls}>{h}</th>
                       ))}
                     </tr>
@@ -761,6 +802,7 @@ function HistorialTab() {
                         style={{ borderColor: 'var(--color-border)' }}>
                         <td className="py-2.5 px-3 font-mono text-xs text-[var(--color-text-muted)]">{v.codigo}</td>
                         <td className="py-2.5 px-3 text-sm text-[var(--color-text-sec)] whitespace-nowrap">{formatDate(v.fecha)}</td>
+                        <td className="py-2.5 px-3 text-xs text-[var(--color-text-sec)] whitespace-nowrap">{v.sucursal_nombre || sucursalNombre(v.sucursal_id)}</td>
                         <td className="py-2.5 px-3 text-sm text-[var(--color-text)] max-w-[120px] truncate">{v.cliente}</td>
                         <td className={tdMutedCls}>{v.vendedor}</td>
                         <td className="py-2.5 px-3">
@@ -779,6 +821,22 @@ function HistorialTab() {
                   </tbody>
                 </table>
               </div>
+              {data.totalPages > 1 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 px-3 pt-4 border-t"
+                  style={{ borderColor: 'var(--color-border)' }}>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    Página {data.page} de {data.totalPages} · {data.total} resultados
+                  </p>
+                  <div className="flex gap-2">
+                    <button disabled={data.page <= 1}
+                      onClick={() => setFiltros(f => ({ ...f, page: Math.max(1, safeNumber(data.page) - 1) }))}
+                      className={`${inputCls} disabled:opacity-40`}>Anterior</button>
+                    <button disabled={data.page >= data.totalPages}
+                      onClick={() => setFiltros(f => ({ ...f, page: Math.min(data.totalPages, safeNumber(data.page) + 1) }))}
+                      className={`${inputCls} disabled:opacity-40`}>Siguiente</button>
+                  </div>
+                </div>
+              )}
             </SectionCard>
           )}
         </>
@@ -827,6 +885,7 @@ function MetricasTab() {
       {!loading && !error && data && (
         <>
           {data.advertencia_costos && <WarningBanner msg={data.advertencia_costos} />}
+          <BranchBreakdown rows={data.por_sucursal} />
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <KpiCard label="Ingresos totales"  value={fmt(safeNumber(data.ingresos_totales))}
@@ -846,6 +905,34 @@ function MetricasTab() {
             <KpiCard label="Margen promedio"   value={`${safeNumber(data.margen_promedio)}%`}
               icon={<Users size={18} className="text-violet-600 dark:text-violet-400" />}         color="bg-violet-50 dark:bg-violet-900/25" />
           </div>
+
+          {(data.compras || data.caja_operativa || data.reparaciones || data.inventario) && (
+            <SectionCard title="Operación consolidada del periodo">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {data.compras && <div className="rounded-xl border p-3" style={{ borderColor: 'var(--color-border)' }}>
+                  <p className="text-[10px] font-bold uppercase text-[var(--color-text-muted)]">Compras</p>
+                  <p className="text-lg font-extrabold text-[var(--color-text)]">{fmt(safeNumber(data.compras.total))}</p>
+                  <p className="text-xs text-[var(--color-text-sec)]">{safeNumber(data.compras.cantidad)} operaciones</p>
+                </div>}
+                {data.caja_operativa && <div className="rounded-xl border p-3" style={{ borderColor: 'var(--color-border)' }}>
+                  <p className="text-[10px] font-bold uppercase text-[var(--color-text-muted)]">Caja Operativa</p>
+                  <p className="text-sm font-bold text-[var(--color-text)]">{data.caja_operativa.sesiones_abiertas} aperturas · {data.caja_operativa.sesiones_cerradas} cierres</p>
+                  <p className="text-xs text-[var(--color-text-sec)]">Diferencia: {fmt(safeNumber(data.caja_operativa.diferencia))}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">Sobrantes {fmt(safeNumber(data.caja_operativa.sobrantes))} · Faltantes {fmt(safeNumber(data.caja_operativa.faltantes))}</p>
+                </div>}
+                {data.reparaciones && <div className="rounded-xl border p-3" style={{ borderColor: 'var(--color-border)' }}>
+                  <p className="text-[10px] font-bold uppercase text-[var(--color-text-muted)]">Reparaciones</p>
+                  <p className="text-sm font-bold text-[var(--color-text)]">{data.reparaciones.creadas} creadas · {data.reparaciones.finalizadas} finalizadas</p>
+                  <p className="text-xs text-[var(--color-text-sec)]">{data.reparaciones.pendientes} pendientes · {data.reparaciones.canceladas} canceladas</p>
+                </div>}
+                {data.inventario && <div className="rounded-xl border p-3" style={{ borderColor: 'var(--color-border)' }}>
+                  <p className="text-[10px] font-bold uppercase text-[var(--color-text-muted)]">Inventario</p>
+                  <p className="text-lg font-extrabold text-[var(--color-text)]">{safeNumber(data.inventario.stock_consolidado)} unidades</p>
+                  <p className="text-xs text-[var(--color-text-sec)]">Entradas {data.inventario.entradas} · Salidas {data.inventario.salidas} · Ajustes {data.inventario.ajustes}</p>
+                </div>}
+              </div>
+            </SectionCard>
+          )}
 
           {data.por_dia.length > 0 ? (
             <SectionCard title="Ingresos y ganancias por dia">
@@ -943,6 +1030,12 @@ function MetricasTab() {
 
 export default function ReportesPage() {
   const [activeTab, setActiveTab] = useState('resumen');
+  const mode = useSucursalContext(state => state.mode);
+  const sucursalActiva = useSucursalContext(state => state.sucursalActiva);
+  const contextVersion = useSucursalContext(state => state.contextVersion);
+  const contextLabel = mode === 'consolidated'
+    ? 'Todas las sucursales'
+    : (sucursalActiva?.nombre || 'Sucursal específica');
 
   return (
     <div className="space-y-6">
@@ -956,6 +1049,10 @@ export default function ReportesPage() {
           </h1>
           <p className="text-sm text-[var(--color-text-sec)] mt-0.5">
             Analisis financiero y estadisticas del negocio
+          </p>
+          <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold text-[var(--color-primary)]"
+            style={{ borderColor: 'rgba(72,185,230,0.28)', background: 'rgba(72,185,230,0.08)' }}>
+            <BarChart3 size={12} /> Contexto: {contextLabel}
           </p>
         </div>
         <span
@@ -990,13 +1087,15 @@ export default function ReportesPage() {
         </div>
       </div>
 
-      {/* Tab content */}
-      {activeTab === 'resumen'   && <ResumenTab />}
-      {activeTab === 'diario'    && <DiarioTab />}
-      {activeTab === 'semanal'   && <SemanalTab />}
-      {activeTab === 'productos' && <ProductosTab />}
-      {activeTab === 'historial' && <HistorialTab />}
-      {activeTab === 'metricas'  && <MetricasTab />}
+      {/* Remontar al cambiar contexto limpia filtros/paginación y evita datos anteriores. */}
+      <div key={contextVersion}>
+        {activeTab === 'resumen'   && <ResumenTab />}
+        {activeTab === 'diario'    && <DiarioTab />}
+        {activeTab === 'semanal'   && <SemanalTab />}
+        {activeTab === 'productos' && <ProductosTab />}
+        {activeTab === 'historial' && <HistorialTab />}
+        {activeTab === 'metricas'  && <MetricasTab />}
+      </div>
     </div>
   );
 }
