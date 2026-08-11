@@ -11,6 +11,7 @@ github/
 
 # ── Backend (no se necesita para construir el frontend) ─────
 Tecnocell_backend/
+!Tecnocell_backend/database/tecnoone_baseline.sql
 
 # ── Archivos de entorno (los valores vienen por build-arg) ───
 .env

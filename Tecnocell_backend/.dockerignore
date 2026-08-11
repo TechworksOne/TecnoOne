@@ -13,5 +13,7 @@ Dockerfile
 
 # ── Misc ────────────────────────────────────────────────────
 *.log
+*.sql
+!database/tecnoone_baseline.sql
 .DS_Store
 README.md

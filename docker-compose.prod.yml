@@ -28,7 +28,7 @@ services:
       MARIADB_PASSWORD:      ${DB_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./tecnocell_web.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./Tecnocell_backend/database/tecnoone_baseline.sql:/docker-entrypoint-initdb.d/01_baseline.sql:ro
     expose:
       - "3306"
     healthcheck:
@@ -58,6 +58,12 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
 
   # ─────────────────────────────────────────────────────────
   # Frontend — build optimizado servido por Nginx
@@ -82,7 +88,7 @@ services:
       - /var/www/Tecnocell_storage/uploads:/var/www/uploads:ro
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   mysql_data:

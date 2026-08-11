@@ -4,6 +4,8 @@ const dotenv = require('dotenv');
 
 // Cargar variables de entorno
 dotenv.config();
+const { validateRuntimeEnv } = require('./utils/validateRuntimeEnv');
+validateRuntimeEnv();
 
 const app = express();
 
@@ -87,6 +89,16 @@ app.use('/api/caja-sesiones', cajaSesionRoutes);
 // app.use('/api/dashboard', dashboardRoutes);
 app.use('/api', marcaLineaRoutes);
 
+app.get('/health', async (req, res) => {
+  try {
+    await require('./config/database').query('SELECT 1');
+    return res.status(200).json({ status: 'ok', database: 'ok' });
+  } catch (error) {
+    console.error('Healthcheck DB error:', error.message);
+    return res.status(503).json({ status: 'unavailable', database: 'error' });
+  }
+});
+
 // Ruta de prueba
 app.get('/', (req, res) => {
   res.json({ message: 'API TecnoOne funcionando correctamente' });
@@ -95,7 +107,7 @@ app.get('/', (req, res) => {
 // Manejo de errores
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ message: 'Error en el servidor', error: err.message });
+  res.status(500).json({ message: 'Error en el servidor' });
 });
 
 // Iniciar servidor
